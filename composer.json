@@ -26,8 +26,20 @@
   "require": {
     "php": "^8.2",
     "illuminate/support": "^10.0|^11.0|^12.0|^13.0",
+    "illuminate/database": "^10.0|^11.0|^12.0|^13.0",
+    "illuminate/http": "^10.0|^11.0|^12.0|^13.0",
+    "illuminate/notifications": "^10.0|^11.0|^12.0|^13.0",
+    "illuminate/events": "^10.0|^11.0|^12.0|^13.0",
+    "laravel/sanctum": "^4.0",
     "artisanpack-ui/core": "^1.0",
-    "artisanpack-ui/hooks": "^1.2"
+    "artisanpack-ui/hooks": "^1.2",
+    "artisanpack-ui/security": "^1.0|^2.0",
+    "nesbot/carbon": "^2.0|^3.0",
+    "moneyphp/money": "^4.0",
+    "stripe/stripe-php": "^13.0",
+    "rebing/graphql-laravel": "^9.0",
+    "laravel/scout": "^10.0",
+    "twig/twig": "^3.10"
   },
   "require-dev": {
     "pestphp/pest": "^3.8",
@@ -38,6 +50,15 @@
     "laravel/pint": "^1.26",
     "orchestra/testbench": "^10.2",
     "friendsofphp/php-cs-fixer": "^3.75"
+  },
+  "suggest": {
+    "artisanpack-ui/cms-framework": "Auto-registers admin nav entries and reuses cms auth/roles when present.",
+    "artisanpack-ui/visual-editor": "Enables commerce blocks (product grid, single-product, add-to-cart, cart, checkout, price, gallery).",
+    "artisanpack-ui/media-library": "Product images via media-library; falls back to a nullable image_url on ProductImage.",
+    "artisanpack-ui/forms": "Enables product-inquiry and quote-request form field types and draft-order spawning from submissions.",
+    "artisanpack-ui/icons": "Icon slot on product categories and kanban columns.",
+    "artisanpack-ui/accessibility": "WCAG contrast checks for admin theme and cart/checkout color choices.",
+    "artisanpack-ui/livewire-ui-components": "Required by the Livewire UI satellite packages that render engine data."
   },
   "scripts": {
     "lint": [
@@ -58,7 +79,7 @@
   "extra": {
     "laravel": {
       "providers": [
-        "ArtisanPackUI\\Ecommerce\\EcommerceServiceProvider"
+        "ArtisanPackUI\\Ecommerce\\Providers\\EcommerceServiceProvider"
       ],
       "aliases": {
         "Ecommerce": "ArtisanPackUI\\Ecommerce\\Facades\\Ecommerce"

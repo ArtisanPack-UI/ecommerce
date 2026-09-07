@@ -15,16 +15,13 @@
 
 declare( strict_types=1 );
 
-namespace ArtisanPackUI\Ecommerce;
+namespace ArtisanPackUI\Ecommerce\Providers;
 
+use ArtisanPackUI\Ecommerce\Ecommerce;
 use Illuminate\Support\ServiceProvider;
 
 /**
  * Service provider for the Ecommerce package.
- *
- * Bootstraps the Ecommerce package by registering services and bindings.
- * Extend this class with your package's configuration, migrations,
- * routes, views, and other service registrations.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -36,15 +33,17 @@ class EcommerceServiceProvider extends ServiceProvider
     /**
      * Registers any application services.
      *
-     * Binds the Ecommerce class as a singleton in the container.
-     * Add additional service registrations here.
-     *
      * @since 1.0.0
      *
      * @return void
      */
     public function register(): void
     {
+        $this->mergeConfigFrom(
+            __DIR__ . '/../../config/artisanpack/ecommerce.php',
+            'artisanpack.ecommerce',
+        );
+
         $this->app->singleton( 'ecommerce', function ( $app ) {
             return new Ecommerce();
         } );
@@ -53,18 +52,16 @@ class EcommerceServiceProvider extends ServiceProvider
     /**
      * Bootstraps any application services.
      *
-     * Add package bootstrapping here such as:
-     * - Configuration publishing: $this->publishes([...])
-     * - Migration loading: $this->loadMigrationsFrom(...)
-     * - View loading: $this->loadViewsFrom(...)
-     * - Route loading: $this->loadRoutesFrom(...)
-     *
      * @since 1.0.0
      *
      * @return void
      */
     public function boot(): void
     {
-        // Add your package bootstrapping here
+        if ( $this->app->runningInConsole() ) {
+            $this->publishes( [
+                __DIR__ . '/../../config/artisanpack/ecommerce.php' => config_path( 'artisanpack/ecommerce.php' ),
+            ], 'ecommerce-config' );
+        }
     }
 }

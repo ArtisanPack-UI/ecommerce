@@ -4,7 +4,7 @@ declare( strict_types=1 );
 
 namespace Tests;
 
-use ArtisanPackUI\Ecommerce\EcommerceServiceProvider;
+use ArtisanPackUI\Ecommerce\Providers\EcommerceServiceProvider;
 use Orchestra\Testbench\TestCase as BaseTestCase;
 
 /**
