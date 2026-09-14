@@ -21,11 +21,14 @@ use ArtisanPackUI\Ecommerce\Console\Commands\ReleaseExpiredReservationsCommand;
 use ArtisanPackUI\Ecommerce\CurrencyRates\ConfigRateProvider;
 use ArtisanPackUI\Ecommerce\CurrencyRates\FrankfurterRateProvider;
 use ArtisanPackUI\Ecommerce\Ecommerce;
+use ArtisanPackUI\Ecommerce\Listeners\LinkCustomerOnUserVerified;
 use ArtisanPackUI\Ecommerce\ProductTypes\DigitalProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType;
 use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
+use Illuminate\Auth\Events\Verified;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -78,6 +81,7 @@ class EcommerceServiceProvider extends ServiceProvider
 
         $this->registerCoreProductTypes();
         $this->registerCoreCurrencyRateProviders();
+        $this->registerCustomerListeners();
 
         if ( $this->app->runningInConsole() ) {
             $this->publishes( [
@@ -162,5 +166,21 @@ class EcommerceServiceProvider extends ServiceProvider
             FrankfurterRateProvider::class,
             [ 'label' => __( 'Frankfurter (ECB reference rates)' ) ],
         );
+    }
+
+    /**
+     * Wires the customer-lifecycle listeners: on verified-email registration,
+     * back-fill `customers.user_id` for the shopper (engine spec §5.8 / §3.22).
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCustomerListeners(): void
+    {
+        /** @var Dispatcher $events */
+        $events = $this->app->make( Dispatcher::class );
+
+        $events->listen( Verified::class, LinkCustomerOnUserVerified::class );
     }
 }

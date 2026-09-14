@@ -101,6 +101,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Customers
+    |--------------------------------------------------------------------------
+    |
+    | `claim_rate_limit`             — Maximum guest-order claim attempts a
+    |                                   single customer may make within
+    |                                   `claim_rate_window_minutes` (engine
+    |                                   spec §3.22, default: 5).
+    |
+    | `claim_rate_window_minutes`    — Length of the rate-limit window in
+    |                                   minutes (default: 60).
+    |
+    */
+
+    'customers' => [
+        'claim_rate_limit'          => (int) env( 'ECOMMERCE_CLAIM_RATE_LIMIT', 5 ),
+        'claim_rate_window_minutes' => (int) env( 'ECOMMERCE_CLAIM_RATE_WINDOW_MINUTES', 60 ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Feature toggles
     |--------------------------------------------------------------------------
     */
