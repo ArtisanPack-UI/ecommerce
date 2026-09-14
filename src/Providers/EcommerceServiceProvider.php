@@ -17,6 +17,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Providers;
 
+use ArtisanPackUI\Ecommerce\Console\Commands\ReleaseExpiredReservationsCommand;
 use ArtisanPackUI\Ecommerce\CurrencyRates\ConfigRateProvider;
 use ArtisanPackUI\Ecommerce\CurrencyRates\FrankfurterRateProvider;
 use ArtisanPackUI\Ecommerce\Ecommerce;
@@ -24,6 +25,7 @@ use ArtisanPackUI\Ecommerce\ProductTypes\DigitalProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType;
 use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -85,6 +87,19 @@ class EcommerceServiceProvider extends ServiceProvider
             $this->publishes( [
                 __DIR__ . '/../../database/migrations' => database_path( 'migrations' ),
             ], 'ecommerce-migrations' );
+
+            $this->commands( [
+                ReleaseExpiredReservationsCommand::class,
+            ] );
+
+            $this->app->booted( function (): void {
+                /** @var Schedule $schedule */
+                $schedule = $this->app->make( Schedule::class );
+                $schedule->command( 'ecommerce:release-expired-reservations' )
+                    ->everyMinute()
+                    ->withoutOverlapping()
+                    ->runInBackground();
+            } );
         }
     }
 
