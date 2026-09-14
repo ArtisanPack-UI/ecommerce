@@ -85,6 +85,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Checkout
+    |--------------------------------------------------------------------------
+    |
+    | `reservation_ttl_minutes` — TTL applied to `inventory_reservations` rows
+    | created when a customer enters checkout. The
+    | `ecommerce:release-expired-reservations` scheduled command sweeps rows
+    | past this TTL every minute.
+    |
+    */
+
+    'checkout' => [
+        'reservation_ttl_minutes' => (int) env( 'ECOMMERCE_RESERVATION_TTL_MINUTES', 15 ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Feature toggles
     |--------------------------------------------------------------------------
     */
