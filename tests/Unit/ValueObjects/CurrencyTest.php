@@ -27,6 +27,19 @@ it( 'rejects codes that are not three A–Z letters', function ( string $code ):
     'symbols'    => '$$$',
 ] );
 
+it( 'rejects well-formed but unassigned ISO 4217 codes', function ( string $code ): void {
+    // ZZZ and XZZ pass the three-letter shape check but are not in the
+    // moneyphp ISO 4217 registry. Downstream formatters call subunitFor()
+    // and throw UnknownCurrencyException for unregistered codes, so the
+    // VO must reject them at the boundary.
+    expect( fn () => new Currency( $code ) )
+        ->toThrow( InvalidArgumentException::class, 'Unknown ISO 4217 currency code' );
+} )->with( [
+    'ZZZ' => 'ZZZ',
+    'XZZ' => 'XZZ',
+    'AAA' => 'AAA',
+] );
+
 it( 'compares two currencies for equality', function (): void {
     expect( Currency::of( 'USD' )->equals( Currency::of( 'usd' ) ) )->toBeTrue();
     expect( Currency::of( 'USD' )->equals( Currency::of( 'EUR' ) ) )->toBeFalse();

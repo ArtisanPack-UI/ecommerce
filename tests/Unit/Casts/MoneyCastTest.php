@@ -166,6 +166,24 @@ it( 'rejects invalid currency codes on the write side', function (): void {
         ->toThrow( InvalidArgumentException::class );
 } );
 
+it( 'rejects unassigned ISO 4217 currency codes on the write side', function (): void {
+    $cast = new MoneyCast();
+
+    // Well-formed but not in moneyphp's ISO 4217 registry. Persisting these
+    // would break formatters that call subunitFor() during price rendering.
+    expect( fn () => $cast->set( makeAnonymousModel(), 'price', [ 'amount' => 100, 'currency' => 'ZZZ' ], [] ) )
+        ->toThrow( InvalidArgumentException::class, 'Unknown ISO 4217 currency code' );
+} );
+
+it( 'rejects unassigned ISO 4217 currency codes on the read side', function (): void {
+    $cast = new MoneyCast();
+
+    expect( fn () => $cast->get( makeAnonymousModel(), 'price', null, [
+        'price_amount'   => 100,
+        'price_currency' => 'ZZZ',
+    ] ) )->toThrow( InvalidArgumentException::class, 'Unknown ISO 4217 currency code' );
+} );
+
 it( 'rejects a Money amount that overflows signed 64-bit BIGINT range', function (): void {
     $cast = new MoneyCast();
 

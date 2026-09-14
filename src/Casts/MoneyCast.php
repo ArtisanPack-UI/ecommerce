@@ -124,7 +124,7 @@ final class MoneyCast implements CastsAttributes
 
         return new Money(
             self::normalizeAmount( $amount ),
-            new Currency( self::normalizeCurrencyCode( (string) $currency ) ),
+            CurrencyVO::of( (string) $currency )->toMoneyPhp(),
         );
     }
 
@@ -192,7 +192,7 @@ final class MoneyCast implements CastsAttributes
         if ( $value instanceof Money ) {
             return [
                 self::normalizeAmount( $value->getAmount() ),
-                self::normalizeCurrencyCode( $value->getCurrency()->getCode() ),
+                CurrencyVO::of( $value->getCurrency()->getCode() )->code(),
             ];
         }
 
@@ -200,14 +200,14 @@ final class MoneyCast implements CastsAttributes
             if ( array_key_exists( 'amount', $value ) && array_key_exists( 'currency', $value ) ) {
                 return [
                     self::normalizeAmount( $value[ 'amount' ] ),
-                    self::normalizeCurrencyCode( self::stringifyCurrency( $value[ 'currency' ] ) ),
+                    CurrencyVO::of( self::stringifyCurrency( $value[ 'currency' ] ) )->code(),
                 ];
             }
 
             if ( array_key_exists( 0, $value ) && array_key_exists( 1, $value ) && 2 === count( $value ) ) {
                 return [
                     self::normalizeAmount( $value[ 0 ] ),
-                    self::normalizeCurrencyCode( self::stringifyCurrency( $value[ 1 ] ) ),
+                    CurrencyVO::of( self::stringifyCurrency( $value[ 1 ] ) )->code(),
                 ];
             }
         }
@@ -295,29 +295,5 @@ final class MoneyCast implements CastsAttributes
         throw new InvalidArgumentException(
             'MoneyCast requires an integer minor-unit amount; floats are forbidden.',
         );
-    }
-
-    /**
-     * Normalises an ISO 4217 currency code to the storage representation.
-     *
-     * @since 1.0.0
-     *
-     * @param  string  $code  Currency code to validate.
-     *
-     * @throws InvalidArgumentException When the code is not three A–Z letters.
-     *
-     * @return string
-     */
-    private static function normalizeCurrencyCode( string $code ): string
-    {
-        $normalized = strtoupper( trim( $code ) );
-
-        if ( 1 !== preg_match( '/^[A-Z]{3}$/', $normalized ) ) {
-            throw new InvalidArgumentException(
-                sprintf( 'Invalid ISO 4217 currency code: "%s".', $code ),
-            );
-        }
-
-        return $normalized;
     }
 }

@@ -19,6 +19,7 @@ namespace ArtisanPackUI\Ecommerce\ValueObjects;
 
 use InvalidArgumentException;
 use JsonSerializable;
+use Money\Currencies\ISOCurrencies;
 use Money\Currency as MoneyCurrency;
 use Stringable;
 
@@ -48,11 +49,17 @@ final class Currency implements JsonSerializable, Stringable
     /**
      * Creates a new Currency value object.
      *
+     * The code is validated in two passes: a shape check (three A–Z letters
+     * after `strtoupper(trim())`) followed by an ISO 4217 registry check
+     * against moneyphp's `ISOCurrencies` list. Well-formed but unassigned
+     * codes such as `ZZZ` are rejected so downstream `Money` formatters —
+     * which look up `subunitFor()` — can't blow up on a persisted value.
+     *
      * @since 1.0.0
      *
      * @param  string  $code  ISO 4217 currency code (case-insensitive).
      *
-     * @throws InvalidArgumentException When the code is not three A–Z letters.
+     * @throws InvalidArgumentException When the code is not three A–Z letters or is not an assigned ISO 4217 code.
      */
     public function __construct( string $code )
     {
@@ -61,6 +68,12 @@ final class Currency implements JsonSerializable, Stringable
         if ( 1 !== preg_match( '/^[A-Z]{3}$/', $normalized ) ) {
             throw new InvalidArgumentException(
                 sprintf( 'Invalid ISO 4217 currency code: "%s".', $code ),
+            );
+        }
+
+        if ( ! ( new ISOCurrencies() )->contains( new MoneyCurrency( $normalized ) ) ) {
+            throw new InvalidArgumentException(
+                sprintf( 'Unknown ISO 4217 currency code: "%s".', $code ),
             );
         }
 
