@@ -145,7 +145,7 @@ class Product extends Model
      *
      * @since 1.0.0
      *
-     * @return HasMany<ProductVariant, self>
+     * @return HasMany<ProductVariant, $this>
      */
     public function variants(): HasMany
     {
@@ -162,7 +162,7 @@ class Product extends Model
      *
      * @since 1.0.0
      *
-     * @return HasMany<ProductAttribute, self>
+     * @return HasMany<ProductAttribute, $this>
      */
     public function productAttributes(): HasMany
     {
@@ -175,7 +175,7 @@ class Product extends Model
      *
      * @since 1.0.0
      *
-     * @return MorphMany<ProductPrice, self>
+     * @return MorphMany<ProductPrice, $this>
      */
     public function prices(): MorphMany
     {

@@ -80,7 +80,7 @@ class ProductVariant extends Model
      *
      * @since 1.0.0
      *
-     * @return BelongsTo<Product, self>
+     * @return BelongsTo<Product, $this>
      */
     public function product(): BelongsTo
     {
@@ -92,7 +92,7 @@ class ProductVariant extends Model
      *
      * @since 1.0.0
      *
-     * @return MorphMany<ProductPrice, self>
+     * @return MorphMany<ProductPrice, $this>
      */
     public function prices(): MorphMany
     {
@@ -104,7 +104,7 @@ class ProductVariant extends Model
      *
      * @since 1.0.0
      *
-     * @return HasMany<ProductVariantOptionValue, self>
+     * @return HasMany<ProductVariantOptionValue, $this>
      */
     public function optionValues(): HasMany
     {

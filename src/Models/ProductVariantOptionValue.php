@@ -57,7 +57,7 @@ class ProductVariantOptionValue extends Model
     ];
 
     /**
-     * @return BelongsTo<ProductVariant, self>
+     * @return BelongsTo<ProductVariant, $this>
      */
     public function variant(): BelongsTo
     {
@@ -65,7 +65,7 @@ class ProductVariantOptionValue extends Model
     }
 
     /**
-     * @return BelongsTo<ProductAttribute, self>
+     * @return BelongsTo<ProductAttribute, $this>
      */
     public function attribute(): BelongsTo
     {
@@ -73,7 +73,7 @@ class ProductVariantOptionValue extends Model
     }
 
     /**
-     * @return BelongsTo<ProductAttributeValue, self>
+     * @return BelongsTo<ProductAttributeValue, $this>
      */
     public function value(): BelongsTo
     {

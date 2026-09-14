@@ -65,7 +65,7 @@ class ProductAttributeValue extends Model
     ];
 
     /**
-     * @return BelongsTo<ProductAttribute, self>
+     * @return BelongsTo<ProductAttribute, $this>
      */
     public function attribute(): BelongsTo
     {

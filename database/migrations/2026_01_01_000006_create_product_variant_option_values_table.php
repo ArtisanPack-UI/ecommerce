@@ -30,12 +30,8 @@ return new class extends Migration {
             $table->foreignId( 'product_variant_id' )
                 ->constrained( 'product_variants' )
                 ->cascadeOnDelete();
-            $table->foreignId( 'product_attribute_id' )
-                ->constrained( 'product_attributes' )
-                ->cascadeOnDelete();
-            $table->foreignId( 'product_attribute_value_id' )
-                ->constrained( 'product_attribute_values' )
-                ->cascadeOnDelete();
+            $table->unsignedBigInteger( 'product_attribute_id' );
+            $table->unsignedBigInteger( 'product_attribute_value_id' );
 
             $table->unique(
                 [ 'product_variant_id', 'product_attribute_id' ],
@@ -45,6 +41,23 @@ return new class extends Migration {
                 'product_attribute_value_id',
                 'product_variant_option_values_value_idx',
             );
+
+            // Composite FK: the chosen value must belong to the chosen
+            // attribute. Matches the composite unique on
+            // `product_attribute_values(id, product_attribute_id)` from
+            // migration §3.5.
+            $table->foreign(
+                [ 'product_attribute_value_id', 'product_attribute_id' ],
+                'pvov_value_attr_fk',
+            )
+                ->references( [ 'id', 'product_attribute_id' ] )
+                ->on( 'product_attribute_values' )
+                ->cascadeOnDelete();
+
+            $table->foreign( 'product_attribute_id', 'pvov_attr_fk' )
+                ->references( 'id' )
+                ->on( 'product_attributes' )
+                ->cascadeOnDelete();
         } );
     }
 

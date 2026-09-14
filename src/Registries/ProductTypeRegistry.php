@@ -23,7 +23,7 @@ namespace ArtisanPackUI\Ecommerce\Registries;
 
 use ArtisanPackUI\Ecommerce\Contracts\ProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\MissingProductType;
-use Illuminate\Contracts\Container\Container;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 
@@ -66,13 +66,17 @@ class ProductTypeRegistry
     private array $resolved = [];
 
     /**
-     * Creates a registry bound to the given container for lazy resolution.
+     * Creates a registry bound to the given application for lazy resolution.
+     *
+     * The `Application` contract is required (rather than the broader
+     * `Container` contract) because the duplicate-key policy branches on
+     * `environment()`, which the container interface does not carry.
      *
      * @since 1.0.0
      *
-     * @param  Container  $container  Container used to resolve class-name entries.
+     * @param  Application  $container  Application used to resolve class-name entries.
      */
-    public function __construct( private readonly Container $container )
+    public function __construct( private readonly Application $container )
     {
     }
 

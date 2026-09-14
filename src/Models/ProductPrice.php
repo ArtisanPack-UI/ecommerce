@@ -73,7 +73,7 @@ class ProductPrice extends Model
      *
      * @since 1.0.0
      *
-     * @return MorphTo<Model, self>
+     * @return MorphTo<Model, $this>
      */
     public function priceable(): MorphTo
     {

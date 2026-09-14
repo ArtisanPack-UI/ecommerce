@@ -67,7 +67,7 @@ class ProductAttribute extends Model
     ];
 
     /**
-     * @return BelongsTo<Product, self>
+     * @return BelongsTo<Product, $this>
      */
     public function product(): BelongsTo
     {
@@ -75,7 +75,7 @@ class ProductAttribute extends Model
     }
 
     /**
-     * @return HasMany<ProductAttributeValue, self>
+     * @return HasMany<ProductAttributeValue, $this>
      */
     public function values(): HasMany
     {

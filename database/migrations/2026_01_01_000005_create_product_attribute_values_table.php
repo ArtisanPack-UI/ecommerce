@@ -39,6 +39,15 @@ return new class extends Migration {
                 [ 'product_attribute_id', 'value' ],
                 'product_attribute_values_value_uk',
             );
+
+            // Composite unique so `product_variant_option_values` can
+            // reference `(product_attribute_value_id, product_attribute_id)`
+            // as a foreign key — enforcing at the schema level that a
+            // chosen value actually belongs to the chosen attribute.
+            $table->unique(
+                [ 'id', 'product_attribute_id' ],
+                'product_attribute_values_id_attr_uk',
+            );
         } );
     }
 

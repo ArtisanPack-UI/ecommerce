@@ -38,12 +38,16 @@ class ProductAttributeFactory extends Factory
      */
     public function definition(): array
     {
-        $key = $this->faker->unique()->randomElement( [ 'size', 'color', 'material', 'style', 'finish' ] );
+        // Compose the key from a random word + a short suffix so the
+        // Faker unique pool cannot exhaust after five records the way a
+        // fixed enum ([size, color, material, style, finish]) does.
+        $word = $this->faker->word();
+        $key  = $this->faker->unique()->regexify( '[a-z]{2,10}' ) . '-' . $word;
 
         return [
             'product_id'   => Product::factory(),
             'key'          => $key,
-            'label'        => ucfirst( $key ),
+            'label'        => ucfirst( $word ),
             'position'     => 0,
             'is_variation' => true,
         ];

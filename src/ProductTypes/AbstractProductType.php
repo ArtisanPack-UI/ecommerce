@@ -72,7 +72,15 @@ abstract class AbstractProductType implements ProductType
         $out = [];
 
         if ( array_key_exists( 'variant_id', $options ) && null !== $options[ 'variant_id' ] ) {
-            $out[ 'variant_id' ] = (int) $options[ 'variant_id' ];
+            $variantId = $this->normaliseVariantId( $options[ 'variant_id' ] );
+
+            if ( null === $variantId ) {
+                throw new InvalidArgumentException(
+                    'variant_id must be a positive integer.',
+                );
+            }
+
+            $out[ 'variant_id' ] = $variantId;
         }
 
         return $out;
@@ -209,10 +217,22 @@ abstract class AbstractProductType implements ProductType
      */
     protected function activePriceFor( Product|ProductVariant $priceable, string $currency, Carbon $at ): ?Money
     {
+        // Order deterministically so ties don't depend on insertion order
+        // when multiple rows apply. Precedence rules for `$scheduled`:
+        //   1. The most-recently-starting window that contains `$at`.
+        //   2. Then the earliest-ending window (tighter windows win).
+        //   3. Finally the highest `id` as a stable tie-breaker.
+        // Precedence for `$base` (both timestamps null): highest `id`
+        // wins so the newest saved base price is authoritative.
         $rows = ProductPrice::query()
             ->where( 'priceable_type', $priceable->getMorphClass() )
             ->where( 'priceable_id', $priceable->getKey() )
             ->where( 'currency', $currency )
+            ->orderByRaw( '(starts_at IS NULL) ASC' )
+            ->orderBy( 'starts_at', 'desc' )
+            ->orderByRaw( '(ends_at IS NULL) ASC' )
+            ->orderBy( 'ends_at', 'asc' )
+            ->orderBy( 'id', 'desc' )
             ->get();
 
         $base      = null;
@@ -220,7 +240,11 @@ abstract class AbstractProductType implements ProductType
 
         foreach ( $rows as $row ) {
             if ( null === $row->starts_at && null === $row->ends_at ) {
-                $base = $row;
+                $base ??= $row;
+                continue;
+            }
+
+            if ( null !== $scheduled ) {
                 continue;
             }
 
@@ -242,5 +266,35 @@ abstract class AbstractProductType implements ProductType
             (int) $winner->price_amount,
             new MoneyCurrency( $currency ),
         );
+    }
+
+    /**
+     * Coerces a variant_id request value to a positive integer or `null`.
+     *
+     * Accepts either an actual `int > 0`, or a canonical integer string
+     * (`"42"` — no leading zeros, no whitespace, no sign, no decimals).
+     * Everything else — floats, negative numbers, zero, arrays, garbage
+     * strings — is rejected. `(int) $value` would otherwise silently
+     * coerce `"42-abc"` → `42` or `"1.9"` → `1`, both of which are
+     * request-poisoning shapes we do not want persisted onto
+     * `cart_items.options`.
+     *
+     * @since 1.0.0
+     *
+     * @param  mixed  $value  Raw value from the request payload.
+     *
+     * @return int|null Positive integer, or null when unusable.
+     */
+    private function normaliseVariantId( mixed $value ): ?int
+    {
+        if ( is_int( $value ) ) {
+            return $value > 0 ? $value : null;
+        }
+
+        if ( is_string( $value ) && 1 === preg_match( '/^[1-9]\d*$/', $value ) ) {
+            return (int) $value;
+        }
+
+        return null;
     }
 }

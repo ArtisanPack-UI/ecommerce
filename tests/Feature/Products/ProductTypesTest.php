@@ -34,6 +34,32 @@ describe( 'SimpleProductType', function (): void {
         expect( $sanitized )->toBe( [ 'variant_id' => 42 ] );
     } );
 
+    it( 'rejects malformed variant_id values instead of silently coercing them', function ( mixed $value ): void {
+        $product = Product::factory()->simple()->create();
+        $type    = new SimpleProductType();
+
+        expect( fn () => $type->validateCartOptions( $product, [ 'variant_id' => $value ] ) )
+            ->toThrow( InvalidArgumentException::class );
+    } )->with( [
+        'zero'          => 0,
+        'negative int'  => -3,
+        'zero string'   => '0',
+        'leading zero'  => '007',
+        'trailing junk' => '42-abc',
+        'decimal'       => '1.9',
+        'float'         => 1.9,
+        'array'         => [ [ 42 ] ],
+    ] );
+
+    it( 'accepts a null variant_id by omitting it entirely', function (): void {
+        $product = Product::factory()->simple()->create();
+        $type    = new SimpleProductType();
+
+        $sanitized = $type->validateCartOptions( $product, [ 'variant_id' => null ] );
+
+        expect( $sanitized )->toBe( [] );
+    } );
+
     it( 'prices a line by looking up the active per-currency row and multiplying by quantity', function (): void {
         $product = Product::factory()->simple()->create();
         ProductPrice::factory()
