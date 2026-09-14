@@ -140,6 +140,46 @@ it( 'throws ClaimRateLimitedException once the customer exhausts the window', fu
         ->toThrow( ClaimRateLimitedException::class );
 } );
 
+it( 'does not count successful attempts toward the failed-attempt rate limit', function (): void {
+    config()->set( 'artisanpack.ecommerce.customers.claim_rate_limit', 3 );
+
+    $customer = Customer::factory()->create( [ 'email' => 'won@example.com' ] );
+
+    CustomerClaimAttempt::factory()
+        ->for( $customer )
+        ->success()
+        ->count( 10 )
+        ->create( [ 'created_at' => Carbon::now()->subMinutes( 5 ) ] );
+
+    ( new Order( [
+        'order_number'     => 'AP-9001',
+        'email'            => 'won@example.com',
+        'shipping_address' => json_encode( [ 'postal_code' => '90210' ] ),
+        'is_claimed'       => false,
+    ] ) )->save();
+
+    $claimed = $this->service->claim( $customer, 'AP-9001', '90210' );
+
+    expect( $claimed )->toHaveCount( 1 );
+} );
+
+it( 'refuses to reuse an already-claimed order as claim proof', function (): void {
+    $customer = Customer::factory()->create( [ 'email' => 'reuse@example.com' ] );
+
+    ( new Order( [
+        'order_number'     => 'AP-DONE',
+        'email'            => 'reuse@example.com',
+        'shipping_address' => json_encode( [ 'postal_code' => '90210' ] ),
+        'is_claimed'       => true,
+    ] ) )->save();
+
+    expect( fn () => $this->service->claim( $customer, 'AP-DONE', '90210' ) )
+        ->toThrow( ClaimVerificationFailedException::class );
+
+    $attempt = CustomerClaimAttempt::query()->latest( 'id' )->first();
+    expect( $attempt->was_success )->toBeFalse();
+} );
+
 it( 'ignores attempts older than the rate window', function (): void {
     config()->set( 'artisanpack.ecommerce.customers.claim_rate_limit', 3 );
     config()->set( 'artisanpack.ecommerce.customers.claim_rate_window_minutes', 60 );

@@ -79,31 +79,42 @@ class CustomerClaimService
         string $postalCode,
         ?string $ipAddress = null,
     ): Collection {
-        $this->assertWithinRateLimit( $customer );
+        $outcome = DB::transaction( function () use ( $customer, $orderNumber, $postalCode, $ipAddress ): array {
+            $locked = Customer::query()->lockForUpdate()->findOrFail( $customer->id );
 
-        $matched = $this->findMatchingOrder( $customer, $orderNumber, $postalCode );
+            $this->assertWithinRateLimit( $locked );
 
-        if ( null === $matched ) {
-            $this->recordAttempt( $customer, $orderNumber, $ipAddress, false );
+            $matched = $this->findMatchingOrder( $locked, $orderNumber, $postalCode );
 
-            throw new ClaimVerificationFailedException( $customer, $orderNumber );
+            if ( null === $matched ) {
+                $this->recordAttempt( $locked, $orderNumber, $ipAddress, false );
+
+                return [ 'success' => false, 'customer' => $locked, 'claimed' => new Collection() ];
+            }
+
+            $claimed = $this->markGuestOrdersClaimed( $locked );
+
+            $this->recordAttempt( $locked, $orderNumber, $ipAddress, true );
+
+            return [ 'success' => true, 'customer' => $locked, 'claimed' => $claimed ];
+        } );
+
+        if ( ! $outcome['success'] ) {
+            throw new ClaimVerificationFailedException( $outcome['customer'], $orderNumber );
         }
 
-        $claimed = DB::transaction(
-            fn (): Collection => $this->markGuestOrdersClaimed( $customer ),
-        );
-
-        $this->recordAttempt( $customer, $orderNumber, $ipAddress, true );
-
-        foreach ( $claimed as $order ) {
-            doAction( 'ap.ecommerce.customer.orderClaimed', $customer, $order );
+        foreach ( $outcome['claimed'] as $order ) {
+            doAction( 'ap.ecommerce.customer.orderClaimed', $outcome['customer'], $order );
         }
 
-        return $claimed;
+        return $outcome['claimed'];
     }
 
     /**
-     * Throws when the customer has hit the configured claim rate limit.
+     * Throws when the customer has hit the configured FAILED claim attempt
+     * cap inside the current rate window. Successful attempts stay on record
+     * for audit but do not consume the failure budget — that is the whole
+     * point of gating the claim behind a rate limit rather than a total.
      *
      * @since 1.0.0
      *
@@ -120,6 +131,7 @@ class CustomerClaimService
 
         $attempts = CustomerClaimAttempt::query()
             ->where( 'customer_id', $customer->id )
+            ->where( 'was_success', false )
             ->withinLastMinutes( $window )
             ->count();
 
@@ -129,8 +141,12 @@ class CustomerClaimService
     }
 
     /**
-     * Looks for a prior guest order under the customer's email whose
-     * `order_number` and shipping postal code both match.
+     * Looks for a prior UNCLAIMED guest order under the customer's email
+     * whose `order_number` and shipping postal code both match.
+     *
+     * Restricting proof to un-claimed orders enforces the one-time nature of
+     * the claim: once a guest order has been claimed (by anyone), it cannot
+     * be reused as verification for a second claim.
      *
      * Returns null if the `orders` table has not been migrated yet (Phase 1
      * ships without the orders migration; downstream phases add it).
@@ -157,6 +173,7 @@ class CustomerClaimService
         $candidates = Order::query()
             ->whereRaw( 'LOWER(email) = ?', [ strtolower( $customer->email ) ] )
             ->where( 'order_number', $orderNumber )
+            ->where( 'is_claimed', false )
             ->get();
 
         foreach ( $candidates as $candidate ) {

@@ -102,16 +102,20 @@ class CustomerService
         $userId   = (int) $user->getAuthIdentifier();
         $customer = $this->findOrCreateForEmail( $email );
 
-        if ( null !== $customer->user_id ) {
-            return $customer->user_id === $userId ? $customer : null;
-        }
+        return DB::transaction( function () use ( $customer, $userId, $user ): ?Customer {
+            $locked = Customer::query()->lockForUpdate()->findOrFail( $customer->id );
 
-        $customer->user_id = $userId;
-        $customer->save();
+            if ( null !== $locked->user_id ) {
+                return $locked->user_id === $userId ? $locked : null;
+            }
 
-        doAction( 'ap.ecommerce.customer.userLinked', $customer, $user );
+            $locked->user_id = $userId;
+            $locked->save();
 
-        return $customer;
+            doAction( 'ap.ecommerce.customer.userLinked', $locked, $user );
+
+            return $locked;
+        } );
     }
 
     /**

@@ -5,7 +5,8 @@
  *
  * Rate-limit audit row: each attempt (successful or failed) a customer makes
  * to claim a prior guest order lands here. Engine spec §3.22 caps this at
- * 5 attempts per hour per customer.
+ * 5 FAILED attempts per hour per customer — successful claims remain on
+ * record for audit but do not consume the failure budget.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
