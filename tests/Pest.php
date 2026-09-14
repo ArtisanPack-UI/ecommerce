@@ -45,3 +45,18 @@ function something(): void
 {
     // ..
 }
+
+if ( ! function_exists( 'makeAnonymousModel' ) ) {
+    /**
+     * Builds a throwaway Eloquent model for cast unit tests.
+     *
+     * Kept in Pest bootstrap so multiple test files can share it without
+     * redeclaring a file-scoped helper (which would fatal at load time).
+     *
+     * @since 1.0.0
+     */
+    function makeAnonymousModel(): Illuminate\Database\Eloquent\Model
+    {
+        return new class extends Illuminate\Database\Eloquent\Model {};
+    }
+}
