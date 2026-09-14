@@ -18,6 +18,9 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Providers;
 
 use ArtisanPackUI\Ecommerce\Ecommerce;
+use ArtisanPackUI\Ecommerce\ProductTypes\DigitalProductType;
+use ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType;
+use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -47,6 +50,10 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->app->singleton( 'ecommerce', function ( $app ) {
             return new Ecommerce();
         } );
+
+        $this->app->singleton( ProductTypeRegistry::class, function ( $app ): ProductTypeRegistry {
+            return new ProductTypeRegistry( $app );
+        } );
     }
 
     /**
@@ -58,10 +65,49 @@ class EcommerceServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        $this->loadMigrationsFrom( __DIR__ . '/../../database/migrations' );
+
+        $this->registerCoreProductTypes();
+
         if ( $this->app->runningInConsole() ) {
             $this->publishes( [
                 __DIR__ . '/../../config/artisanpack/ecommerce.php' => config_path( 'artisanpack/ecommerce.php' ),
             ], 'ecommerce-config' );
+
+            $this->publishes( [
+                __DIR__ . '/../../database/migrations' => database_path( 'migrations' ),
+            ], 'ecommerce-migrations' );
         }
+    }
+
+    /**
+     * Registers the built-in product types the engine ships with.
+     *
+     * Satellites (subscriptions, memberships, licenses, gift cards, …) add
+     * their own by calling `$registry->register()` from their own
+     * service-provider `boot()`. Registration happens in `boot()` — not
+     * `register()` — so satellite providers loaded before this one can
+     * still see the built-ins when they boot.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCoreProductTypes(): void
+    {
+        /** @var ProductTypeRegistry $registry */
+        $registry = $this->app->make( ProductTypeRegistry::class );
+
+        $registry->register(
+            SimpleProductType::KEY,
+            SimpleProductType::class,
+            [ 'label' => __( 'Simple product' ), 'icon' => 'hero-cube' ],
+        );
+
+        $registry->register(
+            DigitalProductType::KEY,
+            DigitalProductType::class,
+            [ 'label' => __( 'Digital product' ), 'icon' => 'hero-arrow-down-tray' ],
+        );
     }
 }
