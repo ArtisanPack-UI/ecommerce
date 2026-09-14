@@ -25,12 +25,11 @@ use ArtisanPackUI\Ecommerce\Models\CartItem;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
 use ArtisanPackUI\Ecommerce\Models\Product;
-use ArtisanPackUI\Ecommerce\Models\ProductPrice;
 use ArtisanPackUI\Ecommerce\Models\ProductVariant;
+use ArtisanPackUI\Ecommerce\Services\ProductPriceResolver;
 use ArtisanPackUI\Ecommerce\ValueObjects\Currency as CurrencyVO;
 use Illuminate\Support\Carbon;
 use InvalidArgumentException;
-use Money\Currency as MoneyCurrency;
 use Money\Money;
 use RuntimeException;
 
@@ -112,12 +111,12 @@ abstract class AbstractProductType implements ProductType
         $variant      = $this->resolveVariant( $product, $options );
 
         $priceable = $variant ?? $product;
-        $unit      = $this->activePriceFor( $priceable, $currencyCode, Carbon::now() );
+        $unit      = app( ProductPriceResolver::class )->resolve( $priceable, $currencyCode, Carbon::now() );
 
         if ( null === $unit ) {
             throw new RuntimeException(
                 sprintf(
-                    'No active %s price exists for %s #%d.',
+                    'No active %s price exists for %s #%d (and no base-currency fallback was available).',
                     $currencyCode,
                     $priceable::class,
                     $priceable->getKey(),
@@ -197,75 +196,6 @@ abstract class AbstractProductType implements ProductType
         }
 
         return $variant;
-    }
-
-    /**
-     * Returns the active price row for `$priceable` in `$currency` at `$at`.
-     *
-     * Rules: the row whose `[starts_at, ends_at]` window contains `$at`
-     * wins; otherwise the row with both timestamps `null` (the base
-     * price) is used; when both apply, the scheduled row takes precedence
-     * (spec §3.2).
-     *
-     * @since 1.0.0
-     *
-     * @param  Product|ProductVariant  $priceable  Priceable row.
-     * @param  string                  $currency   ISO 4217 code.
-     * @param  Carbon                  $at         Reference time.
-     *
-     * @return Money|null
-     */
-    protected function activePriceFor( Product|ProductVariant $priceable, string $currency, Carbon $at ): ?Money
-    {
-        // Order deterministically so ties don't depend on insertion order
-        // when multiple rows apply. Precedence rules for `$scheduled`:
-        //   1. The most-recently-starting window that contains `$at`.
-        //   2. Then the earliest-ending window (tighter windows win).
-        //   3. Finally the highest `id` as a stable tie-breaker.
-        // Precedence for `$base` (both timestamps null): highest `id`
-        // wins so the newest saved base price is authoritative.
-        $rows = ProductPrice::query()
-            ->where( 'priceable_type', $priceable->getMorphClass() )
-            ->where( 'priceable_id', $priceable->getKey() )
-            ->where( 'currency', $currency )
-            ->orderByRaw( '(starts_at IS NULL) ASC' )
-            ->orderBy( 'starts_at', 'desc' )
-            ->orderByRaw( '(ends_at IS NULL) ASC' )
-            ->orderBy( 'ends_at', 'asc' )
-            ->orderBy( 'id', 'desc' )
-            ->get();
-
-        $base      = null;
-        $scheduled = null;
-
-        foreach ( $rows as $row ) {
-            if ( null === $row->starts_at && null === $row->ends_at ) {
-                $base ??= $row;
-                continue;
-            }
-
-            if ( null !== $scheduled ) {
-                continue;
-            }
-
-            $starts = null === $row->starts_at || $row->starts_at->lessThanOrEqualTo( $at );
-            $ends   = null === $row->ends_at || $row->ends_at->greaterThanOrEqualTo( $at );
-
-            if ( $starts && $ends ) {
-                $scheduled = $row;
-            }
-        }
-
-        $winner = $scheduled ?? $base;
-
-        if ( null === $winner || null === $winner->price_amount ) {
-            return null;
-        }
-
-        return new Money(
-            (int) $winner->price_amount,
-            new MoneyCurrency( $currency ),
-        );
     }
 
     /**

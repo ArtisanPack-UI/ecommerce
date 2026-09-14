@@ -72,7 +72,11 @@ describe( 'SimpleProductType', function (): void {
         expect( $line->getCurrency()->getCode() )->toBe( 'USD' );
     } );
 
-    it( 'throws when pricing in a currency with no row', function (): void {
+    it( 'throws when pricing in a currency with no row and no FX fallback available', function (): void {
+        // Only a USD row exists; the requested currency is EUR and the default
+        // `config` rate provider has no rates configured, so the fallback
+        // cannot resolve either — the resolver returns null and the type
+        // surfaces a RuntimeException naming the missing price.
         $product = Product::factory()->simple()->create();
         ProductPrice::factory()
             ->forPriceable( $product )

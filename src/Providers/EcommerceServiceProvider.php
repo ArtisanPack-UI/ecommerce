@@ -17,9 +17,12 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Providers;
 
+use ArtisanPackUI\Ecommerce\CurrencyRates\ConfigRateProvider;
+use ArtisanPackUI\Ecommerce\CurrencyRates\FrankfurterRateProvider;
 use ArtisanPackUI\Ecommerce\Ecommerce;
 use ArtisanPackUI\Ecommerce\ProductTypes\DigitalProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType;
+use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
 use Illuminate\Support\ServiceProvider;
 
@@ -54,6 +57,10 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->app->singleton( ProductTypeRegistry::class, function ( $app ): ProductTypeRegistry {
             return new ProductTypeRegistry( $app );
         } );
+
+        $this->app->singleton( CurrencyRateProviderRegistry::class, function ( $app ): CurrencyRateProviderRegistry {
+            return new CurrencyRateProviderRegistry( $app );
+        } );
     }
 
     /**
@@ -68,6 +75,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->loadMigrationsFrom( __DIR__ . '/../../database/migrations' );
 
         $this->registerCoreProductTypes();
+        $this->registerCoreCurrencyRateProviders();
 
         if ( $this->app->runningInConsole() ) {
             $this->publishes( [
@@ -108,6 +116,36 @@ class EcommerceServiceProvider extends ServiceProvider
             DigitalProductType::KEY,
             DigitalProductType::class,
             [ 'label' => __( 'Digital product' ), 'icon' => 'hero-arrow-down-tray' ],
+        );
+    }
+
+    /**
+     * Registers the built-in FX-rate providers the engine ships with.
+     *
+     * Satellites register additional providers (e.g. Wise, OpenExchange)
+     * from their own service-provider `boot()`. Registration happens here
+     * so satellite providers loaded before this one can still see the
+     * built-ins when they boot.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCoreCurrencyRateProviders(): void
+    {
+        /** @var CurrencyRateProviderRegistry $registry */
+        $registry = $this->app->make( CurrencyRateProviderRegistry::class );
+
+        $registry->register(
+            ConfigRateProvider::KEY,
+            ConfigRateProvider::class,
+            [ 'label' => __( 'Configured rates' ) ],
+        );
+
+        $registry->register(
+            FrankfurterRateProvider::KEY,
+            FrankfurterRateProvider::class,
+            [ 'label' => __( 'Frankfurter (ECB reference rates)' ) ],
         );
     }
 }
