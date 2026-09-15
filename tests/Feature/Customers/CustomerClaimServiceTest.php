@@ -8,41 +8,23 @@ use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\CustomerClaimAttempt;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Services\CustomerClaimService;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Schema;
 
 uses( RefreshDatabase::class );
 
 beforeEach( function (): void {
     $this->service = app( CustomerClaimService::class );
-
-    Schema::create( 'orders', function ( Blueprint $table ): void {
-        $table->bigIncrements( 'id' );
-        $table->unsignedBigInteger( 'customer_id' )->nullable();
-        $table->string( 'order_number', 50 );
-        $table->string( 'email', 255 );
-        $table->json( 'shipping_address' )->nullable();
-        $table->boolean( 'is_claimed' )->default( true );
-        $table->timestamps();
-    } );
-} );
-
-afterEach( function (): void {
-    Schema::dropIfExists( 'orders' );
 } );
 
 it( 'claims a matching guest order and fires orderClaimed', function (): void {
     $customer = Customer::factory()->create( [ 'email' => 'buyer@example.com', 'user_id' => 10 ] );
 
-    $order = new Order( [
+    $order = Order::factory()->guest()->create( [
         'order_number'     => 'AP-1001',
         'email'            => 'buyer@example.com',
-        'shipping_address' => json_encode( [ 'postal_code' => '90210' ] ),
-        'is_claimed'       => false,
+        'shipping_address' => [ 'postal_code' => '90210' ],
     ] );
-    $order->save();
 
     $captured = [];
     addAction( 'ap.ecommerce.customer.orderClaimed', function ( Customer $c, Order $o ) use ( &$captured ): void {
@@ -65,23 +47,16 @@ it( 'claims a matching guest order and fires orderClaimed', function (): void {
 it( 'retroactively claims every un-claimed order under the customers email on a single successful claim', function (): void {
     $customer = Customer::factory()->create( [ 'email' => 'multi@example.com' ] );
 
-    Order::query()->insert( [
-        [
-            'order_number'     => 'AP-1',
-            'email'            => 'multi@example.com',
-            'shipping_address' => json_encode( [ 'postal_code' => '10001' ] ),
-            'is_claimed'       => false,
-            'created_at'       => Carbon::now(),
-            'updated_at'       => Carbon::now(),
-        ],
-        [
-            'order_number'     => 'AP-2',
-            'email'            => 'multi@example.com',
-            'shipping_address' => json_encode( [ 'postal_code' => '99999' ] ),
-            'is_claimed'       => false,
-            'created_at'       => Carbon::now(),
-            'updated_at'       => Carbon::now(),
-        ],
+    Order::factory()->guest()->create( [
+        'order_number'     => 'AP-1',
+        'email'            => 'multi@example.com',
+        'shipping_address' => [ 'postal_code' => '10001' ],
+    ] );
+
+    Order::factory()->guest()->create( [
+        'order_number'     => 'AP-2',
+        'email'            => 'multi@example.com',
+        'shipping_address' => [ 'postal_code' => '99999' ],
     ] );
 
     $this->service->claim( $customer, 'AP-1', '10001' );
@@ -93,12 +68,11 @@ it( 'retroactively claims every un-claimed order under the customers email on a 
 it( 'normalizes postal codes so casing and whitespace do not defeat the match', function (): void {
     $customer = Customer::factory()->create( [ 'email' => 'uk@example.com' ] );
 
-    ( new Order( [
+    Order::factory()->guest()->create( [
         'order_number'     => 'AP-9',
         'email'            => 'uk@example.com',
-        'shipping_address' => json_encode( [ 'postal_code' => 'sw1a 1aa' ] ),
-        'is_claimed'       => false,
-    ] ) )->save();
+        'shipping_address' => [ 'postal_code' => 'sw1a 1aa' ],
+    ] );
 
     $claimed = $this->service->claim( $customer, 'AP-9', 'SW1A1AA' );
 
@@ -108,12 +82,11 @@ it( 'normalizes postal codes so casing and whitespace do not defeat the match', 
 it( 'records a failed attempt and throws when the postal code does not match', function (): void {
     $customer = Customer::factory()->create( [ 'email' => 'bad@example.com' ] );
 
-    ( new Order( [
+    Order::factory()->guest()->create( [
         'order_number'     => 'AP-500',
         'email'            => 'bad@example.com',
-        'shipping_address' => json_encode( [ 'postal_code' => '00000' ] ),
-        'is_claimed'       => false,
-    ] ) )->save();
+        'shipping_address' => [ 'postal_code' => '00000' ],
+    ] );
 
     expect( fn () => $this->service->claim( $customer, 'AP-500', '99999' ) )
         ->toThrow( ClaimVerificationFailedException::class );
@@ -151,12 +124,11 @@ it( 'does not count successful attempts toward the failed-attempt rate limit', f
         ->count( 10 )
         ->create( [ 'created_at' => Carbon::now()->subMinutes( 5 ) ] );
 
-    ( new Order( [
+    Order::factory()->guest()->create( [
         'order_number'     => 'AP-9001',
         'email'            => 'won@example.com',
-        'shipping_address' => json_encode( [ 'postal_code' => '90210' ] ),
-        'is_claimed'       => false,
-    ] ) )->save();
+        'shipping_address' => [ 'postal_code' => '90210' ],
+    ] );
 
     $claimed = $this->service->claim( $customer, 'AP-9001', '90210' );
 
@@ -166,12 +138,12 @@ it( 'does not count successful attempts toward the failed-attempt rate limit', f
 it( 'refuses to reuse an already-claimed order as claim proof', function (): void {
     $customer = Customer::factory()->create( [ 'email' => 'reuse@example.com' ] );
 
-    ( new Order( [
+    Order::factory()->create( [
         'order_number'     => 'AP-DONE',
         'email'            => 'reuse@example.com',
-        'shipping_address' => json_encode( [ 'postal_code' => '90210' ] ),
+        'shipping_address' => [ 'postal_code' => '90210' ],
         'is_claimed'       => true,
-    ] ) )->save();
+    ] );
 
     expect( fn () => $this->service->claim( $customer, 'AP-DONE', '90210' ) )
         ->toThrow( ClaimVerificationFailedException::class );
@@ -191,12 +163,11 @@ it( 'ignores attempts older than the rate window', function (): void {
         ->count( 5 )
         ->create( [ 'created_at' => Carbon::now()->subHours( 2 ) ] );
 
-    ( new Order( [
+    Order::factory()->guest()->create( [
         'order_number'     => 'AP-77',
         'email'            => 'aged@example.com',
-        'shipping_address' => json_encode( [ 'postal_code' => '55555' ] ),
-        'is_claimed'       => false,
-    ] ) )->save();
+        'shipping_address' => [ 'postal_code' => '55555' ],
+    ] );
 
     $claimed = $this->service->claim( $customer, 'AP-77', '55555' );
 
