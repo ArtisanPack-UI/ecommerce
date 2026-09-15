@@ -22,10 +22,12 @@ use ArtisanPackUI\Ecommerce\Console\Commands\ReleaseExpiredReservationsCommand;
 use ArtisanPackUI\Ecommerce\CurrencyRates\ConfigRateProvider;
 use ArtisanPackUI\Ecommerce\CurrencyRates\FrankfurterRateProvider;
 use ArtisanPackUI\Ecommerce\Ecommerce;
+use ArtisanPackUI\Ecommerce\Fulfillment\ProportionalByLineTotalStrategy;
 use ArtisanPackUI\Ecommerce\Listeners\LinkCustomerOnUserVerified;
 use ArtisanPackUI\Ecommerce\ProductTypes\DigitalProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType;
 use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
+use ArtisanPackUI\Ecommerce\Registries\FulfillmentAllocationStrategyRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
 use Illuminate\Auth\Events\Verified;
@@ -72,6 +74,10 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->app->singleton( PaymentGatewayRegistry::class, function ( $app ): PaymentGatewayRegistry {
             return new PaymentGatewayRegistry( $app );
         } );
+
+        $this->app->singleton( FulfillmentAllocationStrategyRegistry::class, function ( $app ): FulfillmentAllocationStrategyRegistry {
+            return new FulfillmentAllocationStrategyRegistry( $app );
+        } );
     }
 
     /**
@@ -87,6 +93,7 @@ class EcommerceServiceProvider extends ServiceProvider
 
         $this->registerCoreProductTypes();
         $this->registerCoreCurrencyRateProviders();
+        $this->registerCoreFulfillmentAllocationStrategies();
         $this->registerCustomerListeners();
 
         if ( $this->app->runningInConsole() ) {
@@ -176,6 +183,28 @@ class EcommerceServiceProvider extends ServiceProvider
             FrankfurterRateProvider::KEY,
             FrankfurterRateProvider::class,
             [ 'label' => __( 'Frankfurter (ECB reference rates)' ) ],
+        );
+    }
+
+    /**
+     * Registers the built-in fulfillment allocation strategies the engine
+     * ships with. Satellites (subscriptions, marketplaces, split-shipment
+     * carriers, …) register additional strategies from their own
+     * service-provider `boot()`.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCoreFulfillmentAllocationStrategies(): void
+    {
+        /** @var FulfillmentAllocationStrategyRegistry $registry */
+        $registry = $this->app->make( FulfillmentAllocationStrategyRegistry::class );
+
+        $registry->register(
+            ProportionalByLineTotalStrategy::KEY,
+            ProportionalByLineTotalStrategy::class,
+            [ 'label' => __( 'Proportional by line total' ) ],
         );
     }
 
