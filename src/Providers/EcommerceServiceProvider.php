@@ -17,6 +17,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Providers;
 
+use ArtisanPackUI\Ecommerce\Console\Commands\AuditOrderStatusCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\ReleaseExpiredReservationsCommand;
 use ArtisanPackUI\Ecommerce\CurrencyRates\ConfigRateProvider;
 use ArtisanPackUI\Ecommerce\CurrencyRates\FrankfurterRateProvider;
@@ -98,6 +99,7 @@ class EcommerceServiceProvider extends ServiceProvider
             ], 'ecommerce-migrations' );
 
             $this->commands( [
+                AuditOrderStatusCommand::class,
                 ReleaseExpiredReservationsCommand::class,
             ] );
 
@@ -106,6 +108,10 @@ class EcommerceServiceProvider extends ServiceProvider
                 $schedule = $this->app->make( Schedule::class );
                 $schedule->command( 'ecommerce:release-expired-reservations' )
                     ->everyMinute()
+                    ->withoutOverlapping()
+                    ->runInBackground();
+                $schedule->command( 'ecommerce:audit-order-status' )
+                    ->dailyAt( '02:15' )
                     ->withoutOverlapping()
                     ->runInBackground();
             } );
