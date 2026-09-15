@@ -22,7 +22,9 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Models;
 
+use ArtisanPackUI\Ecommerce\Database\Eloquent\OrderItemBuilder;
 use ArtisanPackUI\Ecommerce\Database\Factories\OrderItemFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -143,6 +145,21 @@ class OrderItem extends Model
     public function variant(): BelongsTo
     {
         return $this->belongsTo( ProductVariant::class, 'product_variant_id' );
+    }
+
+    /**
+     * Returns a custom Eloquent builder that rejects bulk updates to the
+     * immutable `product_snapshot` column.
+     *
+     * @since 1.0.0
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     *
+     * @return OrderItemBuilder<static>
+     */
+    public function newEloquentBuilder( $query ): Builder
+    {
+        return new OrderItemBuilder( $query );
     }
 
     /**

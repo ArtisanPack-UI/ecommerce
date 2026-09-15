@@ -20,7 +20,9 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Models;
 
+use ArtisanPackUI\Ecommerce\Database\Eloquent\AppendOnlyBuilder;
 use ArtisanPackUI\Ecommerce\Database\Factories\OrderEditFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -89,6 +91,21 @@ class OrderEdit extends Model
     }
 
     /**
+     * Returns the append-only builder so bulk update/delete calls are
+     * rejected the same way as model-instance saves.
+     *
+     * @since 1.0.0
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     *
+     * @return AppendOnlyBuilder<static>
+     */
+    public function newEloquentBuilder( $query ): Builder
+    {
+        return new AppendOnlyBuilder( $query );
+    }
+
+    /**
      * @since 1.0.0
      *
      * @return void
@@ -106,6 +123,12 @@ class OrderEdit extends Model
         static::updating( function ( self $edit ): void {
             throw new LogicException(
                 'Order edits are append-only and cannot be modified after creation.',
+            );
+        } );
+
+        static::deleting( function ( self $edit ): void {
+            throw new LogicException(
+                'Order edits are append-only; delete the owning order to cascade-remove them.',
             );
         } );
     }

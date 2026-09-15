@@ -53,3 +53,69 @@ it( 'rejects any update to an order edit row', function (): void {
     expect( fn () => $edit->save() )
         ->toThrow( LogicException::class, 'append-only' );
 } );
+
+it( 'rejects a bulk update issued through the timeline query builder', function (): void {
+    $entry = OrderTimelineEntry::factory()->create();
+
+    expect( fn () => OrderTimelineEntry::query()->where( 'id', $entry->id )->update( [ 'event_type' => 'tampered' ] ) )
+        ->toThrow( LogicException::class, 'append-only' );
+
+    expect( OrderTimelineEntry::query()->find( $entry->id )->event_type )->not->toBe( 'tampered' );
+} );
+
+it( 'rejects a bulk update issued through the order-edit query builder', function (): void {
+    $edit = OrderEdit::factory()->create();
+
+    expect( fn () => OrderEdit::query()->where( 'id', $edit->id )->update( [ 'reason' => 'tampered' ] ) )
+        ->toThrow( LogicException::class, 'append-only' );
+
+    expect( OrderEdit::query()->find( $edit->id )->reason )->not->toBe( 'tampered' );
+} );
+
+it( 'rejects a direct delete on a timeline entry', function (): void {
+    $entry = OrderTimelineEntry::factory()->create();
+
+    expect( fn () => $entry->delete() )
+        ->toThrow( LogicException::class, 'append-only' );
+
+    expect( OrderTimelineEntry::query()->find( $entry->id ) )->not->toBeNull();
+} );
+
+it( 'rejects a direct delete on an order edit', function (): void {
+    $edit = OrderEdit::factory()->create();
+
+    expect( fn () => $edit->delete() )
+        ->toThrow( LogicException::class, 'append-only' );
+
+    expect( OrderEdit::query()->find( $edit->id ) )->not->toBeNull();
+} );
+
+it( 'rejects a bulk delete against the timeline query builder', function (): void {
+    OrderTimelineEntry::factory()->count( 2 )->create();
+
+    expect( fn () => OrderTimelineEntry::query()->delete() )
+        ->toThrow( LogicException::class, 'append-only' );
+
+    expect( OrderTimelineEntry::query()->count() )->toBe( 2 );
+} );
+
+it( 'rejects a bulk delete against the order-edit query builder', function (): void {
+    OrderEdit::factory()->count( 2 )->create();
+
+    expect( fn () => OrderEdit::query()->delete() )
+        ->toThrow( LogicException::class, 'append-only' );
+
+    expect( OrderEdit::query()->count() )->toBe( 2 );
+} );
+
+it( 'still cascade-removes timeline entries and edits when the owning order is deleted', function (): void {
+    $order = Order::factory()->create();
+
+    OrderTimelineEntry::factory()->for( $order )->count( 2 )->create();
+    OrderEdit::factory()->for( $order )->create();
+
+    $order->delete();
+
+    expect( OrderTimelineEntry::query()->where( 'order_id', $order->id )->count() )->toBe( 0 );
+    expect( OrderEdit::query()->where( 'order_id', $order->id )->count() )->toBe( 0 );
+} );

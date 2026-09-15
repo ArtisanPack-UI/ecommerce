@@ -19,7 +19,9 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Models;
 
+use ArtisanPackUI\Ecommerce\Database\Eloquent\AppendOnlyBuilder;
 use ArtisanPackUI\Ecommerce\Database\Factories\OrderTimelineEntryFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -86,6 +88,21 @@ class OrderTimelineEntry extends Model
     }
 
     /**
+     * Returns the append-only builder so bulk update/delete calls are
+     * rejected the same way as model-instance saves.
+     *
+     * @since 1.0.0
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     *
+     * @return AppendOnlyBuilder<static>
+     */
+    public function newEloquentBuilder( $query ): Builder
+    {
+        return new AppendOnlyBuilder( $query );
+    }
+
+    /**
      * Boot the model to stamp `created_at` on insert and enforce append-only
      * semantics on subsequent saves.
      *
@@ -106,6 +123,12 @@ class OrderTimelineEntry extends Model
         static::updating( function ( self $entry ): void {
             throw new LogicException(
                 'Order timeline entries are append-only and cannot be modified after creation.',
+            );
+        } );
+
+        static::deleting( function ( self $entry ): void {
+            throw new LogicException(
+                'Order timeline entries are append-only; delete the owning order to cascade-remove them.',
             );
         } );
     }
