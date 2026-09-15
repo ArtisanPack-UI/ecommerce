@@ -272,6 +272,52 @@ it( 'caps items.add at the per-call limit', function (): void {
     $this->service->apply( $order, [ 'items' => [ 'add' => $add ] ] );
 } )->throws( InvalidArgumentException::class, 'per-call limit' );
 
+it( 'rejects an email or phone edit on an order past unfulfilled (plan §7.6)', function (): void {
+    $order = makeOrderWithItems( [ [ 'qty' => 1, 'unit' => 1_000 ] ], [ 'fulfillment_status' => 'fulfilled' ] );
+
+    $this->service->apply( $order, [ 'email' => 'new@example.com' ] );
+} )->throws( OrderNotEditableException::class );
+
+it( 'throws when items.change references an id that does not belong to the order', function (): void {
+    $order = makeOrderWithItems();
+
+    $this->service->apply( $order, [
+        'items' => [ 'change' => [ 999_999 => [ 'quantity' => 1 ] ] ],
+    ] );
+} )->throws( InvalidArgumentException::class, 'does not belong to order' );
+
+it( 'throws when items.add is missing a required key', function (): void {
+    $order = makeOrderWithItems();
+
+    $this->service->apply( $order, [
+        'items' => [ 'add' => [ [
+            // Missing product_id.
+            'quantity'            => 1,
+            'unit_price_amount'   => 100,
+            'unit_price_currency' => 'USD',
+            'product_snapshot'    => [],
+        ] ] ],
+    ] );
+} )->throws( InvalidArgumentException::class, 'product_id' );
+
+it( 'copies totals back onto the caller\'s order when the recomputingTotals filter returns a fresh instance', function (): void {
+    addFilter( 'ap.ecommerce.order.recomputingTotals', function ( Order $order ): Order {
+        // Simulate a listener that composes the return value from a cloned
+        // instance instead of mutating in place — same PK, different object.
+        $clone                  = clone $order;
+        $clone->tax_amount      = 111;
+        $clone->shipping_amount = 222;
+        return $clone;
+    } );
+
+    $order  = makeOrderWithItems( [ [ 'qty' => 1, 'unit' => 1_000 ] ] );
+    $result = $this->service->apply( $order, [ 'customer_note' => 'kick recompute' ] );
+
+    expect( $result->order->tax_amount )->toBe( 111 );
+    expect( $result->order->shipping_amount )->toBe( 222 );
+    expect( $result->order->total_amount )->toBe( 1_000 + 111 + 222 );
+} );
+
 it( 'restores removed items during rollback', function (): void {
     $order = makeOrderWithItems( [
         [ 'qty' => 1, 'unit' => 1_000 ],

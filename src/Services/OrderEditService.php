@@ -216,34 +216,20 @@ class OrderEditService
             return;
         }
 
-        $touchesItems  = isset( $edit['items'] ) && ! empty( $edit['items'] );
-        $touchesTotals = array_intersect_key(
-            $edit,
-            array_flip( [ 'shipping_amount', 'tax_amount', 'discount_amount', 'shipping_method_key' ] ),
-        );
-
-        $touchesRestrictedField = false;
+        // Plan §7.6: "After any fulfillment has started: address details and
+        // notes only." Anything outside POST_FULFILLMENT_SAFE_FIELDS — including
+        // email, phone, shipping_method_key, item directives, and total
+        // overrides — requires reversing the shipment first.
         foreach ( array_keys( $edit ) as $key ) {
-            if ( 'items' === $key ) {
-                continue;
-            }
             if ( in_array( $key, self::POST_FULFILLMENT_SAFE_FIELDS, true ) ) {
                 continue;
             }
-            if ( 'email' === $key || 'phone' === $key ) {
-                continue;
-            }
-            if ( in_array( $key, [ 'shipping_amount', 'tax_amount', 'discount_amount', 'shipping_method_key' ], true ) ) {
-                $touchesRestrictedField = true;
-                break;
-            }
-        }
 
-        if ( $touchesItems || $touchesTotals || $touchesRestrictedField ) {
             throw new OrderNotEditableException( sprintf(
-                'Order %d is in fulfillment_status "%s"; line-item, shipping-method, and total overrides require rolling back the shipment first.',
+                'Order %d is in fulfillment_status "%s"; only shipping/billing address and notes are editable at this stage. Field "%s" is not.',
                 $order->id,
                 $fulfillment,
+                $key,
             ) );
         }
     }
@@ -437,12 +423,19 @@ class OrderEditService
 
         $order->subtotal_amount = $subtotal;
 
-        /** @var Order $mutated */
+        /** @var mixed $mutated */
         $mutated = applyFilters( 'ap.ecommerce.order.recomputingTotals', $order );
-        // The filter contract is `Order → Order`; we accept whatever it returns
-        // as authoritative for tax/shipping/discount, but never for identity.
-        if ( $mutated instanceof Order && $mutated->is( $order ) ) {
-            $order = $mutated;
+
+        // The filter contract is `Order → Order` and it is expected to mutate in
+        // place. But a listener may legitimately return a fresh Order instance
+        // whose PK matches (e.g. `$order->replicate()` after tweaking totals).
+        // The local variable `$order` here is a rebind that would not reach the
+        // caller — so instead of swapping references, copy the totals fields
+        // back onto the original instance we were given.
+        if ( $mutated instanceof Order && $mutated !== $order && $mutated->is( $order ) ) {
+            foreach ( [ 'subtotal_amount', 'discount_amount', 'tax_amount', 'shipping_amount' ] as $field ) {
+                $order->{$field} = (int) $mutated->{$field};
+            }
         }
 
         $order->total_amount = (int) $order->subtotal_amount
@@ -652,6 +645,13 @@ class OrderEditService
             $prev        = $beforeItems[ $id ];
             $lineChanges = [];
             foreach ( $item as $key => $value ) {
+                // Skip columns that are immutable after placement — comparing
+                // them can produce spurious "changed" entries when a rollback
+                // re-inserts an item and the database round-trips its JSON in
+                // a different key order than the original snapshot recorded.
+                if ( in_array( $key, [ 'id', 'product_id', 'product_snapshot', 'unit_price_currency', 'total_currency' ], true ) ) {
+                    continue;
+                }
                 if ( ( $prev[ $key ] ?? null ) !== $value ) {
                     $lineChanges[ $key ] = [ 'before' => $prev[ $key ] ?? null, 'after' => $value ];
                 }
