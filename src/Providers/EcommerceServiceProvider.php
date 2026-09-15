@@ -25,6 +25,7 @@ use ArtisanPackUI\Ecommerce\Listeners\LinkCustomerOnUserVerified;
 use ArtisanPackUI\Ecommerce\ProductTypes\DigitalProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType;
 use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
+use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Console\Scheduling\Schedule;
@@ -65,6 +66,10 @@ class EcommerceServiceProvider extends ServiceProvider
 
         $this->app->singleton( CurrencyRateProviderRegistry::class, function ( $app ): CurrencyRateProviderRegistry {
             return new CurrencyRateProviderRegistry( $app );
+        } );
+
+        $this->app->singleton( PaymentGatewayRegistry::class, function ( $app ): PaymentGatewayRegistry {
+            return new PaymentGatewayRegistry( $app );
         } );
     }
 
