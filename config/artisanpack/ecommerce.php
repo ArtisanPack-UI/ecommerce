@@ -101,6 +101,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Fulfillment
+    |--------------------------------------------------------------------------
+    |
+    | `allocation_strategy` — Key of the FulfillmentAllocationStrategy used to
+    |                          split an order's shipping/tax totals across its
+    |                          line items (engine spec §4.6, parent plan §16.7).
+    |                          Ships with `proportional-by-line-total`.
+    |
+    */
+
+    'fulfillment' => [
+        'allocation_strategy' => env(
+            'ECOMMERCE_ALLOCATION_STRATEGY',
+            'proportional-by-line-total',
+        ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Customers
     |--------------------------------------------------------------------------
     |
