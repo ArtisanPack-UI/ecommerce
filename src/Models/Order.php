@@ -76,6 +76,7 @@ use Illuminate\Support\Carbon;
  * @property \Illuminate\Database\Eloquent\Collection<int, OrderNote>               $notes
  * @property \Illuminate\Database\Eloquent\Collection<int, OrderTimelineEntry>      $timelineEntries
  * @property \Illuminate\Database\Eloquent\Collection<int, OrderEdit>               $edits
+ * @property \Illuminate\Database\Eloquent\Collection<int, Refund>                  $refunds
  */
 class Order extends Model
 {
@@ -213,6 +214,18 @@ class Order extends Model
     public function edits(): HasMany
     {
         return $this->hasMany( OrderEdit::class );
+    }
+
+    /**
+     * Refund ledger rows booked against this order.
+     *
+     * @since 1.0.0
+     *
+     * @return HasMany<Refund, $this>
+     */
+    public function refunds(): HasMany
+    {
+        return $this->hasMany( Refund::class );
     }
 
     /**
