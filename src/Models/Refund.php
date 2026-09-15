@@ -24,12 +24,15 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Models;
 
 use ArtisanPackUI\Ecommerce\Casts\MoneyCast;
+use ArtisanPackUI\Ecommerce\Database\Eloquent\AppendOnlyBuilder;
 use ArtisanPackUI\Ecommerce\Database\Factories\RefundFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
+use LogicException;
 use Money\Money;
 
 /**
@@ -100,6 +103,47 @@ class Refund extends Model
     public function items(): HasMany
     {
         return $this->hasMany( RefundItem::class );
+    }
+
+    /**
+     * Returns the append-only builder so bulk update/delete calls are
+     * rejected the same way as model-instance saves.
+     *
+     * @since 1.0.0
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     *
+     * @return AppendOnlyBuilder<static>
+     */
+    public function newEloquentBuilder( $query ): Builder
+    {
+        return new AppendOnlyBuilder( $query );
+    }
+
+    /**
+     * Refunds are append-only ledger rows: once written they cannot be
+     * mutated or deleted through Eloquent. Cascade cleanup on parent order
+     * deletion is enforced at the FK layer and bypasses these hooks.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected static function boot(): void
+    {
+        parent::boot();
+
+        static::updating( function ( self $refund ): void {
+            throw new LogicException(
+                'Refunds are append-only ledger rows and cannot be modified after creation.',
+            );
+        } );
+
+        static::deleting( function ( self $refund ): void {
+            throw new LogicException(
+                'Refunds are append-only; delete the owning order to cascade-remove them.',
+            );
+        } );
     }
 
     /**

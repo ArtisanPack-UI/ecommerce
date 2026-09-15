@@ -23,10 +23,13 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Models;
 
 use ArtisanPackUI\Ecommerce\Casts\MoneyCast;
+use ArtisanPackUI\Ecommerce\Database\Eloquent\AppendOnlyBuilder;
 use ArtisanPackUI\Ecommerce\Database\Factories\RefundItemFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use LogicException;
 use Money\Money;
 
 /**
@@ -114,6 +117,48 @@ class RefundItem extends Model
     public function orderItem(): BelongsTo
     {
         return $this->belongsTo( OrderItem::class );
+    }
+
+    /**
+     * Returns the append-only builder so bulk update/delete calls are
+     * rejected the same way as model-instance saves.
+     *
+     * @since 1.0.0
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     *
+     * @return AppendOnlyBuilder<static>
+     */
+    public function newEloquentBuilder( $query ): Builder
+    {
+        return new AppendOnlyBuilder( $query );
+    }
+
+    /**
+     * Refund items are append-only ledger detail: no updates or deletes
+     * through Eloquent. FK-layer cascades from the parent refund (and, per
+     * spec §3.21, from the referenced order_item) still fire — they run
+     * below Eloquent and do not trigger these hooks.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected static function boot(): void
+    {
+        parent::boot();
+
+        static::updating( function ( self $item ): void {
+            throw new LogicException(
+                'Refund items are append-only and cannot be modified after creation.',
+            );
+        } );
+
+        static::deleting( function ( self $item ): void {
+            throw new LogicException(
+                'Refund items are append-only; delete the owning refund to cascade-remove them.',
+            );
+        } );
     }
 
     /**

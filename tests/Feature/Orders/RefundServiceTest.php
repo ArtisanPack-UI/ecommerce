@@ -328,3 +328,106 @@ it( 'rejects an empty refund payload', function (): void {
     expect( fn () => $this->service->issue( $order, [] ) )
         ->toThrow( InvalidArgumentException::class );
 } );
+
+it( 'rejects a gateway success whose result amount does not match the requested amount', function (): void {
+    $order = makeRefundableOrder( [ [ 'qty' => 2, 'unit' => 1_000 ] ] );
+    $item  = $order->items->first();
+
+    // Gateway reports success but for a different amount than requested — a partial fulfilment.
+    $this->gateway->nextResult = RefundResult::success(
+        new Money( '1500', new \Money\Currency( 'USD' ) ),
+        're_partial',
+    );
+
+    expect( fn () => $this->service->issue(
+        $order,
+        [ [ 'order_item_id' => $item->id, 'quantity' => 2, 'amount' => 2_000 ] ],
+    ) )->toThrow( RefundNotAllowedException::class );
+
+    expect( Refund::query()->count() )->toBe( 0 );
+    expect( $order->fresh()->total_refunded_amount )->toBe( 0 );
+} );
+
+it( 'rejects a filter that returns a different currency than the order', function (): void {
+    $order = makeRefundableOrder( [ [ 'qty' => 1, 'unit' => 1_000 ] ] );
+    $item  = $order->items->first();
+
+    addFilter(
+        'ap.ecommerce.payment.refunding',
+        fn ( Money $amount ) => new Money( $amount->getAmount(), new \Money\Currency( 'EUR' ) ),
+    );
+
+    try {
+        expect( fn () => $this->service->issue(
+            $order,
+            [ [ 'order_item_id' => $item->id, 'quantity' => 1, 'amount' => 1_000 ] ],
+        ) )->toThrow( RefundNotAllowedException::class );
+
+        expect( Refund::query()->count() )->toBe( 0 );
+    } finally {
+        removeAllFilters( 'ap.ecommerce.payment.refunding' );
+    }
+} );
+
+it( 'rejects a filter that pushes the amount over the outstanding balance', function (): void {
+    $order = makeRefundableOrder( [ [ 'qty' => 1, 'unit' => 1_000 ] ] );
+    $item  = $order->items->first();
+
+    addFilter(
+        'ap.ecommerce.payment.refunding',
+        fn () => new Money( '9999', new \Money\Currency( 'USD' ) ),
+    );
+
+    try {
+        expect( fn () => $this->service->issue(
+            $order,
+            [ [ 'order_item_id' => $item->id, 'quantity' => 1, 'amount' => 1_000 ] ],
+        ) )->toThrow( RefundNotAllowedException::class );
+
+        expect( Refund::query()->count() )->toBe( 0 );
+    } finally {
+        removeAllFilters( 'ap.ecommerce.payment.refunding' );
+    }
+} );
+
+it( 'refuses to resolve a gateway whose own key does not match its registry key', function (): void {
+    /** @var PaymentGatewayRegistry $registry */
+    $registry               = app( PaymentGatewayRegistry::class );
+    $misregistered          = new RefundServiceTestFakeGateway();
+    $misregistered->keyName = 'not-mismatch';
+    $registry->register( 'mismatch', $misregistered );
+
+    expect( fn () => $registry->get( 'mismatch' ) )
+        ->toThrow( RuntimeException::class );
+} );
+
+it( 'rejects direct updates and deletes on Refund and RefundItem rows', function (): void {
+    $order = makeRefundableOrder( [ [ 'qty' => 1, 'unit' => 1_000 ] ] );
+    $item  = $order->items->first();
+
+    $refund = $this->service->issue(
+        $order,
+        [ [ 'order_item_id' => $item->id, 'quantity' => 1, 'amount' => 1_000 ] ],
+    );
+
+    expect( fn () => $refund->update( [ 'reason' => 'tamper' ] ) )
+        ->toThrow( LogicException::class );
+
+    $refundItem = $refund->items->first();
+
+    expect( fn () => $refundItem->update( [ 'quantity' => 99 ] ) )
+        ->toThrow( LogicException::class );
+
+    expect( fn () => $refundItem->delete() )
+        ->toThrow( LogicException::class );
+
+    expect( fn () => $refund->delete() )
+        ->toThrow( LogicException::class );
+
+    // Bulk paths through the builder are guarded too.
+    expect( fn () => Refund::query()->where( 'id', $refund->id )->update( [ 'reason' => 'bulk' ] ) )
+        ->toThrow( LogicException::class );
+
+    expect( fn () => RefundItem::query()->where( 'refund_id', $refund->id )->delete() )
+        ->toThrow( LogicException::class );
+} );

@@ -154,9 +154,23 @@ class PaymentGatewayRegistry
 
         $entry = $this->entries[ $key ][ 'entry' ];
 
-        return $this->resolved[ $key ] = is_string( $entry )
+        $gateway = is_string( $entry )
             ? $this->container->make( $entry )
             : $entry;
+
+        // The gateway's self-reported key MUST equal the registry key it
+        // was registered under: refund routing hangs off `orders.payment_gateway_key`,
+        // so a mismatched registration would send refunds through the
+        // wrong provider without any surface error.
+        if ( $gateway->key() !== $key ) {
+            throw new RuntimeException( sprintf(
+                'PaymentGateway registered under "%s" reports its own key as "%s"; refusing to resolve it to avoid mis-routing refunds.',
+                $key,
+                $gateway->key(),
+            ) );
+        }
+
+        return $this->resolved[ $key ] = $gateway;
     }
 
     /**

@@ -144,6 +144,25 @@ class RefundService
             /** @var Money $filteredAmount */
             $filteredAmount = applyFilters( 'ap.ecommerce.payment.refunding', $money, $locked, $reason );
 
+            // The filter contract permits subscribers to modify the Money,
+            // so re-run every guard the pre-filter amount cleared: currency
+            // must still match the order, and the (possibly higher) total
+            // must still fit inside the outstanding balance and the
+            // partial-refund capability of the active gateway.
+            if ( $filteredAmount->getCurrency()->getCode() !== $currency ) {
+                throw new RefundNotAllowedException( sprintf(
+                    'Refund filter returned currency "%s"; order %d is settled in "%s".',
+                    $filteredAmount->getCurrency()->getCode(),
+                    $locked->id,
+                    $currency,
+                ) );
+            }
+
+            $filteredTotal = (int) $filteredAmount->getAmount();
+
+            $this->guardRefundBalance( $locked, $filteredTotal );
+            $this->guardPartialRefundCapability( $locked, $gateway, $filteredTotal );
+
             $result = $gateway->refund( $locked, $filteredAmount, $reason );
 
             if ( ! $result->success ) {
@@ -152,6 +171,27 @@ class RefundService
                     $gateway->key(),
                     $locked->id,
                     $result->errorMessage ?? ( $result->errorCode ?? 'unknown error' ),
+                ) );
+            }
+
+            // A gateway that reports success but moved a different amount
+            // (partial fulfilment, currency mismatch) would silently leave
+            // the local ledger out of sync with provider settlement. Reject
+            // that before touching any tables — the ledger row is the audit
+            // record for reconciliation, and it MUST match what the
+            // provider actually did.
+            if (
+                ! $result->amount->equals( $filteredAmount )
+                || $result->amount->getCurrency()->getCode() !== $filteredAmount->getCurrency()->getCode()
+            ) {
+                throw new RefundNotAllowedException( sprintf(
+                    'Gateway "%s" reported a successful refund of %s %s but %s %s was requested for order %d; refusing to record a mismatched ledger row.',
+                    $gateway->key(),
+                    $result->amount->getAmount(),
+                    $result->amount->getCurrency()->getCode(),
+                    $filteredAmount->getAmount(),
+                    $filteredAmount->getCurrency()->getCode(),
+                    $locked->id,
                 ) );
             }
 
