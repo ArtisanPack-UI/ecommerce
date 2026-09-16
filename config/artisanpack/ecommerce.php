@@ -255,4 +255,21 @@ return [
         'scout'   => true,
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Observability
+    |--------------------------------------------------------------------------
+    |
+    | Minimum level for the dedicated `ecommerce` log channel. The channel
+    | itself is registered automatically from the service provider and
+    | emits structured JSON via `EcommerceLogFormatter`. Host applications
+    | that want a different driver, path, or handler can override the
+    | channel entirely by defining `logging.channels.ecommerce` in their
+    | own `config/logging.php` — the auto-registration is skipped whenever
+    | that key is already present.
+    |
+    */
+
+    'log_level' => env( 'ECOMMERCE_LOG_LEVEL', 'debug' ),
+
 ];

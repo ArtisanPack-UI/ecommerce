@@ -21,14 +21,12 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Exceptions;
 
-use RuntimeException;
-
 /**
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
  *
  * @since      1.0.0
  */
-class RefundNotAllowedException extends RuntimeException
+class RefundNotAllowedException extends EcommerceException
 {
 }

@@ -22,14 +22,12 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Exceptions;
 
-use RuntimeException;
-
 /**
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
  *
  * @since      1.0.0
  */
-class OrderNotEditableException extends RuntimeException
+class OrderNotEditableException extends EcommerceException
 {
 }

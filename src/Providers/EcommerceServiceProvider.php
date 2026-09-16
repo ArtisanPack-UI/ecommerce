@@ -26,7 +26,9 @@ use ArtisanPackUI\Ecommerce\Ecommerce;
 use ArtisanPackUI\Ecommerce\Fulfillment\ProportionalByLineTotalStrategy;
 use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Middleware\RateLimitEcommerce;
+use ArtisanPackUI\Ecommerce\Http\Middleware\RequestIdMiddleware;
 use ArtisanPackUI\Ecommerce\Listeners\LinkCustomerOnUserVerified;
+use ArtisanPackUI\Ecommerce\Logging\EcommerceLogFormatter;
 use ArtisanPackUI\Ecommerce\ProductTypes\DigitalProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType;
 use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
@@ -64,6 +66,8 @@ class EcommerceServiceProvider extends ServiceProvider
             'artisanpack.ecommerce',
         );
 
+        $this->registerLogChannel();
+
         $this->app->singleton( 'ecommerce', function ( $app ) {
             return new Ecommerce();
         } );
@@ -96,6 +100,7 @@ class EcommerceServiceProvider extends ServiceProvider
     {
         $this->loadMigrationsFrom( __DIR__ . '/../../database/migrations' );
 
+        $this->registerRequestIdMiddleware();
         $this->registerIdempotencyMiddleware();
         $this->registerRateLimitMiddleware();
         $this->registerRateLimiters();
@@ -136,6 +141,61 @@ class EcommerceServiceProvider extends ServiceProvider
                     ->runInBackground();
             } );
         }
+    }
+
+    /**
+     * Merges the dedicated `ecommerce` log channel into the application's
+     * `logging.channels` config so callers can immediately reach it with
+     * `Log::channel('ecommerce')->info(...)`. The channel is a `single`
+     * driver tapped by {@see EcommerceLogFormatter} to emit structured
+     * JSON. Engine plan §16.3.
+     *
+     * Consumers who need to point the channel at a different path,
+     * driver, or handler can override the entry by publishing their own
+     * `config/logging.php` — the merge here only fills in the channel
+     * when the host application has not already defined one.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerLogChannel(): void
+    {
+        $channels = (array) $this->app['config']->get( 'logging.channels', [] );
+
+        if ( array_key_exists( 'ecommerce', $channels ) ) {
+            return;
+        }
+
+        $level = (string) $this->app['config']->get( 'artisanpack.ecommerce.log_level', 'debug' );
+
+        $channels['ecommerce'] = [
+            'driver' => 'single',
+            'path'   => storage_path( 'logs/ecommerce.log' ),
+            'level'  => $level,
+            'tap'    => [ EcommerceLogFormatter::class ],
+            'bubble' => true,
+        ];
+
+        $this->app['config']->set( 'logging.channels', $channels );
+    }
+
+    /**
+     * Aliases {@see RequestIdMiddleware} so route classes can attach it
+     * with `->middleware('ecommerce.request-id')`. The middleware
+     * threads a correlation ID through log context + outbound webhook
+     * headers + gateway idempotency keys. Engine plan §16.3.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerRequestIdMiddleware(): void
+    {
+        /** @var Router $router */
+        $router = $this->app->make( Router::class );
+
+        $router->aliasMiddleware( 'ecommerce.request-id', RequestIdMiddleware::class );
     }
 
     /**
