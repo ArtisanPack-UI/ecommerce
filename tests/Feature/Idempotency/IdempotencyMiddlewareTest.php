@@ -121,6 +121,77 @@ it( 'returns 409 when an in-flight lock does not release inside wait_ms', functi
     $response->assertStatus( 409 );
 } );
 
+it( 'rejects Idempotency-Key values longer than the storage column with 400 problem+json', function (): void {
+    $tooLong = str_repeat( 'x', IdempotencyMiddleware::MAX_KEY_LENGTH + 1 );
+
+    $response = $this->withHeader( 'Idempotency-Key', $tooLong )
+        ->postJson( '/_test/idempotent-echo', [ 'quantity' => 1 ] );
+
+    $response->assertStatus( 400 );
+    expect( $response->headers->get( 'Content-Type' ) )
+        ->toStartWith( 'application/problem+json' );
+    expect( $response->json( 'type' ) )->toContain( 'oversized-idempotency-key' );
+
+    expect( IdempotencyRecord::query()->count() )->toBe( 0 );
+} );
+
+it( 'hashes raw request bodies so distinct text/plain payloads do not collide', function (): void {
+    Route::middleware( IdempotencyMiddleware::class )->post(
+        '/_test/idempotent-raw',
+        function () {
+            return response()->json( [ 'nonce' => uniqid( 'r_', true ) ], 201 );
+        },
+    )->name( 'test.idempotent.raw' );
+
+    $first = $this->call(
+        'POST',
+        '/_test/idempotent-raw',
+        [], [], [],
+        [ 'CONTENT_TYPE' => 'text/plain', 'HTTP_IDEMPOTENCY_KEY' => 'key-raw' ],
+        'first-body',
+    );
+    $first->assertStatus( 201 );
+
+    // Same key + different raw body must NOT replay — it must 409.
+    $second = $this->call(
+        'POST',
+        '/_test/idempotent-raw',
+        [], [], [],
+        [ 'CONTENT_TYPE' => 'text/plain', 'HTTP_IDEMPOTENCY_KEY' => 'key-raw' ],
+        'second-body',
+    );
+    $second->assertStatus( 409 );
+} );
+
+it( 'hashes uploaded file contents so distinct uploads under the same field do not collide', function (): void {
+    Route::middleware( IdempotencyMiddleware::class )->post(
+        '/_test/idempotent-upload',
+        function () {
+            return response()->json( [ 'nonce' => uniqid( 'u_', true ) ], 201 );
+        },
+    )->name( 'test.idempotent.upload' );
+
+    $fileA = Illuminate\Http\UploadedFile::fake()->createWithContent( 'a.txt', 'aaa' );
+    $fileB = Illuminate\Http\UploadedFile::fake()->createWithContent( 'a.txt', 'bbb' );
+
+    $this->call(
+        'POST',
+        '/_test/idempotent-upload',
+        [], [],
+        [ 'attachment' => $fileA ],
+        [ 'HTTP_IDEMPOTENCY_KEY' => 'key-upload' ],
+    )->assertStatus( 201 );
+
+    $conflict = $this->call(
+        'POST',
+        '/_test/idempotent-upload',
+        [], [],
+        [ 'attachment' => $fileB ],
+        [ 'HTTP_IDEMPOTENCY_KEY' => 'key-upload' ],
+    );
+    $conflict->assertStatus( 409 );
+} );
+
 it( 'does not crash when the authenticated user lacks Sanctum HasApiTokens', function (): void {
     // A User model that has no `currentAccessToken()` method must fall back
     // to `user:{id}` scope, not fatal with BadMethodCallException.

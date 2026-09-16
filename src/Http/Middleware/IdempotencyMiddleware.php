@@ -35,6 +35,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use JsonException;
+use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -61,6 +62,16 @@ class IdempotencyMiddleware
     public const PROBLEM_CONTENT_TYPE = 'application/problem+json';
 
     /**
+     * Maximum allowed length of the `Idempotency-Key` header value. Matches
+     * the `idempotency_records.idempotency_key` VARCHAR(255) column so a
+     * too-long key is rejected before it can trigger a strict-mode insert
+     * error.
+     *
+     * @since 1.0.0
+     */
+    public const MAX_KEY_LENGTH = 255;
+
+    /**
      * Runs the incoming request through the idempotency machinery.
      *
      * @since 1.0.0
@@ -75,6 +86,9 @@ class IdempotencyMiddleware
         $key = trim( (string) $request->header( self::HEADER, '' ) );
         if ( '' === $key ) {
             return $this->missingHeaderResponse( $request );
+        }
+        if ( strlen( $key ) > self::MAX_KEY_LENGTH ) {
+            return $this->oversizedKeyResponse( $request );
         }
 
         $actorScope  = $this->resolveActorScope( $request );
@@ -218,10 +232,26 @@ class IdempotencyMiddleware
      */
     protected function hashRequest( Request $request ): string
     {
+        // Split scalar/array input from uploaded files so files hash by
+        // content, not by their empty json_encode() serialization.
+        $files = $this->canonicalizeFiles( $request->allFiles() );
+        $body  = $this->canonicalize( $this->stripUploadedFiles( $request->all() ) );
+
+        // For content types Laravel doesn't parse (text/plain,
+        // application/octet-stream, ...) `all()` returns []. Fall back
+        // to the raw body hash so two distinct raw payloads never
+        // collide. When parsed body is present, keep it out of the
+        // payload — including it would defeat key-order canonicalization
+        // for equivalent JSON documents that happen to serialize
+        // differently.
         $payload = [
-            'body'  => $this->canonicalize( $request->all() ),
+            'body'  => $body,
             'query' => $this->canonicalize( $request->query() ),
+            'files' => $files,
         ];
+        if ( [] === $body && [] === $files ) {
+            $payload['raw'] = hash( 'sha256', (string) $request->getContent() );
+        }
 
         try {
             $encoded = json_encode(
@@ -229,10 +259,10 @@ class IdempotencyMiddleware
                 JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
             );
         } catch ( JsonException $e ) {
-            // Payload contains bytes that can't be canonicalized; hash the
-            // raw request body so encode-failing requests still get a
-            // distinct, content-derived key.
-            $encoded = 'raw:' . $request->getContent();
+            // Canonicalized payload still contained unencodable bytes;
+            // fall back to the raw-content hash so the request is at
+            // least distinguishable from other raw payloads.
+            $encoded = 'raw:' . hash( 'sha256', (string) $request->getContent() );
         }
 
         return hash( 'sha256', $encoded );
@@ -259,6 +289,98 @@ class IdempotencyMiddleware
         }
 
         return $value;
+    }
+
+    /**
+     * Recursively drops UploadedFile instances from the parsed input array
+     * so the body branch of the hash payload contains only scalar data.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<mixed>  $input
+     *
+     * @return array<mixed>
+     */
+    protected function stripUploadedFiles( array $input ): array
+    {
+        $clean = [];
+        foreach ( $input as $k => $v ) {
+            if ( $v instanceof UploadedFile ) {
+                continue;
+            }
+            if ( is_array( $v ) ) {
+                $stripped = $this->stripUploadedFiles( $v );
+                if ( [] === $stripped && $this->arrayContainsOnlyFiles( $v ) ) {
+                    continue;
+                }
+                $clean[ $k ] = $stripped;
+                continue;
+            }
+            $clean[ $k ] = $v;
+        }
+        return $clean;
+    }
+
+    /**
+     * Determines whether every leaf inside a nested array is an
+     * UploadedFile — used to drop `photos => [file, file]` cleanly from
+     * the body branch.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<mixed>  $input
+     *
+     * @return bool
+     */
+    protected function arrayContainsOnlyFiles( array $input ): bool
+    {
+        foreach ( $input as $v ) {
+            if ( $v instanceof UploadedFile ) {
+                continue;
+            }
+            if ( is_array( $v ) && $this->arrayContainsOnlyFiles( $v ) ) {
+                continue;
+            }
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Turns an `allFiles()` tree into a stable, content-hashed structure.
+     * Each UploadedFile is replaced with `{name, mime, size, sha256}` so
+     * two different uploads never hash the same.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<mixed>  $files
+     *
+     * @return array<mixed>
+     */
+    protected function canonicalizeFiles( array $files ): array
+    {
+        $out = [];
+        foreach ( $files as $k => $v ) {
+            if ( $v instanceof UploadedFile ) {
+                $path      = $v->getRealPath();
+                $out[ $k ] = [
+                    'name'   => $v->getClientOriginalName(),
+                    'mime'   => $v->getClientMimeType(),
+                    'size'   => $v->getSize(),
+                    'sha256' => ( false !== $path && is_readable( $path ) )
+                        ? hash_file( 'sha256', $path )
+                        : null,
+                ];
+                continue;
+            }
+            if ( is_array( $v ) ) {
+                $out[ $k ] = $this->canonicalizeFiles( $v );
+                continue;
+            }
+            $out[ $k ] = $v;
+        }
+        ksort( $out );
+        return $out;
     }
 
     /**
@@ -403,6 +525,30 @@ class IdempotencyMiddleware
             'missing-idempotency-key',
             'Idempotency-Key header is required',
             'This endpoint requires an Idempotency-Key request header.',
+            $request,
+        );
+    }
+
+    /**
+     * Builds the 400 `problem+json` for an Idempotency-Key value that
+     * exceeds the storage column length.
+     *
+     * @since 1.0.0
+     *
+     * @param  Request  $request
+     *
+     * @return JsonResponse
+     */
+    protected function oversizedKeyResponse( Request $request ): JsonResponse
+    {
+        return $this->problem(
+            400,
+            'oversized-idempotency-key',
+            'Idempotency-Key is too long',
+            sprintf(
+                'Idempotency-Key must be %d characters or fewer.',
+                self::MAX_KEY_LENGTH,
+            ),
             $request,
         );
     }
