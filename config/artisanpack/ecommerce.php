@@ -175,6 +175,76 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Rate limits
+    |--------------------------------------------------------------------------
+    |
+    | Named rate-limit policies registered against Laravel's `RateLimiter`
+    | facade in `EcommerceServiceProvider::registerRateLimiters()`. Each
+    | policy maps to one or more `Limit` objects; compound policies (e.g.
+    | `checkout.finalize`) have separate per-IP and per-subject buckets.
+    |
+    | Store owners override the shipped defaults per policy without
+    | overwriting the whole map — any key left absent falls back to the
+    | value baked in below. Values are always in requests per window; the
+    | window (per-minute vs. per-hour) is fixed by the engine spec §11.3.
+    |
+    | `problem_base_url` — Base URL used to build problem+json `type` URIs
+    |                      when a caller exceeds their allowance.
+    |
+    */
+
+    'rate_limits' => [
+
+        'catalog.read' => [
+            'per_ip' => (int) env( 'ECOMMERCE_RATE_CATALOG_READ_PER_IP', 300 ),
+        ],
+
+        'cart.mutate' => [
+            'per_cart' => (int) env( 'ECOMMERCE_RATE_CART_MUTATE_PER_CART', 60 ),
+        ],
+
+        'checkout.finalize' => [
+            'per_ip'   => (int) env( 'ECOMMERCE_RATE_CHECKOUT_FINALIZE_PER_IP', 6 ),
+            'per_cart' => (int) env( 'ECOMMERCE_RATE_CHECKOUT_FINALIZE_PER_CART', 12 ),
+        ],
+
+        'coupon.attempt' => [
+            'per_cart' => (int) env( 'ECOMMERCE_RATE_COUPON_ATTEMPT_PER_CART', 10 ),
+            'per_ip'   => (int) env( 'ECOMMERCE_RATE_COUPON_ATTEMPT_PER_IP', 30 ),
+        ],
+
+        'login' => [
+            'per_ip'    => (int) env( 'ECOMMERCE_RATE_LOGIN_PER_IP', 5 ),
+            'per_email' => (int) env( 'ECOMMERCE_RATE_LOGIN_PER_EMAIL', 20 ),
+        ],
+
+        'review.submit' => [
+            'per_customer' => (int) env( 'ECOMMERCE_RATE_REVIEW_SUBMIT_PER_CUSTOMER', 3 ),
+            'per_ip'       => (int) env( 'ECOMMERCE_RATE_REVIEW_SUBMIT_PER_IP', 10 ),
+        ],
+
+        'license.validate' => [
+            'per_license' => (int) env( 'ECOMMERCE_RATE_LICENSE_VALIDATE_PER_LICENSE', 60 ),
+            'per_ip'      => (int) env( 'ECOMMERCE_RATE_LICENSE_VALIDATE_PER_IP', 600 ),
+        ],
+
+        'webhook.inbound' => [
+            'per_provider' => (int) env( 'ECOMMERCE_RATE_WEBHOOK_INBOUND_PER_PROVIDER', 1_000 ),
+        ],
+
+        'admin.mutate' => [
+            'per_user' => (int) env( 'ECOMMERCE_RATE_ADMIN_MUTATE_PER_USER', 120 ),
+        ],
+
+        'problem_base_url' => env(
+            'ECOMMERCE_RATE_LIMIT_PROBLEM_BASE_URL',
+            'https://docs.artisanpack-ui.dev/ecommerce/problems',
+        ),
+
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Feature toggles
     |--------------------------------------------------------------------------
     */

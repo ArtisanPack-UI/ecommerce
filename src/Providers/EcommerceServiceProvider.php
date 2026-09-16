@@ -25,6 +25,7 @@ use ArtisanPackUI\Ecommerce\CurrencyRates\FrankfurterRateProvider;
 use ArtisanPackUI\Ecommerce\Ecommerce;
 use ArtisanPackUI\Ecommerce\Fulfillment\ProportionalByLineTotalStrategy;
 use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
+use ArtisanPackUI\Ecommerce\Http\Middleware\RateLimitEcommerce;
 use ArtisanPackUI\Ecommerce\Listeners\LinkCustomerOnUserVerified;
 use ArtisanPackUI\Ecommerce\ProductTypes\DigitalProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType;
@@ -32,6 +33,7 @@ use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\FulfillmentAllocationStrategyRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
+use ArtisanPackUI\Ecommerce\Support\RateLimitPolicyRegistrar;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Events\Dispatcher;
@@ -95,6 +97,8 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->loadMigrationsFrom( __DIR__ . '/../../database/migrations' );
 
         $this->registerIdempotencyMiddleware();
+        $this->registerRateLimitMiddleware();
+        $this->registerRateLimiters();
         $this->registerCoreProductTypes();
         $this->registerCoreCurrencyRateProviders();
         $this->registerCoreFulfillmentAllocationStrategies();
@@ -148,6 +152,36 @@ class EcommerceServiceProvider extends ServiceProvider
         $router = $this->app->make( Router::class );
 
         $router->aliasMiddleware( 'ecommerce.idempotency', IdempotencyMiddleware::class );
+    }
+
+    /**
+     * Aliases {@see RateLimitEcommerce} so routes can attach a named policy
+     * with `->middleware('ecommerce.rate-limit:ecommerce.catalog.read')`.
+     * Engine spec §11.3.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerRateLimitMiddleware(): void
+    {
+        /** @var Router $router */
+        $router = $this->app->make( Router::class );
+
+        $router->aliasMiddleware( 'ecommerce.rate-limit', RateLimitEcommerce::class );
+    }
+
+    /**
+     * Registers every named rate-limit policy from engine spec §11.3
+     * (parent plan §16.1) with Laravel's `RateLimiter` facade.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerRateLimiters(): void
+    {
+        RateLimitPolicyRegistrar::register();
     }
 
     /**
