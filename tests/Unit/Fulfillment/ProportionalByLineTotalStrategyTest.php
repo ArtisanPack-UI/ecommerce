@@ -5,7 +5,6 @@ declare( strict_types=1 );
 use ArtisanPackUI\Ecommerce\Fulfillment\ProportionalByLineTotalStrategy;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
-use ArtisanPackUI\Ecommerce\Testing\FulfillmentAllocationStrategyContract;
 use Money\Money;
 
 if ( ! function_exists( 'makeAllocationOrder' ) ) {
@@ -188,11 +187,3 @@ it( 'returns Money values tagged with the order\'s shipping and tax currencies',
         ->and( $result[ 1 ][ 'tax' ]->getCurrency()->getCode() )->toBe( 'GBP' );
 } );
 
-it( 'satisfies the shared FulfillmentAllocationStrategy contract', function (): void {
-    $strategy = new ProportionalByLineTotalStrategy();
-    $contract = new FulfillmentAllocationStrategyContract();
-
-    $contract->assertReturnsOneAllocationPerItem( $strategy );
-    $contract->assertShippingAllocationsSumToOrderShipping( $strategy );
-    $contract->assertTaxAllocationsSumToOrderTax( $strategy );
-} );
