@@ -140,6 +140,41 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Idempotency
+    |--------------------------------------------------------------------------
+    |
+    | `default_ttl_hours`  — Baseline TTL applied to a stored idempotency
+    |                        record (engine spec §7.5 / §11.2, default 24h).
+    |
+    | `ttls`               — Per-endpoint overrides, keyed by the resolved
+    |                        `endpoint_key` (route name or normalized
+    |                        `{method}:{path}`). Value is TTL in hours.
+    |
+    | `wait_ms`            — Maximum time (milliseconds) the middleware will
+    |                        wait on an in-flight duplicate before returning
+    |                        409 (engine spec §11.2, default 8000ms).
+    |
+    | `poll_ms`            — Interval (milliseconds) between in-flight-lock
+    |                        poll attempts while waiting for `wait_ms`.
+    |
+    | `problem_base_url`   — Base URL used to construct problem+json `type`
+    |                        URIs for missing-header / conflict responses.
+    |
+    */
+
+    'idempotency' => [
+        'default_ttl_hours' => (int) env( 'ECOMMERCE_IDEMPOTENCY_TTL_HOURS', 24 ),
+        'ttls'              => [],
+        'wait_ms'           => (int) env( 'ECOMMERCE_IDEMPOTENCY_WAIT_MS', 8_000 ),
+        'poll_ms'           => (int) env( 'ECOMMERCE_IDEMPOTENCY_POLL_MS', 100 ),
+        'problem_base_url'  => env(
+            'ECOMMERCE_PROBLEM_BASE_URL',
+            'https://docs.artisanpack-ui.dev/ecommerce/problems',
+        ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Feature toggles
     |--------------------------------------------------------------------------
     */

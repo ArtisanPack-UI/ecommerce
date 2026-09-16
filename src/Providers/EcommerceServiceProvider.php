@@ -18,11 +18,13 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Providers;
 
 use ArtisanPackUI\Ecommerce\Console\Commands\AuditOrderStatusCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\PruneIdempotencyRecordsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\ReleaseExpiredReservationsCommand;
 use ArtisanPackUI\Ecommerce\CurrencyRates\ConfigRateProvider;
 use ArtisanPackUI\Ecommerce\CurrencyRates\FrankfurterRateProvider;
 use ArtisanPackUI\Ecommerce\Ecommerce;
 use ArtisanPackUI\Ecommerce\Fulfillment\ProportionalByLineTotalStrategy;
+use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
 use ArtisanPackUI\Ecommerce\Listeners\LinkCustomerOnUserVerified;
 use ArtisanPackUI\Ecommerce\ProductTypes\DigitalProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType;
@@ -33,6 +35,7 @@ use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Routing\Router;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -91,6 +94,7 @@ class EcommerceServiceProvider extends ServiceProvider
     {
         $this->loadMigrationsFrom( __DIR__ . '/../../database/migrations' );
 
+        $this->registerIdempotencyMiddleware();
         $this->registerCoreProductTypes();
         $this->registerCoreCurrencyRateProviders();
         $this->registerCoreFulfillmentAllocationStrategies();
@@ -107,6 +111,7 @@ class EcommerceServiceProvider extends ServiceProvider
 
             $this->commands( [
                 AuditOrderStatusCommand::class,
+                PruneIdempotencyRecordsCommand::class,
                 ReleaseExpiredReservationsCommand::class,
             ] );
 
@@ -121,8 +126,28 @@ class EcommerceServiceProvider extends ServiceProvider
                     ->dailyAt( '02:15' )
                     ->withoutOverlapping()
                     ->runInBackground();
+                $schedule->command( 'ecommerce:prune-idempotency-records' )
+                    ->hourly()
+                    ->withoutOverlapping()
+                    ->runInBackground();
             } );
         }
+    }
+
+    /**
+     * Aliases {@see IdempotencyMiddleware} so route classes can attach it
+     * with `->middleware('ecommerce.idempotency')`. Engine spec §11.2.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerIdempotencyMiddleware(): void
+    {
+        /** @var Router $router */
+        $router = $this->app->make( Router::class );
+
+        $router->aliasMiddleware( 'ecommerce.idempotency', IdempotencyMiddleware::class );
     }
 
     /**
