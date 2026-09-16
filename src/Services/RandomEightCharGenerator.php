@@ -23,6 +23,7 @@ namespace ArtisanPackUI\Ecommerce\Services;
 
 use ArtisanPackUI\Ecommerce\Contracts\OrderNumberGenerator;
 use ArtisanPackUI\Ecommerce\Models\Order;
+use Closure;
 use RuntimeException;
 
 /**
@@ -60,6 +61,29 @@ class RandomEightCharGenerator implements OrderNumberGenerator
     private const MAX_ATTEMPTS = 16;
 
     /**
+     * Optional candidate producer used by the contract test to inject a
+     * deterministic candidate stream. Production callers always leave this
+     * `null` so {@see self::randomString()} runs.
+     *
+     * @since 1.0.0
+     *
+     * @var Closure(): string|null
+     */
+    private ?Closure $candidateFactory;
+
+    /**
+     * @since 1.0.0
+     *
+     * @param  (Closure(): string)|null  $candidateFactory  Test-only hook. When `null`,
+     *                                                     candidates are drawn from
+     *                                                     {@see self::randomString()}.
+     */
+    public function __construct( ?Closure $candidateFactory = null )
+    {
+        $this->candidateFactory = $candidateFactory;
+    }
+
+    /**
      * @since 1.0.0
      *
      * @param  Order  $order  Order being placed.
@@ -69,7 +93,7 @@ class RandomEightCharGenerator implements OrderNumberGenerator
     public function generate( Order $order ): string
     {
         for ( $attempt = 0; $attempt < self::MAX_ATTEMPTS; $attempt++ ) {
-            $candidate = $this->randomString();
+            $candidate = $this->nextCandidate();
 
             if ( ! Order::query()->where( 'order_number', $candidate )->exists() ) {
                 return $candidate;
@@ -77,6 +101,24 @@ class RandomEightCharGenerator implements OrderNumberGenerator
         }
 
         throw new RuntimeException( 'Unable to generate a unique order number after ' . self::MAX_ATTEMPTS . ' attempts.' );
+    }
+
+    /**
+     * Returns the next candidate — either from the injected factory (used by
+     * the contract test to prove DB-checking behaviour) or from the default
+     * CSPRNG-backed alphabet draw.
+     *
+     * @since 1.0.0
+     *
+     * @return string
+     */
+    private function nextCandidate(): string
+    {
+        if ( null !== $this->candidateFactory ) {
+            return ( $this->candidateFactory )();
+        }
+
+        return $this->randomString();
     }
 
     /**

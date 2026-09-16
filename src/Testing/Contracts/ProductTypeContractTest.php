@@ -84,7 +84,7 @@ abstract class ProductTypeContractTest extends TestCase
      *
      * @return void
      */
-    public function test_validate_cart_options_returns_sanitized_array(): void
+    public function test_validate_cart_options_returns_expected_sanitized_payload(): void
     {
         $type    = $this->productType();
         $product = $this->makeProduct();
@@ -92,6 +92,11 @@ abstract class ProductTypeContractTest extends TestCase
         $sanitized = $type->validateCartOptions( $product, $this->sampleCartOptions() );
 
         $this->assertIsArray( $sanitized, 'ProductType::validateCartOptions() must return an array.' );
+        $this->assertSame(
+            $this->sampleSanitizedCartOptions(),
+            $sanitized,
+            'ProductType::validateCartOptions() must strip disallowed keys and return exactly the payload sampleSanitizedCartOptions() declares.',
+        );
     }
 
     /**
@@ -171,13 +176,27 @@ abstract class ProductTypeContractTest extends TestCase
     abstract protected function makeProduct(): Product;
 
     /**
-     * Cart-line options the product type considers valid.
+     * Raw cart-line options handed to the product type. May include keys
+     * the type is expected to strip so the sanitization contract is
+     * actually exercised.
      *
      * @since 1.0.0
      *
      * @return array<string, mixed>
      */
     abstract protected function sampleCartOptions(): array;
+
+    /**
+     * Exact sanitized payload the product type must return for
+     * {@see self::sampleCartOptions()}. The shared contract test asserts
+     * strict equality against this value, so subclasses must declare every
+     * key the type keeps (and nothing more).
+     *
+     * @since 1.0.0
+     *
+     * @return array<string, mixed>
+     */
+    abstract protected function sampleSanitizedCartOptions(): array;
 
     /**
      * Currency the product type is priced in for these fixtures.

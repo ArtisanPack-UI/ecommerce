@@ -32,11 +32,14 @@ use ArtisanPackUI\Ecommerce\Models\Order;
 interface OrderNumberGenerator
 {
     /**
-     * Generates a unique order number.
+     * Generates an order number for the given order.
      *
-     * Called inside the order-placement transaction; implementations MUST
-     * be collision-safe under concurrent placement. Returning a duplicate
-     * is fatal (placement retries once, then errors).
+     * Implementations SHOULD avoid values already persisted on the
+     * `orders` table so the common case does not round-trip through
+     * placement retry. `generate()` does NOT need to atomically reserve
+     * the returned value — concurrent collisions are contained by the
+     * unique index on `orders.order_number` plus placement's one-shot
+     * retry (returning a duplicate a second time is fatal).
      *
      * @since 1.0.0
      *

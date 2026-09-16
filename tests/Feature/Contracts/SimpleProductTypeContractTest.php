@@ -52,6 +52,18 @@ final class SimpleProductTypeContractTest extends ProductTypeContractTest
      */
     protected function sampleCartOptions(): array
     {
+        return [
+            'stowaway_key' => 'ignored',
+        ];
+    }
+
+    /**
+     * @since 1.0.0
+     *
+     * @return array<string, mixed>
+     */
+    protected function sampleSanitizedCartOptions(): array
+    {
         return [];
     }
 

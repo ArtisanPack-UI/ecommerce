@@ -18,7 +18,10 @@ Extension points a satellite must provide:
 - `productType(): ProductType` — the concrete product type under test.
 - `makeProduct(): Product` — a persisted product the type accepts (with a
   matching price row for `sampleCurrency()` / `sampleUnitPriceMinor()`).
-- `sampleCartOptions(): array` — a valid cart-line payload.
+- `sampleCartOptions(): array` — raw options handed to `validateCartOptions()`
+  (include stowaway keys the type is expected to strip).
+- `sampleSanitizedCartOptions(): array` — exact payload the type must return
+  after sanitizing `sampleCartOptions()`.
 - `sampleCurrency(): string` — currency the fixtures are priced in.
 - `sampleUnitPriceMinor(): int` — expected unit price in minor units.
 
@@ -27,7 +30,8 @@ Invariants verified:
 - Registry key is a non-empty, stable string.
 - Label is a non-empty string.
 - `icon()` returns `string` or `null`.
-- `validateCartOptions()` returns an array (sanitised options).
+- `validateCartOptions()` returns exactly the payload declared by
+  `sampleSanitizedCartOptions()` — stowaway keys are stripped.
 - `priceLine()` returns a `Money` value in the requested currency and
   multiplies unit price by quantity.
 - `buildOrderSnapshot()` records the type's registry key under the `type`
@@ -74,9 +78,14 @@ Extension points a satellite must provide:
 Invariants verified:
 
 - `generate()` returns a non-empty string.
-- 100 sequential calls return 100 distinct values.
-- After seeding an existing row with a previously-generated number, 25
-  further calls never return the seeded number (collision-safe).
+- 100 sequential calls return 100 distinct values (statistical uniqueness).
+- **Optional, opt-in via `deterministicCollisionSeam()`**: when a subclass
+  supplies a generator configured to try a specific `persisted` candidate
+  first then a `free` candidate, the generator returns `free` after
+  `persisted` has been seeded on the `orders` table — proving `generate()`
+  actually reads existing rows before returning. Concurrent-collision
+  handling is NOT covered by the contract test: that is the DB unique
+  index's job (plus placement's one-shot retry).
 
 Reference implementation:
 [`RandomEightCharGenerator`](../src/Services/RandomEightCharGenerator.php) —
@@ -113,7 +122,9 @@ When a Phase 2+ contract lands, add:
    if it needs a booted app / DB). Declare abstract extension points for
    whatever the satellite must supply, then assert the invariants the
    engine relies on.
-2. Reference implementation in `src/` — must extend the abstract test suite
-   from `tests/Feature/Contracts/` (or `tests/Unit/Contracts/`).
+2. Reference implementation in `src/`, plus a concrete test under
+   `tests/Feature/Contracts/` or `tests/Unit/Contracts/` that extends the
+   abstract contract test suite and returns the reference implementation
+   from the required accessor.
 3. A new subsection in this file linking to the contract, the invariants,
    and the reference implementation.

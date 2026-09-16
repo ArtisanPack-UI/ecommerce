@@ -80,20 +80,47 @@ abstract class OrderNumberGeneratorContractTest extends TestCase
      *
      * @return void
      */
-    public function test_generate_avoids_collision_with_existing_order_numbers(): void
+    public function test_generate_avoids_collision_when_seam_is_provided(): void
     {
-        $generator = $this->generator();
-        $existing  = $generator->generate( new Order() );
+        $seam = $this->deterministicCollisionSeam();
 
-        Order::factory()->create( [ 'order_number' => $existing ] );
-
-        for ( $i = 0; $i < 25; $i++ ) {
-            $this->assertNotSame(
-                $existing,
-                $generator->generate( new Order() ),
-                'Generator must not return an order number that already exists in the orders table.',
+        if ( null === $seam ) {
+            $this->markTestSkipped(
+                'This generator does not expose a deterministic collision seam; the "SHOULD avoid persisted values" invariant is exercised statistically by test_generate_returns_unique_values_across_repeated_calls(). See CartStorage / OrderNumberGenerator concurrent-collision handling: the DB unique index on orders.order_number plus placement retry are the source of truth.',
             );
         }
+
+        Order::factory()->create( [ 'order_number' => $seam[ 'persisted' ] ] );
+
+        $this->assertSame(
+            $seam[ 'free' ],
+            $seam[ 'generator' ]->generate( new Order() ),
+            'When the persisted candidate is seeded first, the generator must return the free candidate — proving it read the persisted set.',
+        );
+    }
+
+    /**
+     * Optional deterministic collision seam for satellite generators that can
+     * be configured to emit specific candidates in order.
+     *
+     * Return `null` to skip {@see self::test_generate_avoids_collision_when_seam_is_provided()}.
+     * Otherwise return an array shaped as:
+     *
+     * ```php
+     * [
+     *     'generator' => OrderNumberGenerator, // Configured to try 'persisted' first, then 'free'.
+     *     'persisted' => string,               // Number that will be seeded on the orders table.
+     *     'free'      => string,               // Number the generator MUST return after skipping 'persisted'.
+     * ]
+     * ```
+     *
+     * @since 1.0.0
+     *
+     * @return array{generator: OrderNumberGenerator, persisted: string, free: string}|null
+     */
+    protected function deterministicCollisionSeam(): ?array
+    {
+        return null;
     }
 
     /**
