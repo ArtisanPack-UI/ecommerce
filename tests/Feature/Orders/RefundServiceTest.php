@@ -6,6 +6,7 @@ use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
 use ArtisanPackUI\Ecommerce\Events\OrderRefunded;
 use ArtisanPackUI\Ecommerce\Events\PaymentRefunded;
 use ArtisanPackUI\Ecommerce\Exceptions\RefundNotAllowedException;
+use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\InventoryItem;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
@@ -15,8 +16,12 @@ use ArtisanPackUI\Ecommerce\Models\Refund;
 use ArtisanPackUI\Ecommerce\Models\RefundItem;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\Services\RefundService;
+use ArtisanPackUI\Ecommerce\ValueObjects\PaymentResult;
+use ArtisanPackUI\Ecommerce\ValueObjects\PaymentSession;
 use ArtisanPackUI\Ecommerce\ValueObjects\RefundResult;
+use ArtisanPackUI\Ecommerce\ValueObjects\WebhookResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Money\Money;
 
@@ -44,6 +49,11 @@ final class RefundServiceTestFakeGateway implements PaymentGateway
         return $this->keyName;
     }
 
+    public function label(): string
+    {
+        return 'Fake gateway';
+    }
+
     public function supportsRefunds(): bool
     {
         return $this->supports;
@@ -52,6 +62,34 @@ final class RefundServiceTestFakeGateway implements PaymentGateway
     public function supportsPartialRefunds(): bool
     {
         return $this->supportsPartial;
+    }
+
+    public function supportsSavedInstruments(): bool
+    {
+        return false;
+    }
+
+    public function createPaymentSession( Cart $cart, array $context = [] ): PaymentSession
+    {
+        return new PaymentSession(
+            gatewayKey: $this->keyName,
+            reference: 'ps_fake_' . $cart->getKey(),
+            amount: Money::USD( 0 ),
+        );
+    }
+
+    public function capturePayment( Order $order, PaymentSession $session ): PaymentResult
+    {
+        return PaymentResult::success( $session->amount, 'pi_fake_captured' );
+    }
+
+    public function voidPendingPayment( Order $order ): void
+    {
+    }
+
+    public function handleWebhook( Request $request ): WebhookResult
+    {
+        return WebhookResult::unverified( 'not_implemented' );
     }
 
     public function refund( Order $order, Money $amount, ?string $reason = null ): RefundResult

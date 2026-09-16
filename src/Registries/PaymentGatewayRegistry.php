@@ -198,4 +198,49 @@ class PaymentGatewayRegistry
     {
         return array_keys( $this->entries );
     }
+
+    /**
+     * Resolves the {@see PaymentGateway} registered under `$key`, or `null`
+     * when nothing is registered under it.
+     *
+     * Preferred lookup at call sites that want to fall through to a null
+     * check rather than catch a {@see RuntimeException}.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $key  Registry key.
+     *
+     * @return PaymentGateway|null
+     */
+    public function find( string $key ): ?PaymentGateway
+    {
+        if ( ! isset( $this->entries[ $key ] ) ) {
+            return null;
+        }
+
+        return $this->get( $key );
+    }
+
+    /**
+     * Returns every registered gateway, keyed by registry key, in
+     * registration order.
+     *
+     * Iterating the return value resolves every registered entry — call
+     * sites that only need one gateway should prefer {@see self::find()}
+     * or {@see self::get()}.
+     *
+     * @since 1.0.0
+     *
+     * @return array<string, PaymentGateway>
+     */
+    public function all(): array
+    {
+        $gateways = [];
+
+        foreach ( array_keys( $this->entries ) as $key ) {
+            $gateways[ $key ] = $this->get( $key );
+        }
+
+        return $gateways;
+    }
 }
