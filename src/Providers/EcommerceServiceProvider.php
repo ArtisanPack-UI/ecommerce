@@ -20,6 +20,8 @@ namespace ArtisanPackUI\Ecommerce\Providers;
 use ArtisanPackUI\Ecommerce\Console\Commands\AuditOrderStatusCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\PruneIdempotencyRecordsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\ReleaseExpiredReservationsCommand;
+use ArtisanPackUI\Ecommerce\Contracts\CartStorage;
+use ArtisanPackUI\Ecommerce\Contracts\OrderNumberGenerator;
 use ArtisanPackUI\Ecommerce\CurrencyRates\ConfigRateProvider;
 use ArtisanPackUI\Ecommerce\CurrencyRates\FrankfurterRateProvider;
 use ArtisanPackUI\Ecommerce\Ecommerce;
@@ -35,6 +37,8 @@ use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\FulfillmentAllocationStrategyRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
+use ArtisanPackUI\Ecommerce\Services\DatabaseCartStorage;
+use ArtisanPackUI\Ecommerce\Services\RandomEightCharGenerator;
 use ArtisanPackUI\Ecommerce\Support\RateLimitPolicyRegistrar;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Console\Scheduling\Schedule;
@@ -87,6 +91,9 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->app->singleton( FulfillmentAllocationStrategyRegistry::class, function ( $app ): FulfillmentAllocationStrategyRegistry {
             return new FulfillmentAllocationStrategyRegistry( $app );
         } );
+
+        $this->app->singleton( CartStorage::class, DatabaseCartStorage::class );
+        $this->app->singleton( OrderNumberGenerator::class, RandomEightCharGenerator::class );
     }
 
     /**
