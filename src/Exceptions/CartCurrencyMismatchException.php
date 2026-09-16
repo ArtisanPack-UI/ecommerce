@@ -23,7 +23,6 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Exceptions;
 
 use ArtisanPackUI\Ecommerce\Models\Cart;
-use RuntimeException;
 
 /**
  * @package    ArtisanPack_UI
@@ -31,7 +30,7 @@ use RuntimeException;
  *
  * @since      1.0.0
  */
-class CartCurrencyMismatchException extends RuntimeException
+class CartCurrencyMismatchException extends EcommerceException
 {
     /**
      * @since 1.0.0

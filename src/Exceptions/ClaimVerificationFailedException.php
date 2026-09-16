@@ -19,7 +19,6 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Exceptions;
 
 use ArtisanPackUI\Ecommerce\Models\Customer;
-use RuntimeException;
 
 /**
  * @package    ArtisanPack_UI
@@ -27,7 +26,7 @@ use RuntimeException;
  *
  * @since      1.0.0
  */
-class ClaimVerificationFailedException extends RuntimeException
+class ClaimVerificationFailedException extends EcommerceException
 {
     /**
      * @since 1.0.0

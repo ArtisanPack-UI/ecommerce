@@ -22,15 +22,13 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Exceptions;
 
-use RuntimeException;
-
 /**
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
  *
  * @since      1.0.0
  */
-class IncompatibleBoardSubstatusException extends RuntimeException
+class IncompatibleBoardSubstatusException extends EcommerceException
 {
     /**
      * The order's current `system_status`.

@@ -20,7 +20,6 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Exceptions;
 
 use ArtisanPackUI\Ecommerce\Models\InventoryItem;
-use RuntimeException;
 
 /**
  * @package    ArtisanPack_UI
@@ -28,7 +27,7 @@ use RuntimeException;
  *
  * @since      1.0.0
  */
-class InsufficientStockException extends RuntimeException
+class InsufficientStockException extends EcommerceException
 {
     /**
      * @since 1.0.0
