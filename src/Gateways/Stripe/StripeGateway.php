@@ -35,6 +35,7 @@ use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
 use ArtisanPackUI\Ecommerce\Exceptions\PaymentCurrencyMismatchException;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\Order;
+use ArtisanPackUI\Ecommerce\Models\Refund;
 use ArtisanPackUI\Ecommerce\ValueObjects\PaymentResult;
 use ArtisanPackUI\Ecommerce\ValueObjects\PaymentSession;
 use ArtisanPackUI\Ecommerce\ValueObjects\RefundResult;
@@ -165,11 +166,24 @@ class StripeGateway implements PaymentGateway
         $currency = strtoupper( (string) ( $cart->getAttribute( 'currency' ) ?: $cart->getAttribute( 'total_currency' ) ?: 'USD' ) );
         $amount   = new Money( (int) ( $cart->getAttribute( 'total_amount' ) ?? 0 ), new Currency( $currency ) );
 
+        $returnUrl = isset( $context[ 'return_url' ] ) ? (string) $context[ 'return_url' ] : '';
+
+        // Stripe requires a `return_url` when confirming a PaymentIntent that
+        // accepts redirect-based payment methods (iDEAL, Klarna, Bancontact, …).
+        // Callers that cannot supply one must not have their checkout fail at
+        // confirmation — filter redirect-based methods out of automatic payment
+        // methods when no return URL is available. Engine spec §4.2.
+        $automaticPaymentMethods = [ 'enabled' => true ];
+
+        if ( '' === $returnUrl ) {
+            $automaticPaymentMethods[ 'allow_redirects' ] = 'never';
+        }
+
         $params = [
-            'amount'                      => $this->toStripeAmount( $amount ),
-            'currency'                    => strtolower( $currency ),
-            'automatic_payment_methods'   => [ 'enabled' => true ],
-            'metadata'                    => array_merge(
+            'amount'                    => $this->toStripeAmount( $amount ),
+            'currency'                  => strtolower( $currency ),
+            'automatic_payment_methods' => $automaticPaymentMethods,
+            'metadata'                  => array_merge(
                 [ 'ap_ec_cart_id' => (string) $cart->getKey() ],
                 (array) ( $context[ 'metadata' ] ?? [] ),
             ),
@@ -183,8 +197,8 @@ class StripeGateway implements PaymentGateway
             $params[ 'setup_future_usage' ] = (string) $context[ 'setup_future_usage' ];
         }
 
-        if ( isset( $context[ 'return_url' ] ) ) {
-            $params[ 'return_url' ] = (string) $context[ 'return_url' ];
+        if ( '' !== $returnUrl ) {
+            $params[ 'return_url' ] = $returnUrl;
         }
 
         $captureMethod = (string) $this->config->get(
@@ -386,10 +400,25 @@ class StripeGateway implements PaymentGateway
             $params[ 'reason' ] = $mappedReason;
         }
 
+        // Derive a stable per-attempt idempotency key from the number of
+        // refund rows already recorded against the order. The RefundService
+        // ledger row is written AFTER the gateway call, so a retry of a
+        // failed attempt observes the same count and re-uses the same key —
+        // Stripe dedupes and never moves money twice. Once a refund
+        // succeeds and the ledger row is committed, the count advances and
+        // the next partial refund gets a fresh key. Engine spec §11.2.
+        $priorRefunds   = Refund::query()->where( 'order_id', $order->getKey() )->count();
+        $idempotencyKey = sprintf(
+            'ap-ec-refund-%s-%d-%s',
+            $reference,
+            $priorRefunds + 1,
+            $amount->getAmount(),
+        );
+
         try {
             $refund = $this->client()->refunds->create(
                 $params,
-                $this->requestOptions( [ 'idempotency_key' => 'ap-ec-refund-' . $reference . '-' . $amount->getAmount() . '-' . uniqid( '', true ) ] ),
+                $this->requestOptions( [ 'idempotency_key' => $idempotencyKey ] ),
             );
 
             if ( 'failed' === $refund->status || 'canceled' === $refund->status ) {
