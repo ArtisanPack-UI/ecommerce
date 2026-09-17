@@ -49,6 +49,7 @@ use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderTimelineEntry;
 use ArtisanPackUI\Ecommerce\Registries\FraudProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
+use ArtisanPackUI\Ecommerce\Services\Fraud\ChainFraudProvider;
 use ArtisanPackUI\Ecommerce\ValueObjects\Address;
 use ArtisanPackUI\Ecommerce\ValueObjects\Currency as CurrencyVO;
 use ArtisanPackUI\Ecommerce\ValueObjects\FraudDecision;
@@ -180,22 +181,40 @@ class PaymentOrchestrator
      */
     protected function resolveFraudProvider(): FraudProvider
     {
-        $key = trim( (string) $this->config->get( 'artisanpack.ecommerce.fraud.provider', '' ) );
+        $raw = trim( (string) $this->config->get( 'artisanpack.ecommerce.fraud.provider', '' ) );
 
-        if ( '' === $key ) {
+        if ( '' === $raw ) {
             throw new RuntimeException(
                 'No FraudProvider configured; set artisanpack.ecommerce.fraud.provider to a registered provider key.',
             );
         }
 
-        if ( ! $this->fraudProviders->has( $key ) ) {
-            throw new RuntimeException( sprintf(
-                'FraudProvider "%s" is configured but not registered.',
-                $key,
-            ) );
+        $keys = array_values( array_filter( array_map( 'trim', explode( ',', $raw ) ), static fn ( string $k ): bool => '' !== $k ) );
+
+        if ( [] === $keys ) {
+            throw new RuntimeException(
+                'artisanpack.ecommerce.fraud.provider is set but contains no usable provider keys.',
+            );
         }
 
-        return $this->fraudProviders->get( $key );
+        $providers = [];
+
+        foreach ( $keys as $key ) {
+            if ( ! $this->fraudProviders->has( $key ) ) {
+                throw new RuntimeException( sprintf(
+                    'FraudProvider "%s" is configured but not registered.',
+                    $key,
+                ) );
+            }
+
+            $providers[] = $this->fraudProviders->get( $key );
+        }
+
+        if ( 1 === count( $providers ) ) {
+            return $providers[ 0 ];
+        }
+
+        return new ChainFraudProvider( $providers );
     }
 
     /**

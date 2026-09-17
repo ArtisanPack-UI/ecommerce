@@ -41,6 +41,8 @@ use ArtisanPackUI\Ecommerce\Registries\FulfillmentAllocationStrategyRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
 use ArtisanPackUI\Ecommerce\Services\DatabaseCartStorage;
+use ArtisanPackUI\Ecommerce\Services\Fraud\AlwaysApproveFraudProvider;
+use ArtisanPackUI\Ecommerce\Services\Fraud\StripeRadarFraudProvider;
 use ArtisanPackUI\Ecommerce\Services\RandomEightCharGenerator;
 use ArtisanPackUI\Ecommerce\Support\RateLimitPolicyRegistrar;
 use Illuminate\Auth\Events\Verified;
@@ -122,6 +124,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->registerCoreCurrencyRateProviders();
         $this->registerCoreFulfillmentAllocationStrategies();
         $this->registerCorePaymentGateways();
+        $this->registerCoreFraudProviders();
         $this->registerStripeWebhookRoute();
         $this->registerCustomerListeners();
 
@@ -373,6 +376,48 @@ class EcommerceServiceProvider extends ServiceProvider
                 'supports_partial_refunds' => true,
             ],
         );
+    }
+
+    /**
+     * Registers the built-in fraud providers the engine ships with.
+     *
+     * `always-approve` is always registered — stores that don't want
+     * fraud gating still route through the assess step for uniform
+     * timeline entries and hook signals. `stripe-radar` is only
+     * registered when the Stripe gateway itself is enabled, since it
+     * depends on the same client factory. Satellites (Signifyd, Kount)
+     * register additional providers from their own service-provider
+     * `boot()` and can be chained via a comma-separated
+     * `artisanpack.ecommerce.fraud.provider`.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCoreFraudProviders(): void
+    {
+        /** @var FraudProviderRegistry $registry */
+        $registry = $this->app->make( FraudProviderRegistry::class );
+
+        $registry->register(
+            AlwaysApproveFraudProvider::KEY,
+            AlwaysApproveFraudProvider::class,
+            [ 'label' => __( 'Always approve (fraud gating disabled)' ) ],
+        );
+
+        if ( (bool) $this->app[ 'config' ]->get( 'artisanpack.ecommerce.gateways.stripe.enabled', false ) ) {
+            $this->app->bind( StripeRadarFraudProvider::class, function ( $app ): StripeRadarFraudProvider {
+                return new StripeRadarFraudProvider(
+                    static fn () => $app->make( \ArtisanPackUI\Ecommerce\Gateways\Stripe\StripeClientFactory::class )->make(),
+                );
+            } );
+
+            $registry->register(
+                StripeRadarFraudProvider::KEY,
+                StripeRadarFraudProvider::class,
+                [ 'label' => __( 'Stripe Radar' ) ],
+            );
+        }
     }
 
     /**

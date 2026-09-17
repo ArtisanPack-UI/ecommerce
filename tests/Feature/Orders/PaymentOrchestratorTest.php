@@ -377,3 +377,75 @@ it( 'throws when the configured fraud provider is not registered', function (): 
 
     $orch->finalize( $order, $cart, orchShipping() );
 } )->throws( RuntimeException::class, 'not-a-real-provider' );
+
+it( 'runs every provider in chain mode and blocks when any provider blocks', function (): void {
+    Event::fake( [ FraudBlocked::class, PaymentSucceeded::class, PaymentFailed::class ] );
+
+    $approve = new OrchestratorFakeFraudProvider( FraudDecision::approve(), 'chain-approve' );
+    $block   = new OrchestratorFakeFraudProvider( FraudDecision::block( 90, [ 'unusual_device' ] ), 'chain-block' );
+
+    /** @var FraudProviderRegistry $registry */
+    $registry = app( FraudProviderRegistry::class );
+    $registry->register( $approve->key(), $approve );
+    $registry->register( $block->key(), $block );
+
+    config()->set( 'artisanpack.ecommerce.fraud.provider', 'chain-approve, chain-block' );
+
+    [ $order, $cart ] = orchMakeOrderAndCart();
+
+    /** @var PaymentOrchestrator $orch */
+    $orch = app( PaymentOrchestrator::class );
+
+    $result = $orch->finalize( $order, $cart, orchShipping() );
+
+    expect( $result->isBlocked() )->toBeTrue();
+    expect( $approve->calls )->toHaveCount( 1 );
+    expect( $block->calls )->toHaveCount( 1 );
+
+    Event::assertDispatched( FraudBlocked::class );
+} );
+
+it( 'throws when a comma-listed provider in chain mode is not registered', function (): void {
+    $approve = new OrchestratorFakeFraudProvider( FraudDecision::approve(), 'chain-registered' );
+
+    /** @var FraudProviderRegistry $registry */
+    $registry = app( FraudProviderRegistry::class );
+    $registry->register( $approve->key(), $approve );
+
+    config()->set( 'artisanpack.ecommerce.fraud.provider', 'chain-registered,chain-missing' );
+
+    [ $order, $cart ] = orchMakeOrderAndCart();
+
+    /** @var PaymentOrchestrator $orch */
+    $orch = app( PaymentOrchestrator::class );
+
+    $orch->finalize( $order, $cart, orchShipping() );
+} )->throws( RuntimeException::class, 'chain-missing' );
+
+it( 'runs every provider in chain mode and approves when all providers approve', function (): void {
+    Event::fake( [ PaymentSucceeded::class, PaymentFailed::class, FraudBlocked::class, FraudChallenged::class ] );
+
+    $one = new OrchestratorFakeFraudProvider( FraudDecision::approve( 1 ), 'chain-one' );
+    $two = new OrchestratorFakeFraudProvider( FraudDecision::approve( 2 ), 'chain-two' );
+
+    /** @var FraudProviderRegistry $registry */
+    $registry = app( FraudProviderRegistry::class );
+    $registry->register( $one->key(), $one );
+    $registry->register( $two->key(), $two );
+
+    config()->set( 'artisanpack.ecommerce.fraud.provider', 'chain-one,chain-two' );
+
+    [ $order, $cart ] = orchMakeOrderAndCart();
+
+    /** @var PaymentOrchestrator $orch */
+    $orch = app( PaymentOrchestrator::class );
+
+    $result = $orch->finalize( $order, $cart, orchShipping() );
+
+    expect( $result->isCaptured() )->toBeTrue();
+    expect( $one->calls )->toHaveCount( 1 );
+    expect( $two->calls )->toHaveCount( 1 );
+
+    Event::assertDispatched( PaymentSucceeded::class );
+    Event::assertNotDispatched( FraudBlocked::class );
+} );
