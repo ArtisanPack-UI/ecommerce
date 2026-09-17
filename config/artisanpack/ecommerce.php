@@ -272,4 +272,45 @@ return [
 
     'log_level' => env( 'ECOMMERCE_LOG_LEVEL', 'debug' ),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Payment gateways
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for the built-in payment gateway adapters. Each gateway
+    | is registered against `PaymentGatewayRegistry` from the engine service
+    | provider's `boot()` only when its `enabled` flag is `true` — that
+    | keeps a mis-configured (or intentionally disabled) provider from
+    | routing traffic through it.
+    |
+    | `stripe`:
+    |   - `enabled`         — Register the Stripe gateway on boot.
+    |   - `secret_key`      — Stripe API secret key (server-side only; NEVER
+    |                         expose to the client).
+    |   - `publishable_key` — Publishable key surfaced to the storefront so
+    |                         Stripe Elements can initialize.
+    |   - `webhook_secret`  — Endpoint secret (`whsec_…`) used to verify
+    |                         inbound webhook signatures.
+    |   - `api_version`     — Optional pinned Stripe API version.
+    |   - `capture_method`  — `automatic` (default), `manual`, or
+    |                         `automatic_async`. `manual` uses the classic
+    |                         auth/capture split for orders that need a
+    |                         review step before capture.
+    |   - `webhook_route`   — Path (relative to app root) where the
+    |                         `POST` webhook endpoint is registered.
+    |
+    */
+
+    'gateways' => [
+        'stripe' => [
+            'enabled'         => (bool) env( 'ECOMMERCE_STRIPE_ENABLED', false ),
+            'secret_key'      => env( 'ECOMMERCE_STRIPE_SECRET_KEY' ),
+            'publishable_key' => env( 'ECOMMERCE_STRIPE_PUBLISHABLE_KEY' ),
+            'webhook_secret'  => env( 'ECOMMERCE_STRIPE_WEBHOOK_SECRET' ),
+            'api_version'     => env( 'ECOMMERCE_STRIPE_API_VERSION' ),
+            'capture_method'  => env( 'ECOMMERCE_STRIPE_CAPTURE_METHOD', 'automatic' ),
+            'webhook_route'   => env( 'ECOMMERCE_STRIPE_WEBHOOK_ROUTE', 'ecommerce/webhooks/stripe' ),
+        ],
+    ],
+
 ];
