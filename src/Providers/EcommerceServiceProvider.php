@@ -36,6 +36,7 @@ use ArtisanPackUI\Ecommerce\Logging\EcommerceLogFormatter;
 use ArtisanPackUI\Ecommerce\ProductTypes\DigitalProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType;
 use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
+use ArtisanPackUI\Ecommerce\Registries\FraudProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\FulfillmentAllocationStrategyRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
@@ -88,6 +89,10 @@ class EcommerceServiceProvider extends ServiceProvider
 
         $this->app->singleton( PaymentGatewayRegistry::class, function ( $app ): PaymentGatewayRegistry {
             return new PaymentGatewayRegistry( $app );
+        } );
+
+        $this->app->singleton( FraudProviderRegistry::class, function ( $app ): FraudProviderRegistry {
+            return new FraudProviderRegistry( $app );
         } );
 
         $this->app->singleton( FulfillmentAllocationStrategyRegistry::class, function ( $app ): FulfillmentAllocationStrategyRegistry {

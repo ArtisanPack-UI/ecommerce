@@ -313,4 +313,25 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Fraud
+    |--------------------------------------------------------------------------
+    |
+    | Active `FraudProvider` used by `PaymentOrchestrator::finalize()` to
+    | assess the pending authorization between the authorize and capture
+    | steps. The provider must be registered against `FraudProviderRegistry`.
+    |
+    | Reference implementations (`stripe-radar`, `always-approve`) ship in
+    | the engine — until at least one provider is registered, the
+    | orchestrator throws rather than defaulting to a permissive mode,
+    | because silently skipping fraud assessment is exactly the failure
+    | mode this contract exists to prevent.
+    |
+    */
+
+    'fraud' => [
+        'provider' => env( 'ECOMMERCE_FRAUD_PROVIDER', 'always-approve' ),
+    ],
+
 ];
