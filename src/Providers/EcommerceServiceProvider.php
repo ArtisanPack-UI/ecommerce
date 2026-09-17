@@ -18,6 +18,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Providers;
 
 use ArtisanPackUI\Ecommerce\Console\Commands\AuditOrderStatusCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\LintPciColumnsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\PruneIdempotencyRecordsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\ReleaseExpiredReservationsCommand;
 use ArtisanPackUI\Ecommerce\Contracts\CartStorage;
@@ -139,6 +140,7 @@ class EcommerceServiceProvider extends ServiceProvider
 
             $this->commands( [
                 AuditOrderStatusCommand::class,
+                LintPciColumnsCommand::class,
                 PruneIdempotencyRecordsCommand::class,
                 ReleaseExpiredReservationsCommand::class,
             ] );
