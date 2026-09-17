@@ -116,6 +116,26 @@ it( 'requires the ignore annotation to live in a line comment', function (): voi
         ->assertExitCode( 0 );
 } );
 
+it( 'catches double-quoted escape sequences that decode to a forbidden name', function (): void {
+    File::put(
+        $this->tmp . '/2026_01_01_000009_migration.php',
+        "<?php\n\$table->string( \"card_\\x6eumber\" );\n",
+    );
+
+    $this->artisan( 'ecommerce:lint:pci-columns', [ '--path' => [ $this->tmp ] ] )
+        ->assertExitCode( 1 );
+} );
+
+it( 'rejects an ignore annotation inside a block comment', function (): void {
+    File::put(
+        $this->tmp . '/2026_01_01_000010_migration.php',
+        "<?php\n\$table->string( 'card_number' ); /* pci-lint:ignore reason: block comment not accepted */\n",
+    );
+
+    $this->artisan( 'ecommerce:lint:pci-columns', [ '--path' => [ $this->tmp ] ] )
+        ->assertExitCode( 1 );
+} );
+
 it( 'scans the engine bundled migrations by default', function (): void {
     $this->artisan( 'ecommerce:lint:pci-columns' )
         ->expectsOutputToContain( 'PCI column lint passed.' )

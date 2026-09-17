@@ -91,34 +91,32 @@ class LintPciColumnsCommand extends Command
 
             foreach ( $finder as $file ) {
                 $scanned++;
-                $lines = preg_split( '/\R/', (string) file_get_contents( $file->getRealPath() ) ) ?: [];
+                $source = (string) file_get_contents( $file->getRealPath() );
+                $lines  = preg_split( '/\R/', $source ) ?: [];
+                $hits   = $this->scanSource( $source );
 
-                foreach ( $lines as $index => $line ) {
-                    $match = $this->findForbiddenMatch( $line );
-                    if ( null === $match ) {
-                        continue;
-                    }
+                foreach ( $hits as $hit ) {
+                    $reason = $this->extractIgnoreReasonForLine( $source, $hit['line'] );
 
-                    $lineNumber = $index + 1;
-                    $ignore     = $this->extractIgnoreReason( $line );
-
-                    if ( null !== $ignore ) {
+                    if ( null !== $reason ) {
                         $ignored[] = [
                             'file'   => $file->getRelativePathname(),
                             'path'   => $file->getRealPath(),
-                            'line'   => $lineNumber,
-                            'match'  => $match,
-                            'reason' => $ignore,
+                            'line'   => $hit['line'],
+                            'match'  => $hit['match'],
+                            'reason' => $reason,
                         ];
                         continue;
                     }
 
+                    $snippet = $lines[ $hit['line'] - 1 ] ?? '';
+
                     $violations[] = [
                         'file'    => $file->getRelativePathname(),
                         'path'    => $file->getRealPath(),
-                        'line'    => $lineNumber,
-                        'match'   => $match,
-                        'snippet' => trim( $line ),
+                        'line'    => $hit['line'],
+                        'match'   => $hit['match'],
+                        'snippet' => trim( $snippet ),
                     ];
                 }
             }
@@ -194,41 +192,96 @@ class LintPciColumnsCommand extends Command
     }
 
     /**
-     * Return the first forbidden substring that appears as part of a column
-     * name on the given line, or null if none appear. Matching is
-     * case-insensitive.
-     *
-     * A "column name" is any string literal (single- or double-quoted) on
-     * the line. This keeps the lint focused on schema declarations and
-     * avoids false positives on common English words that happen to contain
-     * a forbidden substring (e.g. `company` containing `pan`).
+     * Tokenize the given PHP source and return every string-literal hit
+     * against the forbidden substring list. Uses `token_get_all()` so escape
+     * sequences inside double-quoted strings (`"card_\x6eumber"`) are
+     * decoded before matching, closing the obvious bypass path.
      *
      * @since 1.0.0
      *
-     * @param  string  $line  Raw file line.
+     * @param  string  $source  Raw file contents.
+     *
+     * @return array<int, array{line: int, match: string}>
+     */
+    protected function scanSource( string $source ): array
+    {
+        $hits = [];
+
+        foreach ( token_get_all( $source ) as $token ) {
+            if ( ! is_array( $token ) ) {
+                continue;
+            }
+
+            if ( T_CONSTANT_ENCAPSED_STRING !== $token[ 0 ] ) {
+                continue;
+            }
+
+            $value = $this->decodeStringLiteral( $token[ 1 ] );
+            $match = $this->findForbiddenInValue( $value );
+
+            if ( null === $match ) {
+                continue;
+            }
+
+            $hits[] = [
+                'line'  => (int) $token[ 2 ],
+                'match' => $match,
+            ];
+        }
+
+        return $hits;
+    }
+
+    /**
+     * Decode a PHP string literal token to its runtime value. Handles both
+     * single- and double-quoted literals with their respective escape rules.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $literal  Raw token text including surrounding quotes.
+     *
+     * @return string
+     */
+    protected function decodeStringLiteral( string $literal ): string
+    {
+        if ( '' === $literal ) {
+            return '';
+        }
+
+        $quote = $literal[ 0 ];
+        $inner = substr( $literal, 1, -1 );
+
+        if ( "'" === $quote ) {
+            return strtr( $inner, [ "\\'" => "'", '\\\\' => '\\' ] );
+        }
+
+        return stripcslashes( $inner );
+    }
+
+    /**
+     * Return the first forbidden substring that appears as a snake_case
+     * token inside the given decoded string value.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $value  Decoded string literal value.
      *
      * @return string|null
      */
-    protected function findForbiddenMatch( string $line ): ?string
+    protected function findForbiddenInValue( string $value ): ?string
     {
-        if ( 0 === preg_match_all( '/([\'"])([^\'"\\\\]*)\\1/', $line, $matches ) ) {
-            return null;
-        }
+        $tokens = preg_split( '/[^A-Za-z0-9_]+/', strtolower( $value ) ) ?: [];
 
-        foreach ( $matches[ 2 ] as $literal ) {
-            $tokens = preg_split( '/[^A-Za-z0-9_]+/', strtolower( $literal ) ) ?: [];
+        foreach ( $tokens as $token ) {
+            if ( '' === $token ) {
+                continue;
+            }
 
-            foreach ( $tokens as $token ) {
-                if ( '' === $token ) {
-                    continue;
-                }
+            foreach ( self::FORBIDDEN_SUBSTRINGS as $needle ) {
+                $pattern = '/(?:^|_)' . preg_quote( $needle, '/' ) . '(?:_|$)/';
 
-                foreach ( self::FORBIDDEN_SUBSTRINGS as $needle ) {
-                    $pattern = '/(?:^|_)' . preg_quote( $needle, '/' ) . '(?:_|$)/';
-
-                    if ( 1 === preg_match( $pattern, $token ) ) {
-                        return $needle;
-                    }
+                if ( 1 === preg_match( $pattern, $token ) ) {
+                    return $needle;
                 }
             }
         }
@@ -237,26 +290,49 @@ class LintPciColumnsCommand extends Command
     }
 
     /**
-     * Extract the reason from an inline `// pci-lint:ignore reason:<text>`
-     * annotation, if present on the given line. Returns null when no
-     * annotation is present or when the reason string is empty.
+     * Look for a `// pci-lint:ignore reason:<text>` annotation among the
+     * line-comment tokens that share the given line number. Block comments
+     * (`/* ... *\/`) are intentionally rejected so an annotation must live
+     * in a real end-of-line comment.
      *
      * @since 1.0.0
      *
-     * @param  string  $line  Raw file line.
+     * @param  string  $source  Raw file contents.
+     * @param  int     $line    1-indexed line number of the violation.
      *
-     * @return string|null
+     * @return string|null Trimmed reason string, or null when no valid
+     *                     annotation is present on the same line.
      */
-    protected function extractIgnoreReason( string $line ): ?string
+    protected function extractIgnoreReasonForLine( string $source, int $line ): ?string
     {
-        $stripped = preg_replace( '/([\'"])(?:[^\'"\\\\]|\\\\.)*\\1/', '', $line ) ?? $line;
+        foreach ( token_get_all( $source ) as $token ) {
+            if ( ! is_array( $token ) || T_COMMENT !== $token[ 0 ] ) {
+                continue;
+            }
 
-        if ( 1 !== preg_match( '~//[^\r\n]*?pci-lint:ignore\s+reason:(.+)$~i', $stripped, $matches ) ) {
-            return null;
+            if ( (int) $token[ 2 ] !== $line ) {
+                continue;
+            }
+
+            $text = $token[ 1 ];
+
+            if ( ! str_starts_with( ltrim( $text ), '//' ) && ! str_starts_with( ltrim( $text ), '#' ) ) {
+                continue;
+            }
+
+            if ( 1 !== preg_match( '/pci-lint:ignore\s+reason:(.+)$/i', $text, $matches ) ) {
+                continue;
+            }
+
+            $reason = trim( $matches[ 1 ] );
+
+            if ( '' === $reason ) {
+                return null;
+            }
+
+            return $reason;
         }
 
-        $reason = trim( $matches[ 1 ] );
-
-        return '' === $reason ? null : $reason;
+        return null;
     }
 }

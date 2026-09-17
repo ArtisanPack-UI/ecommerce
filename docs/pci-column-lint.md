@@ -74,7 +74,7 @@ mirror scheduled for removal, or a column whose name coincidentally contains a
 forbidden substring), append an inline annotation to the offending line:
 
 ```php
-$table->string( 'pancake_topping' ); // pci-lint:ignore reason: unrelated to PAN; ships pancake ordering demo
+$table->string( 'legacy_pan_reference' ); // pci-lint:ignore reason: read-only import mirror, drop after 2026-Q4 backfill
 ```
 
 Rules:
