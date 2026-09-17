@@ -26,6 +26,8 @@ use ArtisanPackUI\Ecommerce\CurrencyRates\ConfigRateProvider;
 use ArtisanPackUI\Ecommerce\CurrencyRates\FrankfurterRateProvider;
 use ArtisanPackUI\Ecommerce\Ecommerce;
 use ArtisanPackUI\Ecommerce\Fulfillment\ProportionalByLineTotalStrategy;
+use ArtisanPackUI\Ecommerce\Gateways\Stripe\StripeGateway;
+use ArtisanPackUI\Ecommerce\Http\Controllers\StripeWebhookController;
 use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Middleware\RateLimitEcommerce;
 use ArtisanPackUI\Ecommerce\Http\Middleware\RequestIdMiddleware;
@@ -114,6 +116,8 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->registerCoreProductTypes();
         $this->registerCoreCurrencyRateProviders();
         $this->registerCoreFulfillmentAllocationStrategies();
+        $this->registerCorePaymentGateways();
+        $this->registerStripeWebhookRoute();
         $this->registerCustomerListeners();
 
         if ( $this->app->runningInConsole() ) {
@@ -332,6 +336,69 @@ class EcommerceServiceProvider extends ServiceProvider
             ProportionalByLineTotalStrategy::class,
             [ 'label' => __( 'Proportional by line total' ) ],
         );
+    }
+
+    /**
+     * Registers the built-in payment gateways the engine ships with.
+     *
+     * Currently: Stripe (parent plan §7.5 + §8.1 + §8.5). The gateway is
+     * only registered when `artisanpack.ecommerce.gateways.stripe.enabled`
+     * is true, so a mis-configured environment can't accidentally route
+     * traffic through a provider whose secret key is unset.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCorePaymentGateways(): void
+    {
+        if ( ! (bool) $this->app[ 'config' ]->get( 'artisanpack.ecommerce.gateways.stripe.enabled', false ) ) {
+            return;
+        }
+
+        /** @var PaymentGatewayRegistry $registry */
+        $registry = $this->app->make( PaymentGatewayRegistry::class );
+
+        $registry->register(
+            StripeGateway::KEY,
+            StripeGateway::class,
+            [
+                'label'                    => __( 'Stripe' ),
+                'supports_saved_cards'     => true,
+                'supports_partial_refunds' => true,
+            ],
+        );
+    }
+
+    /**
+     * Registers the Stripe inbound-webhook route.
+     *
+     * Only registered when the gateway is enabled — the route hangs off
+     * `POST {webhook_route}` (default `ecommerce/webhooks/stripe`), rate-
+     * limited by the shared `ap.ecommerce.webhook.inbound` policy, and
+     * excluded from CSRF because Stripe cannot mint a token.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerStripeWebhookRoute(): void
+    {
+        if ( ! (bool) $this->app[ 'config' ]->get( 'artisanpack.ecommerce.gateways.stripe.enabled', false ) ) {
+            return;
+        }
+
+        $path = (string) $this->app[ 'config' ]->get(
+            'artisanpack.ecommerce.gateways.stripe.webhook_route',
+            'ecommerce/webhooks/stripe',
+        );
+
+        /** @var Router $router */
+        $router = $this->app->make( Router::class );
+
+        $router->post( $path, StripeWebhookController::class )
+            ->middleware( [ 'api', 'ecommerce.rate-limit:ecommerce.webhook.inbound' ] )
+            ->name( 'ecommerce.webhooks.stripe' );
     }
 
     /**
