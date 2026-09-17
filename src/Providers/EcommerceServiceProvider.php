@@ -28,7 +28,7 @@ use ArtisanPackUI\Ecommerce\CurrencyRates\FrankfurterRateProvider;
 use ArtisanPackUI\Ecommerce\Ecommerce;
 use ArtisanPackUI\Ecommerce\Fulfillment\ProportionalByLineTotalStrategy;
 use ArtisanPackUI\Ecommerce\Gateways\Stripe\StripeGateway;
-use ArtisanPackUI\Ecommerce\Http\Controllers\StripeWebhookController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\WebhookController;
 use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Middleware\RateLimitEcommerce;
 use ArtisanPackUI\Ecommerce\Http\Middleware\RequestIdMiddleware;
@@ -126,7 +126,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->registerCoreFulfillmentAllocationStrategies();
         $this->registerCorePaymentGateways();
         $this->registerCoreFraudProviders();
-        $this->registerStripeWebhookRoute();
+        $this->registerWebhookRoute();
         $this->registerCustomerListeners();
 
         if ( $this->app->runningInConsole() ) {
@@ -423,34 +423,26 @@ class EcommerceServiceProvider extends ServiceProvider
     }
 
     /**
-     * Registers the Stripe inbound-webhook route.
+     * Registers the generic inbound-webhook route.
      *
-     * Only registered when the gateway is enabled — the route hangs off
-     * `POST {webhook_route}` (default `ecommerce/webhooks/stripe`), rate-
-     * limited by the shared `ap.ecommerce.webhook.inbound` policy, and
-     * excluded from CSRF because Stripe cannot mint a token.
+     * `POST /ecommerce/webhooks/{provider}` dispatches to whatever gateway
+     * is registered under `{provider}` in {@see PaymentGatewayRegistry}.
+     * The route is rate-limited by the shared `ap.ecommerce.webhook.inbound`
+     * policy and excluded from CSRF because a provider cannot mint a token.
      *
      * @since 1.0.0
      *
      * @return void
      */
-    protected function registerStripeWebhookRoute(): void
+    protected function registerWebhookRoute(): void
     {
-        if ( ! (bool) $this->app[ 'config' ]->get( 'artisanpack.ecommerce.gateways.stripe.enabled', false ) ) {
-            return;
-        }
-
-        $path = (string) $this->app[ 'config' ]->get(
-            'artisanpack.ecommerce.gateways.stripe.webhook_route',
-            'ecommerce/webhooks/stripe',
-        );
-
         /** @var Router $router */
         $router = $this->app->make( Router::class );
 
-        $router->post( $path, StripeWebhookController::class )
-            ->middleware( [ 'api', 'ecommerce.rate-limit:ecommerce.webhook.inbound' ] )
-            ->name( 'ecommerce.webhooks.stripe' );
+        $router->post( 'ecommerce/webhooks/{provider}', [ WebhookController::class, 'handle' ] )
+            ->where( 'provider', '[A-Za-z0-9_.-]+' )
+            ->middleware( [ 'api', 'ecommerce.request-id', 'ecommerce.rate-limit:ecommerce.webhook.inbound' ] )
+            ->name( 'ecommerce.webhooks' );
     }
 
     /**
