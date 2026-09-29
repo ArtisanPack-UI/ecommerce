@@ -47,7 +47,7 @@ never collide with a host app's GraphQL schemas.
 | `cart(token)` | anyone holding the token | `ecommerce.cart.mutate` |
 | `me`, `myOrders` | signed-in shopper, token with `ecommerce:storefront` (or admin) | `ecommerce.admin.mutate` |
 | `order(id)` | `ecommerce.order.view`, or the shopper who owns it | `ecommerce.admin.mutate` |
-| `orders`, `refund`, `customer`, `customers`, `promotion`, `promotions`, `taxClasses`, `taxRates`, `shippingZones`, `shippingZone`, `inventoryItems`, `webhookSubscriptions`, `webhookSubscription` | the matching `ecommerce.{resource}.{action}` ability | `ecommerce.admin.mutate` |
+| `orders`, `refund`, `customer`, `customers`, `promotion`, `promotions`, `taxClasses`, `taxRates`, `shippingZones`, `shippingZone`, `inventoryItems`, `webhookSubscriptions`, `webhookSubscription`, `notificationTemplates`, `notificationTemplate` | the matching `ecommerce.{resource}.{action}` ability | `ecommerce.admin.mutate` |
 
 ## Mutations
 
@@ -64,6 +64,8 @@ snake_case keys. Each mutation takes one `input` argument and returns
 | `applyCoupon` / `removeCoupon` | `POST carts/{token}/coupons` / `DELETE carts/{token}/coupons/{code}` |
 | `issueRefund` | `POST orders/{order}/refunds` |
 | `createWebhookSubscription` / `updateWebhookSubscription` / `deleteWebhookSubscription` / `replayWebhookDelivery` | `admin/webhook-subscriptions…` |
+| `updateNotificationTemplate` | `PATCH admin/notification-templates/{template}` |
+| `previewNotificationTemplate` (returns `rendered { subject body }`) | `POST admin/notification-templates/{template}/preview` |
 
 ```graphql
 mutation Add($input: AddToCartInput!) {
@@ -76,13 +78,18 @@ mutation Add($input: AddToCartInput!) {
 ```
 
 Expected failures (validation, an unavailable product, an invalid coupon, a
-refused refund) come back in `errors`. Auth, not-found, and rate-limit failures
+refused refund, a notification template the sandbox rejects) come back in
+`errors`. Auth, not-found, and rate-limit failures
 are top-level GraphQL errors with `extensions.code` set to `UNAUTHENTICATED`,
 `FORBIDDEN`, `NOT_FOUND`, `RATE_LIMITED` (with `retry_after`), or
 `BAD_USER_INPUT`.
 
 `placeOrder`, `moveKanbanCard`, and the other mutations in engine spec §10.3
-arrive with the checkout and kanban services behind them.
+arrive with the checkout and kanban services behind them. The review, license,
+and preference fields (`submitReview`, `moderateReview`, `validateLicense`,
+`revokeLicense`, `updateMyNotificationPreferences`, `digitalFiles`,
+`licenseKey`) are REST-only for now. Their services exist, so they can be
+added the same way as the notification-template fields.
 
 ## Authentication
 
@@ -119,6 +126,7 @@ The `Subscription` type describes the real-time payloads:
 | `paymentSucceeded` | `{ order, payment }` | `private-ecommerce.admin` |
 | `stockChanged` | `{ inventory_item, delta, new_level }` | `private-ecommerce.admin` |
 | `webhookDeliveryFailed` | `{ delivery, reason }` | `private-ecommerce.admin` |
+| `reviewSubmitted` | `{ review }` | `private-ecommerce.admin` |
 
 They're delivered over Laravel broadcasting (Reverb, Pusher, …), not over HTTP.
 Set `ECOMMERCE_GRAPHQL_SUBSCRIPTIONS=true` with a configured broadcaster. Each
@@ -134,8 +142,8 @@ The channel is authorized by the `ecommerce.order.viewAny` ability.
 `kanbanCardMoved` (`{ card, from_column_id, to_column_id, board_id }`) is
 broadcast on `private-ecommerce.kanban.board.{boardId}` when
 `ECOMMERCE_KANBAN_BROADCAST=true`; that channel needs the `kanbanBoard.view`
-ability (see [kanban.md](kanban.md)). `orderPlaced` and `reviewSubmitted` join
-the list with the services that fire them.
+ability (see [kanban.md](kanban.md)). `orderPlaced` joins the list with the
+checkout service that fires it.
 
 ## Extending the schema
 

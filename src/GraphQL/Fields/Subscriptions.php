@@ -18,10 +18,11 @@
  * | `paymentSucceeded`      | `private-ecommerce.admin`       | `PaymentSucceeded` event               |
  * | `stockChanged`          | `private-ecommerce.admin`       | `ap.ecommerce.inventory.adjusted` hook |
  * | `webhookDeliveryFailed` | `private-ecommerce.admin`       | `WebhookFailed` event                  |
+ * | `reviewSubmitted`       | `private-ecommerce.admin`       | `ReviewSubmitted` event                |
  * | `kanbanCardMoved`       | `private-ecommerce.kanban.board.{boardId}` | `KanbanCardMoved` event (enabled by `artisanpack.ecommerce.kanban.broadcast`) |
  *
- * `orderPlaced` and `reviewSubmitted` join this list with the checkout and
- * review services that fire them. Satellites
+ * `orderPlaced` joins this list with the checkout service that fires it.
+ * Satellites
  * add their own through `ap.ecommerce.graphql.extend` and broadcast a
  * {@see \ArtisanPackUI\Ecommerce\Broadcasting\GraphQLSubscriptionBroadcast}.
  *
@@ -80,6 +81,10 @@ class Subscriptions
                 'description' => 'An outbound webhook delivery attempt failed.',
                 'fields'      => [ 'delivery' => 'WebhookDelivery!', 'reason' => 'String!' ],
             ],
+            'ReviewSubmittedEvent' => [
+                'description' => 'A product review was submitted (after automatic moderation).',
+                'fields'      => [ 'review' => 'ProductReview!' ],
+            ],
             'KanbanCardMovedEvent' => [
                 'description' => 'A card moved between columns on a kanban board.',
                 'fields'      => [ 'card' => 'KanbanCard!', 'from_column_id' => 'Int', 'to_column_id' => 'Int!', 'board_id' => 'Int!' ],
@@ -103,6 +108,7 @@ class Subscriptions
             'paymentSucceeded'      => [ 'type' => 'PaymentSucceededEvent', 'resolve' => $payload ],
             'stockChanged'          => [ 'type' => 'StockChangedEvent', 'resolve' => $payload ],
             'webhookDeliveryFailed' => [ 'type' => 'WebhookDeliveryFailedEvent', 'resolve' => $payload ],
+            'reviewSubmitted'       => [ 'type' => 'ReviewSubmittedEvent', 'resolve' => $payload ],
             'kanbanCardMoved'       => [ 'type' => 'KanbanCardMovedEvent', 'resolve' => $payload ],
         ];
     }

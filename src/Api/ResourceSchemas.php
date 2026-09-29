@@ -584,6 +584,81 @@ final class ResourceSchemas
                 'order' => [ 'Order', false, 'order' ],
             ] ),
 
+            'ProductReview' => self::schema( Resources\ProductReviewResource::class, Models\ProductReview::class, 'A product review; approved reviews count toward the product rating.', [
+                'product_id'           => 'Int!',
+                'customer_id'          => 'Int',
+                'order_id'             => 'Int',
+                'author_name'          => 'String!',
+                'author_email'         => 'String',
+                'rating'               => 'Int!',
+                'title'                => 'String',
+                'body'                 => 'String',
+                'is_verified_purchase' => 'Boolean!',
+                'status'               => 'String',
+                'approved_at'          => 'DateTime',
+                'reviewed_by_user_id'  => 'Int',
+                'media_ids'            => '[Int!]!',
+            ] + $timestamps ),
+
+            'DigitalFile' => self::schema( Resources\DigitalFileResource::class, Models\DigitalFile::class, 'A deliverable file attached to a product or variant.', [
+                'product_id'         => 'Int',
+                'product_variant_id' => 'Int',
+                'media_id'           => 'Int',
+                'disk'               => 'String',
+                'path'               => 'String',
+                'label'              => 'String!',
+                'version'            => 'String',
+                'is_streaming_only'  => 'Boolean!',
+                'checksum_sha256'    => 'String',
+            ] + $timestamps ),
+
+            'DigitalDownload' => self::schema( Resources\DigitalDownloadResource::class, Models\DigitalDownload::class, 'A download entitlement for one order line and file.', [
+                'order_item_id'       => 'Int!',
+                'digital_file_id'     => 'Int!',
+                'downloads_remaining' => 'Int',
+                'expires_at'          => 'DateTime',
+                'first_downloaded_at' => 'DateTime',
+                'last_downloaded_at'  => 'DateTime',
+                'download_count'      => 'Int!',
+            ] + $timestamps, [
+                'file' => [ 'DigitalFile', false, 'file', true ],
+            ] ),
+
+            'LicenseKey' => self::schema( Resources\LicenseKeyResource::class, Models\LicenseKey::class, 'A software license key issued for an order line.', [
+                'order_item_id'     => 'Int!',
+                'digital_file_id'   => 'Int',
+                'key'               => 'String!',
+                'activations_limit' => 'Int',
+                'activations_count' => 'Int!',
+                'expires_at'        => 'DateTime',
+                'is_revoked'        => 'Boolean!',
+                'revoked_at'        => 'DateTime',
+                'meta'              => 'JSON',
+            ] + $timestamps, [
+                'activations' => [ 'LicenseActivation', true, 'activations' ],
+            ] ),
+
+            'LicenseActivation' => self::schema( Resources\LicenseActivationResource::class, Models\LicenseActivation::class, 'A machine a license key is activated on.', [
+                'license_key_id'      => 'Int!',
+                'machine_fingerprint' => 'String',
+                'activated_at'        => 'DateTime',
+                'last_seen_at'        => 'DateTime',
+                'ip_address'          => 'String',
+            ] ),
+
+            'NotificationTemplate' => self::schema( Resources\NotificationTemplateResource::class, Models\NotificationTemplate::class, 'Editable Twig copy for one catalog notification, channel, and locale.', [
+                'key'          => 'String!',
+                'channel'      => 'String!',
+                'locale'       => 'String!',
+                'label'        => 'String!',
+                'category'     => 'String',
+                'subject'      => 'String',
+                'body'         => 'String!',
+                'variables'    => '[String!]!',
+                'preview_data' => 'JSON',
+                'is_active'    => 'Boolean!',
+            ] + $timestamps ),
+
             'WebhookSubscription' => self::schema( Resources\WebhookSubscriptionResource::class, Models\WebhookSubscription::class, 'An outbound webhook endpoint.', [
                 'name'                 => 'String!',
                 'url'                  => 'String!',

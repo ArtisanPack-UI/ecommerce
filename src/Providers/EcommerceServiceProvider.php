@@ -26,6 +26,7 @@ use ArtisanPackUI\Ecommerce\Console\Commands\ReleaseExpiredReservationsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\RetryWebhookDeliveriesCommand;
 use ArtisanPackUI\Ecommerce\Contracts\CartStorage;
 use ArtisanPackUI\Ecommerce\Contracts\OrderNumberGenerator;
+use ArtisanPackUI\Ecommerce\Contracts\ReviewModerator;
 use ArtisanPackUI\Ecommerce\CurrencyRates\ConfigRateProvider;
 use ArtisanPackUI\Ecommerce\CurrencyRates\FrankfurterRateProvider;
 use ArtisanPackUI\Ecommerce\Ecommerce;
@@ -63,16 +64,23 @@ use ArtisanPackUI\Ecommerce\Kanban\Widgets\TotalWidget;
 use ArtisanPackUI\Ecommerce\Listeners\BroadcastGraphQLSubscriptions;
 use ArtisanPackUI\Ecommerce\Listeners\BroadcastKanbanCardMoved;
 use ArtisanPackUI\Ecommerce\Listeners\DispatchWebhooksForEvent;
+use ArtisanPackUI\Ecommerce\Listeners\IssueDigitalDeliverables;
 use ArtisanPackUI\Ecommerce\Listeners\LinkCustomerOnUserVerified;
+use ArtisanPackUI\Ecommerce\Listeners\RevokeDigitalDeliverables;
+use ArtisanPackUI\Ecommerce\Listeners\SendCatalogNotifications;
 use ArtisanPackUI\Ecommerce\Logging\EcommerceLogFormatter;
 use ArtisanPackUI\Ecommerce\Models\Coupon;
 use ArtisanPackUI\Ecommerce\Models\Customer;
+use ArtisanPackUI\Ecommerce\Models\DigitalFile;
 use ArtisanPackUI\Ecommerce\Models\KanbanAutomation;
 use ArtisanPackUI\Ecommerce\Models\KanbanBoard;
 use ArtisanPackUI\Ecommerce\Models\KanbanColumn;
+use ArtisanPackUI\Ecommerce\Models\LicenseKey;
+use ArtisanPackUI\Ecommerce\Models\NotificationTemplate;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderBoardAssignment;
 use ArtisanPackUI\Ecommerce\Models\Product;
+use ArtisanPackUI\Ecommerce\Models\ProductReview;
 use ArtisanPackUI\Ecommerce\Models\Promotion;
 use ArtisanPackUI\Ecommerce\Models\Refund;
 use ArtisanPackUI\Ecommerce\Models\ShippingMethod;
@@ -80,14 +88,19 @@ use ArtisanPackUI\Ecommerce\Models\ShippingZone;
 use ArtisanPackUI\Ecommerce\Models\TaxClass;
 use ArtisanPackUI\Ecommerce\Models\TaxRate;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
+use ArtisanPackUI\Ecommerce\Notifications\NotificationCatalog;
 use ArtisanPackUI\Ecommerce\Policies\CouponPolicy;
 use ArtisanPackUI\Ecommerce\Policies\CustomerPolicy;
+use ArtisanPackUI\Ecommerce\Policies\DigitalFilePolicy;
 use ArtisanPackUI\Ecommerce\Policies\KanbanBoardPolicy;
 use ArtisanPackUI\Ecommerce\Policies\KanbanCardPolicy;
+use ArtisanPackUI\Ecommerce\Policies\LicenseKeyPolicy;
+use ArtisanPackUI\Ecommerce\Policies\NotificationTemplatePolicy;
 use ArtisanPackUI\Ecommerce\Policies\OrderPolicy;
 use ArtisanPackUI\Ecommerce\Policies\ProductPolicy;
 use ArtisanPackUI\Ecommerce\Policies\PromotionPolicy;
 use ArtisanPackUI\Ecommerce\Policies\RefundPolicy;
+use ArtisanPackUI\Ecommerce\Policies\ReviewPolicy;
 use ArtisanPackUI\Ecommerce\Policies\ShippingZonePolicy;
 use ArtisanPackUI\Ecommerce\Policies\TaxRatePolicy;
 use ArtisanPackUI\Ecommerce\Policies\WebhookSubscriptionPolicy;
@@ -111,6 +124,7 @@ use ArtisanPackUI\Ecommerce\Registries\FraudProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\FulfillmentAllocationStrategyRegistry;
 use ArtisanPackUI\Ecommerce\Registries\KanbanAutomationRegistry;
 use ArtisanPackUI\Ecommerce\Registries\KanbanCardWidgetRegistry;
+use ArtisanPackUI\Ecommerce\Registries\NotificationTemplateRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PromotionActionRegistry;
@@ -120,6 +134,8 @@ use ArtisanPackUI\Ecommerce\Registries\ShippingLabelProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingMethodTypeRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingRateProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\TaxProviderRegistry;
+use ArtisanPackUI\Ecommerce\Reviews\NoopReviewModerator;
+use ArtisanPackUI\Ecommerce\Reviews\ProductRatingAggregator;
 use ArtisanPackUI\Ecommerce\Services\DatabaseCartStorage;
 use ArtisanPackUI\Ecommerce\Services\Fraud\AlwaysApproveFraudProvider;
 use ArtisanPackUI\Ecommerce\Services\Fraud\StripeRadarFraudProvider;
@@ -209,12 +225,14 @@ class EcommerceServiceProvider extends ServiceProvider
             PromotionSourceRegistry::class,
             KanbanCardWidgetRegistry::class,
             KanbanAutomationRegistry::class,
+            NotificationTemplateRegistry::class,
         ] as $registry ) {
             $this->app->singleton( $registry, static fn ( $app ) => new $registry( $app ) );
         }
 
         $this->app->singleton( CartStorage::class, DatabaseCartStorage::class );
         $this->app->singleton( OrderNumberGenerator::class, RandomEightCharGenerator::class );
+        $this->app->singleton( ReviewModerator::class, NoopReviewModerator::class );
 
         // After every provider has registered, before any boots: rebing
         // registers its schema routes while booting, so the `ecommerce`
@@ -249,6 +267,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->registerCoreShippingMethodTypes();
         $this->registerCorePromotionRules();
         $this->registerCoreKanban();
+        $this->registerCoreNotificationTemplates();
         $this->registerWebhookRoute();
         $this->registerPolicies();
         $this->registerRestRoutes();
@@ -256,6 +275,9 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->registerWebhookListeners();
         $this->registerGraphQLSubscriptions();
         $this->registerKanbanListeners();
+        $this->registerReviewListeners();
+        $this->registerDigitalDeliveryListeners();
+        $this->registerNotificationListeners();
 
         if ( $this->app->runningInConsole() ) {
             $this->publishes( [
@@ -761,6 +783,93 @@ class EcommerceServiceProvider extends ServiceProvider
     }
 
     /**
+     * Registers the built-in notification catalog (parent plan §14.4).
+     * Satellites add their own templates from their own `boot()`.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCoreNotificationTemplates(): void
+    {
+        /** @var NotificationTemplateRegistry $registry */
+        $registry = $this->app->make( NotificationTemplateRegistry::class );
+
+        foreach ( NotificationCatalog::definitions() as $definition ) {
+            $registry->register( $definition->key(), $definition, [ 'provided_by' => 'ecommerce' ] );
+        }
+    }
+
+    /**
+     * Keeps each product's denormalized rating in step with its approved
+     * reviews (parent plan §5.12): the aggregate is recomputed whenever a
+     * review is approved, rejected, or marked as spam.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerReviewListeners(): void
+    {
+        $recalculate = function ( ProductReview $review ): void {
+            $this->app->make( ProductRatingAggregator::class )->handle( $review );
+        };
+
+        foreach ( [ 'ap.ecommerce.review.approved', 'ap.ecommerce.review.rejected', 'ap.ecommerce.review.markedSpam' ] as $hook ) {
+            addAction( $hook, $recalculate );
+        }
+    }
+
+    /**
+     * With `artisanpack.ecommerce.digital.auto_issue`, issues download
+     * entitlements and license keys when an order is paid (parent plan
+     * §5.13); with `.revoke_on_refund`, takes them back when the order is
+     * fully refunded or cancelled.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerDigitalDeliveryListeners(): void
+    {
+        $config = $this->app['config'];
+
+        if ( (bool) $config->get( 'artisanpack.ecommerce.digital.auto_issue', true ) ) {
+            addAction( 'ap.ecommerce.payment.succeeded', function ( mixed $payment, Order $order ): void {
+                $this->app->make( IssueDigitalDeliverables::class )->handle( $payment, $order );
+            } );
+        }
+
+        if ( (bool) $config->get( 'artisanpack.ecommerce.digital.revoke_on_refund', true ) ) {
+            addAction( 'ap.ecommerce.order.refunded', function ( Order $order, mixed $refund = null ): void {
+                $this->app->make( RevokeDigitalDeliverables::class )->refunded( $order, $refund );
+            } );
+
+            addAction( 'ap.ecommerce.order.statusChanged', function ( Order $order, string $from, string $to ): void {
+                $this->app->make( RevokeDigitalDeliverables::class )->statusChanged( $order, $from, $to );
+            } );
+        }
+    }
+
+    /**
+     * Sends the notification catalog from the engine's lifecycle hooks
+     * when `artisanpack.ecommerce.notifications.enabled` is on (parent
+     * plan §14).
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerNotificationListeners(): void
+    {
+        if ( ! (bool) $this->app['config']->get( 'artisanpack.ecommerce.notifications.enabled', true ) ) {
+            return;
+        }
+
+        $this->app->make( Dispatcher::class )->subscribe( SendCatalogNotifications::class );
+    }
+
+    /**
      * Registers the generic inbound-webhook route.
      *
      * `POST /ecommerce/webhooks/{provider}` dispatches to whatever gateway
@@ -937,6 +1046,10 @@ class EcommerceServiceProvider extends ServiceProvider
             KanbanColumn::class         => KanbanBoardPolicy::class,
             KanbanAutomation::class     => KanbanBoardPolicy::class,
             OrderBoardAssignment::class => KanbanCardPolicy::class,
+            ProductReview::class        => ReviewPolicy::class,
+            DigitalFile::class          => DigitalFilePolicy::class,
+            LicenseKey::class           => LicenseKeyPolicy::class,
+            NotificationTemplate::class => NotificationTemplatePolicy::class,
         ];
 
         $registered = Gate::policies();

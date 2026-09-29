@@ -13,7 +13,10 @@
  *                    `ecommerce.coupon.attempt`); cart writes also require
  *                    an Idempotency-Key;
  * - admin reads    → auth + `ecommerce.can:{resource},{action}` + `ecommerce.admin.mutate`;
- * - admin writes   → the above + `ecommerce.idempotency` (Idempotency-Key required).
+ * - admin writes   → the above + `ecommerce.idempotency` (Idempotency-Key required);
+ * - downloads      → the token in the URL is the credential (`ecommerce.catalog.read`);
+ * - license check  → public, `ecommerce.license.validate` + Idempotency-Key;
+ * - me/*           → auth + `ecommerce.admin.mutate` (the shopper's own data).
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -28,6 +31,8 @@ declare( strict_types=1 );
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CartController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CouponController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CustomerController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\DigitalDownloadController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\DigitalFileController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\InventoryController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanAssignmentController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanAutomationController;
@@ -35,11 +40,16 @@ use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanBoardController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanCardController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanCatalogController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanColumnController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\LicenseKeyController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\NotificationPreferenceController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\NotificationTemplateController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderRefundController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderShipmentController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductReviewController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\PromotionController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ReviewController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\SearchController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ShippingMethodController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ShippingZoneController;
@@ -66,8 +76,27 @@ Route::middleware( 'ecommerce.rate-limit:ecommerce.catalog.read' )->group( funct
     Route::get( 'products', [ ProductController::class, 'index' ] )->name( 'products.index' );
     Route::get( 'products/{product}', [ ProductController::class, 'show' ] )->whereNumber( 'product' )->name( 'products.show' );
     Route::get( 'products/{product}/variants', [ ProductController::class, 'variants' ] )->whereNumber( 'product' )->name( 'products.variants' );
+    Route::get( 'products/{product}/reviews', [ ProductReviewController::class, 'index' ] )->whereNumber( 'product' )->name( 'products.reviews.index' );
     Route::get( 'search', [ SearchController::class, 'index' ] )->name( 'search' );
 } );
+
+// Reviews (engine spec §9.1): signed-in customers or, when allowed, guests.
+Route::post( 'products/{product}/reviews', [ ProductReviewController::class, 'store' ] )
+    ->whereNumber( 'product' )
+    ->middleware( [ 'ecommerce.optional-auth', 'ecommerce.rate-limit:ecommerce.review.submit', 'ecommerce.idempotency' ] )
+    ->name( 'products.reviews.store' );
+
+// Digital delivery (engine spec §9.9): the token is the credential.
+Route::where( [ 'token' => '[A-Za-z0-9]{64}' ] )
+    ->middleware( 'ecommerce.rate-limit:ecommerce.catalog.read' )
+    ->group( function (): void {
+        Route::get( 'downloads/{token}', [ DigitalDownloadController::class, 'show' ] )->name( 'downloads.show' );
+        Route::get( 'downloads/{token}/stream', [ DigitalDownloadController::class, 'stream' ] )->name( 'downloads.stream' );
+    } );
+
+Route::post( 'license/validate', [ LicenseKeyController::class, 'validateKey' ] )
+    ->middleware( [ 'ecommerce.rate-limit:ecommerce.license.validate', 'ecommerce.idempotency' ] )
+    ->name( 'license.validate' );
 
 // Cart (token is the credential).
 Route::post( 'carts', [ CartController::class, 'store' ] )
@@ -106,6 +135,14 @@ Route::patch( 'orders/{order}/shipments/{shipment}', [ OrderShipmentController::
 Route::get( 'customers', [ CustomerController::class, 'index' ] )->middleware( $admin( 'customer', 'viewAny' ) )->name( 'customers.index' );
 Route::get( 'customers/{customer}', [ CustomerController::class, 'show' ] )->middleware( $admin( 'customer', 'view' ) )->name( 'customers.show' );
 Route::patch( 'customers/{customer}', [ CustomerController::class, 'update' ] )->middleware( $admin( 'customer', 'update', true ) )->name( 'customers.update' );
+
+// The signed-in shopper (engine spec §9.4).
+Route::get( 'me/notification-preferences', [ NotificationPreferenceController::class, 'show' ] )
+    ->middleware( array_merge( $auth, [ 'ecommerce.rate-limit:ecommerce.admin.mutate' ] ) )
+    ->name( 'me.notification-preferences.show' );
+Route::patch( 'me/notification-preferences', [ NotificationPreferenceController::class, 'update' ] )
+    ->middleware( array_merge( $auth, [ 'ecommerce.rate-limit:ecommerce.admin.mutate', 'ecommerce.idempotency' ] ) )
+    ->name( 'me.notification-preferences.update' );
 
 // Kanban (engine spec §9.10, parent plan §9.5).
 Route::prefix( 'kanban' )
@@ -164,6 +201,26 @@ Route::prefix( 'admin' )->name( 'admin.' )->group( function () use ( $admin ): v
     Route::post( 'promotions/{promotion}/coupons', [ CouponController::class, 'store' ] )->middleware( $admin( 'coupon', 'create', true ) )->name( 'coupons.store' );
     Route::patch( 'coupons/{coupon}', [ CouponController::class, 'update' ] )->middleware( $admin( 'coupon', 'update', true ) )->name( 'coupons.update' );
     Route::delete( 'coupons/{coupon}', [ CouponController::class, 'destroy' ] )->middleware( $admin( 'coupon', 'delete', true ) )->name( 'coupons.destroy' );
+
+    // Reviews (moderation queue).
+    Route::get( 'reviews', [ ReviewController::class, 'index' ] )->middleware( $admin( 'review', 'viewAny' ) )->name( 'reviews.index' );
+    Route::get( 'reviews/{review}', [ ReviewController::class, 'show' ] )->middleware( $admin( 'review', 'view' ) )->name( 'reviews.show' );
+    Route::post( 'reviews/{review}/moderate', [ ReviewController::class, 'moderate' ] )->middleware( $admin( 'review', 'moderate', true ) )->name( 'reviews.moderate' );
+    Route::delete( 'reviews/{review}', [ ReviewController::class, 'destroy' ] )->middleware( $admin( 'review', 'delete', true ) )->name( 'reviews.destroy' );
+
+    // Digital files + license keys.
+    Route::get( 'digital-files', [ DigitalFileController::class, 'index' ] )->middleware( $admin( 'digitalFile', 'viewAny' ) )->name( 'digital-files.index' );
+    Route::post( 'digital-files', [ DigitalFileController::class, 'store' ] )->middleware( $admin( 'digitalFile', 'create', true ) )->name( 'digital-files.store' );
+    Route::patch( 'digital-files/{file}', [ DigitalFileController::class, 'update' ] )->middleware( $admin( 'digitalFile', 'update', true ) )->name( 'digital-files.update' );
+    Route::delete( 'digital-files/{file}', [ DigitalFileController::class, 'destroy' ] )->middleware( $admin( 'digitalFile', 'delete', true ) )->name( 'digital-files.destroy' );
+    Route::get( 'license-keys', [ LicenseKeyController::class, 'index' ] )->middleware( $admin( 'licenseKey', 'view' ) )->name( 'license-keys.index' );
+    Route::post( 'license-keys/{key}/revoke', [ LicenseKeyController::class, 'revoke' ] )->middleware( $admin( 'licenseKey', 'revoke', true ) )->name( 'license-keys.revoke' );
+
+    // Notification templates.
+    Route::get( 'notification-templates', [ NotificationTemplateController::class, 'index' ] )->middleware( $admin( 'notificationTemplate', 'viewAny' ) )->name( 'notification-templates.index' );
+    Route::get( 'notification-templates/{template}', [ NotificationTemplateController::class, 'show' ] )->middleware( $admin( 'notificationTemplate', 'view' ) )->name( 'notification-templates.show' );
+    Route::patch( 'notification-templates/{template}', [ NotificationTemplateController::class, 'update' ] )->middleware( $admin( 'notificationTemplate', 'update', true ) )->name( 'notification-templates.update' );
+    Route::post( 'notification-templates/{template}/preview', [ NotificationTemplateController::class, 'preview' ] )->middleware( $admin( 'notificationTemplate', 'update' ) )->name( 'notification-templates.preview' );
 
     // Outbound webhooks.
     Route::get( 'webhook-subscriptions', [ WebhookSubscriptionController::class, 'index' ] )->middleware( $admin( 'webhookSubscription', 'viewAny' ) )->name( 'webhook-subscriptions.index' );

@@ -6,11 +6,12 @@ the abstract class from your satellite's test suite, wire the required
 factory method(s), and PHPUnit / Pest will run every invariant the engine's
 reference implementations are held to against your driver.
 
-There are twelve suites — one per engine spec §4 contract that satellites
+There are fourteen suites — one per engine spec §4 contract that satellites
 implement: `ProductType`, `CartStorage`, `OrderNumberGenerator`,
 `FulfillmentAllocationStrategy`, `PaymentGateway`, `TaxProvider`,
 `ShippingRateProvider`, `FraudProvider`, `PromotionCondition`,
-`PromotionAction`, `KanbanCardWidget`, and `KanbanAutomationTrigger`.
+`PromotionAction`, `KanbanCardWidget`, `KanbanAutomationTrigger`,
+`ReviewModerator`, and `NotificationTemplate`.
 
 Phase 2 database-backed suites share the
 [`InteractsWithEcommerceCarts`](../src/Testing/Contracts/Concerns/InteractsWithEcommerceCarts.php)
@@ -352,6 +353,52 @@ Reference implementations: `send-email`, `dispatch-job`, `webhook`,
 `update-order-field`, `create-shipment`, `print-shipping-label` under
 [`src/Kanban/Triggers/`](../src/Kanban/Triggers/) — see
 `tests/Feature/Contracts/*TriggerContractTest.php`.
+
+## `ReviewModeratorContractTest`
+
+Contract: [`ReviewModerator`](../src/Contracts/ReviewModerator.php)
+(engine spec §4.16).
+
+Extension points a satellite must provide:
+
+- `moderator(): ReviewModerator` — the concrete moderator under test.
+- Optional `reviews(): array<string, ProductReview>` — extra review
+  fixtures the moderator treats specially.
+
+Invariants verified:
+
+- `key()` is a non-empty string.
+- `moderate()` returns one of `approve`, `reject`, `spam`, `pending` for
+  every fixture (typical, empty body, verified purchase, very long body).
+- `moderate()` never changes or saves the review — `ReviewService` applies
+  the verdict.
+
+Reference implementation:
+[`NoopReviewModerator`](../src/Reviews/NoopReviewModerator.php) — see
+`tests/Feature/Contracts/NoopReviewModeratorContractTest.php`.
+
+## `NotificationTemplateContractTest`
+
+Contract: [`NotificationTemplate`](../src/Contracts/NotificationTemplate.php)
+(engine spec §4.14).
+
+Extension points a satellite must provide:
+
+- `template(): NotificationTemplate` — the definition under test.
+
+Invariants verified:
+
+- `key()` is lowercase dot-separated segments; `label()`, `channel()`,
+  `category()`, and `defaultBody()` are non-empty.
+- Every entry in `variables()` is a dotted path (`Order.items.*.name`) whose
+  root appears in `previewData()`.
+- The default subject and body compile in the notification sandbox,
+  reference only declared variables, and render the preview data.
+
+Reference implementation: the engine catalog in
+[`NotificationCatalog`](../src/Notifications/NotificationCatalog.php) — see
+`tests/Feature/Contracts/OrderShippedTemplateContractTest.php` (every catalog
+entry is also checked in `tests/Feature/Notifications/NotificationTemplateRendererTest.php`).
 
 ## Adding a new contract test suite
 

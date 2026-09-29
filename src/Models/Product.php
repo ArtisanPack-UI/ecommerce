@@ -77,6 +77,8 @@ use Laravel\Scout\Searchable;
  * @property \Illuminate\Database\Eloquent\Collection<int, ProductVariant>              $variants
  * @property \Illuminate\Database\Eloquent\Collection<int, ProductAttribute>            $productAttributes
  * @property \Illuminate\Database\Eloquent\Collection<int, ProductPrice>                $prices
+ * @property \Illuminate\Database\Eloquent\Collection<int, ProductReview>               $reviews
+ * @property \Illuminate\Database\Eloquent\Collection<int, DigitalFile>                 $digitalFiles
  */
 class Product extends Model
 {
@@ -209,6 +211,31 @@ class Product extends Model
     public function prices(): MorphMany
     {
         return $this->morphMany( ProductPrice::class, 'priceable' );
+    }
+
+    /**
+     * Every review of the product, in any moderation status. Use
+     * `->approved()` for the storefront-visible ones.
+     *
+     * @since 1.0.0
+     *
+     * @return HasMany<ProductReview, $this>
+     */
+    public function reviews(): HasMany
+    {
+        return $this->hasMany( ProductReview::class );
+    }
+
+    /**
+     * Deliverable files for the product (and its variants).
+     *
+     * @since 1.0.0
+     *
+     * @return HasMany<DigitalFile, $this>
+     */
+    public function digitalFiles(): HasMany
+    {
+        return $this->hasMany( DigitalFile::class );
     }
 
     /**
