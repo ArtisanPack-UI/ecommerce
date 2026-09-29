@@ -4,20 +4,13 @@
  * EnsureEcommerceAbility middleware.
  *
  * Gates REST routes on an engine ability (`->middleware('ecommerce.can:order,viewAny')`).
- * The decision is **default-deny**:
- *
- * 1. If the host app defines the Gate ability `ecommerce.{resource}.{action}`,
- *    it decides.
- * 2. Otherwise, if it defines the umbrella ability `ecommerce.admin`, that
- *    decides.
- * 3. Otherwise the request is denied.
- *
- * The result is then passed through the
- * `ap.ecommerce.abilities.{resource}.{action}` filter (engine spec §6.18)
- * so the cms-framework / role satellites can grant or revoke without a
- * Gate definition. Unauthenticated requests get 401, denied ones 403,
- * both as `problem+json`. On success the request is flagged
- * `ecommerce.admin` so resources can reveal admin-only fields.
+ * The decision is delegated to {@see EcommerceAuthorizer} (default-deny:
+ * Gate ability → umbrella `ecommerce.admin` → deny, then the
+ * `ap.ecommerce.abilities.{resource}.{action}` filter, then the caller's
+ * Sanctum token abilities), the same decision the policies and GraphQL
+ * resolvers use. Unauthenticated requests get 401, denied ones 403, both
+ * as `problem+json`. On success the request is flagged `ecommerce.admin`
+ * so resources can reveal admin-only fields.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -31,10 +24,10 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Middleware;
 
+use ArtisanPackUI\Ecommerce\Auth\EcommerceAuthorizer;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
 use Closure;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Gate;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -57,6 +50,15 @@ class EnsureEcommerceAbility
     /**
      * @since 1.0.0
      *
+     * @param  EcommerceAuthorizer  $authorizer  Shared ability decision.
+     */
+    public function __construct( private readonly EcommerceAuthorizer $authorizer )
+    {
+    }
+
+    /**
+     * @since 1.0.0
+     *
      * @param  Request  $request   Request.
      * @param  Closure  $next      Next middleware.
      * @param  string   $resource  Resource name (e.g. `order`).
@@ -73,15 +75,7 @@ class EnsureEcommerceAbility
         }
 
         $ability = sprintf( 'ecommerce.%s.%s', $resource, $action );
-        $gate    = Gate::forUser( $user );
-
-        $allowed = match ( true ) {
-            Gate::has( $ability )           => $gate->allows( $ability, [ $request ] ),
-            Gate::has( 'ecommerce.admin' )  => $gate->allows( 'ecommerce.admin' ),
-            default                         => false,
-        };
-
-        $allowed = (bool) applyFilters( sprintf( 'ap.ecommerce.abilities.%s.%s', $resource, $action ), $allowed, $user, $request );
+        $allowed = $this->authorizer->allows( $user, $resource, $action, $request, $request );
 
         if ( ! $allowed ) {
             return Problem::make( 403, 'forbidden', 'Forbidden', sprintf( 'Missing ability %s.', $ability ), $request );

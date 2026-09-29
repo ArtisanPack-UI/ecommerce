@@ -25,6 +25,7 @@ use ArtisanPackUI\Ecommerce\Http\Resources\ShipmentResource;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\Shipment;
+use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use ArtisanPackUI\Ecommerce\Services\ShipmentService;
 use ArtisanPackUI\Ecommerce\ValueObjects\TrackingStatus;
 use Illuminate\Http\JsonResponse;
@@ -55,6 +56,7 @@ class OrderShipmentController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Create a shipment for an order', resource: ShipmentResource::class, status: 201 )]
     public function store( StoreShipmentRequest $request, Order $order ): JsonResponse
     {
         $quantities = [];
@@ -86,6 +88,7 @@ class OrderShipmentController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Update a shipment', resource: ShipmentResource::class )]
     public function update( UpdateShipmentRequest $request, Order $order, Shipment $shipment ): JsonResponse
     {
         $data = $request->validated();

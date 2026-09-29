@@ -88,12 +88,31 @@ jobs:
           # Write to file for multi-line support
           echo "$NOTES" > release_notes.txt
 
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: dom, curl, libxml, mbstring, zip, pdo, sqlite, pdo_sqlite
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      # OpenAPI 3.1 spec for the REST API, built from the registered routes,
+      # their middleware, form requests, and resource schemas.
+      - name: Generate OpenAPI spec
+        run: vendor/bin/testbench ecommerce:generate-openapi --output=build/openapi/ecommerce-openapi-v${{ steps.version.outputs.version }}.json
+
+      - name: Validate OpenAPI spec
+        run: npx --yes @redocly/cli@2 lint build/openapi/*.json
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: v${{ steps.version.outputs.version }}
           body_path: release_notes.txt
           generate_release_notes: false
+          files: build/openapi/*.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

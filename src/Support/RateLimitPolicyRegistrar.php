@@ -81,9 +81,13 @@ class RateLimitPolicyRegistrar
         } );
 
         RateLimiter::for( 'ecommerce.cart.mutate', function ( Request $request ): array {
+            // The per-IP bucket bounds callers who mint a fresh cart (or
+            // send a fresh token) per request to dodge the per-cart bucket.
             return [
                 Limit::perMinute( self::limit( 'cart.mutate.per_cart', 60 ) )
                     ->by( 'ecommerce:cart:token:' . self::cartSubject( $request ) ),
+                Limit::perMinute( self::limit( 'cart.mutate.per_ip', 300 ) )
+                    ->by( 'ecommerce:cart:ip:' . sha1( (string) $request->ip() ) ),
             ];
         } );
 
@@ -218,9 +222,12 @@ class RateLimitPolicyRegistrar
     /**
      * Resolves the cart-scoped subject used for cart-keyed policies.
      *
-     * Prefers an explicit `X-Cart-Token` header, falling back to a `cart`
-     * route parameter, then the caller's IP. The value is hashed by the
-     * caller so the raw token never lands in a cache key.
+     * Prefers the cart the request actually operates on — the `cart` route
+     * parameter, then a `cart_token` input — and only then an
+     * `X-Cart-Token` header, falling back to the caller's IP. The header
+     * comes last because it is client-controlled: preferring it would let
+     * a caller pick a fresh bucket per request for a cart named elsewhere.
+     * The value is hashed so the raw token never lands in a cache key.
      *
      * @since 1.0.0
      *
@@ -230,9 +237,9 @@ class RateLimitPolicyRegistrar
      */
     protected static function cartSubject( Request $request ): string
     {
-        $token = $request->header( 'X-Cart-Token' )
-            ?? $request->route( 'cart' )
-            ?? $request->input( 'cart_token' );
+        $token = $request->route( 'cart' )
+            ?? $request->input( 'cart_token' )
+            ?? $request->header( 'X-Cart-Token' );
 
         if ( is_string( $token ) && '' !== $token ) {
             return sha1( 'token:' . $token );

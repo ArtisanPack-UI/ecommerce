@@ -23,6 +23,7 @@ use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\PromotionRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\PromotionResource;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
 use ArtisanPackUI\Ecommerce\Models\Promotion;
+use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -49,6 +50,7 @@ class PromotionController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'List promotions', resource: PromotionResource::class, collection: true )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(
@@ -69,6 +71,7 @@ class PromotionController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Create a promotion', resource: PromotionResource::class, status: 201 )]
     public function store( PromotionRequest $request ): JsonResponse
     {
         $promotion = DB::transaction( fn (): Promotion => $this->persist( new Promotion(), $request->validated() ) );
@@ -87,6 +90,7 @@ class PromotionController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Update a promotion', resource: PromotionResource::class )]
     public function update( PromotionRequest $request, Promotion $promotion ): JsonResponse
     {
         DB::transaction( fn (): Promotion => $this->persist( $promotion, $request->validated() ) );
@@ -106,6 +110,7 @@ class PromotionController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Delete a promotion', resource: PromotionResource::class )]
     public function destroy( Request $request, Promotion $promotion ): JsonResponse
     {
         // Usage rows are the discount audit trail for placed orders; deleting

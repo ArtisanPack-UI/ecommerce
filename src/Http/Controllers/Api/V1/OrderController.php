@@ -21,6 +21,7 @@ namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateOrderRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\OrderResource;
 use ArtisanPackUI\Ecommerce\Models\Order;
+use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -57,6 +58,7 @@ class OrderController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'List orders', resource: OrderResource::class, collection: true )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(
@@ -84,6 +86,7 @@ class OrderController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Get an order', resource: OrderResource::class )]
     public function show( Request $request, Order $order ): JsonResponse
     {
         return $this->resourceResponse( $order, $request, OrderResource::class, self::INCLUDES );
@@ -97,6 +100,7 @@ class OrderController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Update an order', resource: OrderResource::class )]
     public function update( UpdateOrderRequest $request, Order $order ): JsonResponse
     {
         $data = $request->validated();

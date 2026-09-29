@@ -22,6 +22,7 @@ use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ShippingMethodRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\ShippingMethodResource;
 use ArtisanPackUI\Ecommerce\Models\ShippingMethod;
 use ArtisanPackUI\Ecommerce\Models\ShippingZone;
+use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -41,6 +42,7 @@ class ShippingMethodController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Add a shipping method to a zone', resource: ShippingMethodResource::class, status: 201 )]
     public function store( ShippingMethodRequest $request, ShippingZone $zone ): JsonResponse
     {
         $method = $zone->methods()->create( $request->validated() + [ 'config' => [] ] );
@@ -56,6 +58,7 @@ class ShippingMethodController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Update a shipping method', resource: ShippingMethodResource::class )]
     public function update( ShippingMethodRequest $request, ShippingMethod $method ): JsonResponse
     {
         $method->fill( $request->validated() )->save();
@@ -71,6 +74,7 @@ class ShippingMethodController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Delete a shipping method', resource: ShippingMethodResource::class )]
     public function destroy( Request $request, ShippingMethod $method ): JsonResponse
     {
         $method->delete();

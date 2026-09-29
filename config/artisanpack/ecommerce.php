@@ -201,6 +201,7 @@ return [
 
         'cart.mutate' => [
             'per_cart' => (int) env( 'ECOMMERCE_RATE_CART_MUTATE_PER_CART', 60 ),
+            'per_ip'   => (int) env( 'ECOMMERCE_RATE_CART_MUTATE_PER_IP', 300 ),
         ],
 
         'checkout.finalize' => [
@@ -381,11 +382,31 @@ return [
     |                      stack.
     |
     | `auth_middleware`  — Authentication middleware for non-public routes.
-    |                      Admin routes then require the Gate ability
-    |                      `ecommerce.{resource}.{action}` (or the umbrella
-    |                      `ecommerce.admin`), filterable via
+    |                      `ecommerce.service-signature` authenticates
+    |                      signed service-to-service calls (engine spec
+    |                      §11.4) and is a no-op for everything else;
+    |                      `auth:sanctum` then accepts Sanctum tokens and
+    |                      cookie sessions. Admin routes then require the
+    |                      Gate ability `ecommerce.{resource}.{action}` (or
+    |                      the umbrella `ecommerce.admin`), filterable via
     |                      `ap.ecommerce.abilities.{resource}.{action}`.
-    |                      With neither defined, admin routes deny.
+    |                      With neither defined, admin routes deny. A
+    |                      Sanctum token further narrows access to its
+    |                      abilities: `ecommerce:admin`,
+    |                      `ecommerce:storefront`, or per-resource scopes
+    |                      such as `ecommerce:orders.read`.
+    |
+    | `services`         — Service-to-service callers, keyed by the
+    |                      signature `keyId`. Each entry has a `secret`
+    |                      (shared HMAC key) and the token `abilities` the
+    |                      service is granted, e.g.
+    |                        'erp-sync' => [
+    |                            'secret'    => env( 'ECOMMERCE_ERP_SECRET' ),
+    |                            'abilities' => [ 'ecommerce:orders.read' ],
+    |                        ],
+    |
+    | `signature_tolerance_seconds` — Maximum clock skew accepted on a
+    |                      signed request's `Date` header (default 300s).
     |
     */
 
@@ -394,7 +415,130 @@ return [
         'default_per_page' => (int) env( 'ECOMMERCE_API_DEFAULT_PER_PAGE', 25 ),
         'max_per_page'     => (int) env( 'ECOMMERCE_API_MAX_PER_PAGE', 100 ),
         'middleware'       => [ 'api', 'ecommerce.request-id' ],
-        'auth_middleware'  => [ 'auth:sanctum' ],
+        'auth_middleware'  => [ 'ecommerce.service-signature', 'auth:sanctum' ],
+
+        'services' => [],
+
+        'signature_tolerance_seconds' => (int) env( 'ECOMMERCE_SERVICE_SIGNATURE_TOLERANCE', 300 ),
+    ],
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Outbound webhooks
+    |--------------------------------------------------------------------------
+    |
+    | Signed deliveries to `webhook_subscriptions` endpoints (engine spec
+    | §8). Each delivery is POSTed with
+    | `X-ArtisanPack-Signature: t=<ts>, v1=<hmac_sha256(ts.payload, secret)>`.
+    |
+    | `events`                 — Domain event classes delivered as webhooks.
+    |                            The wire name comes from the class
+    |                            (`OrderRefunded` → `order.refunded`).
+    | `backoff_seconds`        — Delay after the 1st, 2nd, … failed attempt
+    |                            (default 1m … 24h; the last entry repeats).
+    | `max_attempts`           — Attempts per delivery before it is given
+    |                            up on (default 10).
+    | `disable_after_failures` — Consecutive failures (across deliveries)
+    |                            before a subscription is switched off and
+    |                            `WebhookSubscriptionDisabled` fires.
+    | `timeout`                — HTTP timeout per attempt, in seconds.
+    | `claim_seconds`          — How long a queued attempt holds its row
+    |                            before the retry sweep may queue it again.
+    | `allow_insecure_urls`    — Accept `http://` endpoints (local dev only).
+    | `allow_private_hosts`    — Accept endpoints resolving to loopback /
+    |                            private / link-local addresses. Off by
+    |                            default to block SSRF into the store's own
+    |                            network; enable for local development or
+    |                            receivers on a private network.
+    | `include_admin_fields`   — Render admin-only resource fields (payment
+    |                            references, IP / user agent, product meta,
+    |                            cost prices) in payloads. Off by default.
+    | `connection` / `queue`   — Where `DeliverWebhookJob` is queued.
+    |
+    */
+
+    'webhooks' => [
+        'events' => [
+            \ArtisanPackUI\Ecommerce\Events\OrderStatusChanged::class,
+            \ArtisanPackUI\Ecommerce\Events\OrderSubstatusChanged::class,
+            \ArtisanPackUI\Ecommerce\Events\OrderEdited::class,
+            \ArtisanPackUI\Ecommerce\Events\OrderRefunded::class,
+            \ArtisanPackUI\Ecommerce\Events\PaymentSucceeded::class,
+            \ArtisanPackUI\Ecommerce\Events\PaymentFailed::class,
+            \ArtisanPackUI\Ecommerce\Events\PaymentRefunded::class,
+            \ArtisanPackUI\Ecommerce\Events\FraudBlocked::class,
+        ],
+        'backoff_seconds'        => [ 60, 300, 900, 1_800, 3_600, 7_200, 14_400, 28_800, 43_200, 86_400 ],
+        'max_attempts'           => (int) env( 'ECOMMERCE_WEBHOOK_MAX_ATTEMPTS', 10 ),
+        'disable_after_failures' => (int) env( 'ECOMMERCE_WEBHOOK_DISABLE_AFTER', 10 ),
+        'timeout'                => (int) env( 'ECOMMERCE_WEBHOOK_TIMEOUT', 10 ),
+        'claim_seconds'          => (int) env( 'ECOMMERCE_WEBHOOK_CLAIM_SECONDS', 300 ),
+        'allow_insecure_urls'    => (bool) env( 'ECOMMERCE_WEBHOOK_ALLOW_INSECURE_URLS', false ),
+        'allow_private_hosts'    => (bool) env( 'ECOMMERCE_WEBHOOK_ALLOW_PRIVATE_HOSTS', false ),
+        'include_admin_fields'   => (bool) env( 'ECOMMERCE_WEBHOOK_INCLUDE_ADMIN_FIELDS', false ),
+        'connection'             => env( 'ECOMMERCE_WEBHOOK_QUEUE_CONNECTION' ),
+        'queue'                  => env( 'ECOMMERCE_WEBHOOK_QUEUE' ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Search
+    |--------------------------------------------------------------------------
+    |
+    | Product search runs through Laravel Scout (parent plan §4.1).
+    |
+    | `driver` — Scout engine for products. Defaults to `database` so search
+    |            works with no extra infrastructure. Set it to `meilisearch`,
+    |            `typesense`, or `algolia` (after installing that engine's
+    |            client) — or to an empty value to follow `scout.driver`.
+    | `index`  — Index name for dedicated engines (`scout.prefix` is
+    |            prepended).
+    |
+    */
+
+    'search' => [
+        'driver' => env( 'ECOMMERCE_SEARCH_DRIVER', 'database' ),
+        'index'  => env( 'ECOMMERCE_SEARCH_INDEX', 'ecommerce_products' ),
+    ],
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | GraphQL
+    |--------------------------------------------------------------------------
+    |
+    | The `ecommerce` schema on rebing/graphql-laravel, served at
+    | `/graphql/ecommerce` (engine spec §10). Toggle it with
+    | `features.graphql`.
+    |
+    | `middleware`    — Route middleware. The endpoint serves public and
+    |                   authenticated fields in one request, so it resolves
+    |                   credentials without requiring them
+    |                   (`ecommerce.optional-auth`); each field then enforces
+    |                   its REST counterpart's ability and rate limit. An
+    |                   `Idempotency-Key` header is honoured when sent.
+    | `max_depth`     — Maximum query nesting depth (0 disables the check).
+    | `max_complexity`— Maximum operation cost (0 disables the check). Each
+    |                   field costs 1; a connection multiplies its selection
+    |                   by `first` and a relation list by
+    |                   `list_complexity_factor`, so nested lists and
+    |                   aliases add up quickly.
+    | `list_complexity_factor` — Assumed size of a relation list (default 5).
+    | `max_batch`     — Maximum operations in one batched request.
+    | `subscriptions` — Broadcast subscription events over Laravel
+    |                   broadcasting (requires a configured broadcaster).
+    |
+    */
+
+    'graphql' => [
+        'middleware'     => [ 'api', 'ecommerce.request-id', 'ecommerce.graphql-batch', 'ecommerce.service-signature', 'ecommerce.optional-auth', 'ecommerce.idempotency:optional' ],
+        'max_depth'      => (int) env( 'ECOMMERCE_GRAPHQL_MAX_DEPTH', 10 ),
+        'max_complexity' => (int) env( 'ECOMMERCE_GRAPHQL_MAX_COMPLEXITY', 5_000 ),
+
+        'list_complexity_factor' => (int) env( 'ECOMMERCE_GRAPHQL_LIST_COMPLEXITY_FACTOR', 5 ),
+        'max_batch'      => (int) env( 'ECOMMERCE_GRAPHQL_MAX_BATCH', 10 ),
+        'subscriptions' => (bool) env( 'ECOMMERCE_GRAPHQL_SUBSCRIPTIONS', false ),
     ],
 
 ];

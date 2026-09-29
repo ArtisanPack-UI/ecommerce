@@ -89,6 +89,7 @@ cross-package hooks standardization initiative).
 | `ap.ecommerce.product.deleted` | action | on delete | `(Product $product)` |
 | `ap.ecommerce.variant.saved` | action | Variant model events | `(Variant $variant, Product $product)` |
 | `ap.ecommerce.product.registeredTypes` | filter | product-type registry | `(array $types)` — simple, variant, digital, subscription, bundle |
+| `ap.ecommerce.product.searchableData` | filter | Scout `Product::toSearchableArray()` | `(array $data, Product $product)` — add fields to a dedicated search index; see [search.md](search.md) |
 
 ## Inventory (MEDIUM)
 
@@ -107,11 +108,36 @@ cross-package hooks standardization initiative).
 | `ap.ecommerce.customer.firstOrder` | action | on first order paid | `(Customer $customer, Order $order)` |
 | `ap.ecommerce.customer.becameVip` | action | on VIP threshold cross (spend/order count) | `(Customer $customer, string $reason)` |
 
+## Outbound webhooks (MEDIUM)
+
+| Hook | Type | Where | Payload |
+|---|---|---|---|
+| `ap.ecommerce.webhook.subscribing` | filter | before a subscription is inserted | `(array $attributes)` — return `null` to abort |
+| `ap.ecommerce.webhook.delivering` | filter | before a delivery is signed and sent | `(array $payload, WebhookSubscription $subscription, string $event)` |
+| `ap.ecommerce.webhook.delivered` | action | on a 2xx response | `(WebhookDelivery $delivery)` |
+| `ap.ecommerce.webhook.failed` | action | on a non-2xx response or transport error | `(WebhookDelivery $delivery, Throwable $reason)` |
+| `ap.ecommerce.webhook.subscriptionDisabled` | action | when the consecutive-failure ceiling is hit | `(WebhookSubscription $subscription)` |
+
+See [webhooks.md](webhooks.md).
+
+## API augmentation (MEDIUM)
+
+| Hook | Type | Where | Payload |
+|---|---|---|---|
+| `ap.ecommerce.api.resource.{name}` | filter | every REST resource (and so every GraphQL object) | `(array $data, Model $subject, Request $request)` |
+| `ap.ecommerce.api.list.{name}` | filter | before a REST listing is serialized | `(array $items, Builder $query, Request $request)` |
+| `ap.ecommerce.graphql.extend` | filter | GraphQL schema build | `(array $schema, TypeRegistry $registry)` — add types and fields; see [graphql.md](graphql.md) |
+
 ## Policy filters (MEDIUM)
 
-Every Laravel Gate ability check in `src/Policies/*.php` routes through
-`ap.ecommerce.abilities.{resource}.{action}` filters, matching the pattern used
-in `cms-framework` Wave 4c and `media-library`.
+Every ability check — the REST `ecommerce.can` middleware, the policies in
+`src/Policies/*.php`, and the GraphQL resolvers — routes through
+`ap.ecommerce.abilities.{resource}.{action}`, matching the pattern used in
+`cms-framework` Wave 4c and `media-library`. Payload:
+`(bool $allowed, Authenticatable $user, Request $request, mixed $subject)`,
+where `$subject` is the model when checked through a policy or GraphQL and the
+request when checked by REST middleware. A filter can't widen what a scoped
+Sanctum token allows. See [api-auth.md](api-auth.md).
 
 ## Landing checklist
 
@@ -127,5 +153,7 @@ sub-issue linked back to #97.
 - [ ] Product / variant lifecycle hooks fired + tested + documented
 - [ ] Inventory hooks fired + tested + documented
 - [ ] Customer lifecycle hooks fired + tested + documented
-- [ ] Policy ability filters wired in every policy
+- [x] Policy ability filters wired in every policy
+- [x] Outbound webhook hooks fired + tested + documented
+- [x] API augmentation hooks (`api.resource`, `api.list`, `graphql.extend`) fired + tested + documented
 - [ ] README "events, and hooks" claim links to this reference

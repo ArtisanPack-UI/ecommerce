@@ -33,6 +33,7 @@ namespace ArtisanPackUI\Ecommerce\Http\Controllers;
 
 use ArtisanPackUI\Ecommerce\Models\IdempotencyRecord;
 use ArtisanPackUI\Ecommerce\Models\InboundWebhookDelivery;
+use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\ValueObjects\WebhookResult;
 use Illuminate\Database\QueryException;
@@ -69,6 +70,7 @@ class WebhookController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Receive a payment-provider webhook', description: 'Dispatched to the payment gateway registered under `{provider}`, which verifies the provider signature. Unknown providers are a 404.' )]
     public function handle( Request $request, string $provider ): JsonResponse
     {
         $gateway = $this->gateways->find( $provider );
