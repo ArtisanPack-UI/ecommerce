@@ -150,12 +150,11 @@ class RefundService
             // must still fit inside the outstanding balance and the
             // partial-refund capability of the active gateway.
             if ( $filteredAmount->getCurrency()->getCode() !== $currency ) {
-                throw new RefundNotAllowedException( sprintf(
-                    'Refund filter returned currency "%s"; order %d is settled in "%s".',
-                    $filteredAmount->getCurrency()->getCode(),
-                    $locked->id,
-                    $currency,
-                ) );
+                throw new RefundNotAllowedException( __( 'Refund filter returned currency ":returned"; order :order is settled in ":currency".', [
+                    'returned' => $filteredAmount->getCurrency()->getCode(),
+                    'order'    => $locked->id,
+                    'currency' => $currency,
+                ] ) );
             }
 
             $filteredTotal = (int) $filteredAmount->getAmount();
@@ -166,12 +165,11 @@ class RefundService
             $result = $gateway->refund( $locked, $filteredAmount, $reason );
 
             if ( ! $result->success ) {
-                throw new RefundNotAllowedException( sprintf(
-                    'Gateway "%s" declined refund for order %d: %s',
-                    $gateway->key(),
-                    $locked->id,
-                    $result->errorMessage ?? ( $result->errorCode ?? 'unknown error' ),
-                ) );
+                throw new RefundNotAllowedException( __( 'Gateway ":gateway" declined refund for order :order: :error', [
+                    'gateway' => $gateway->key(),
+                    'order'   => $locked->id,
+                    'error'   => $result->errorMessage ?? ( $result->errorCode ?? __( 'unknown error' ) ),
+                ] ) );
             }
 
             // A gateway that reports success but moved a different amount
@@ -184,15 +182,14 @@ class RefundService
                 ! $result->amount->equals( $filteredAmount )
                 || $result->amount->getCurrency()->getCode() !== $filteredAmount->getCurrency()->getCode()
             ) {
-                throw new RefundNotAllowedException( sprintf(
-                    'Gateway "%s" reported a successful refund of %s %s but %s %s was requested for order %d; refusing to record a mismatched ledger row.',
-                    $gateway->key(),
-                    $result->amount->getAmount(),
-                    $result->amount->getCurrency()->getCode(),
-                    $filteredAmount->getAmount(),
-                    $filteredAmount->getCurrency()->getCode(),
-                    $locked->id,
-                ) );
+                throw new RefundNotAllowedException( __( 'Gateway ":gateway" reported a successful refund of :refunded :refunded_currency but :requested :requested_currency was requested for order :order; refusing to record a mismatched ledger row.', [
+                    'gateway'            => $gateway->key(),
+                    'refunded'           => $result->amount->getAmount(),
+                    'refunded_currency'  => $result->amount->getCurrency()->getCode(),
+                    'requested'          => $filteredAmount->getAmount(),
+                    'requested_currency' => $filteredAmount->getCurrency()->getCode(),
+                    'order'              => $locked->id,
+                ] ) );
             }
 
             $refund = Refund::query()->create( [
@@ -267,12 +264,11 @@ class RefundService
     protected function guardOrderRefundable( Order $order ): void
     {
         if ( ! in_array( (string) $order->payment_status, self::REFUNDABLE_PAYMENT_STATUSES, true ) ) {
-            throw new RefundNotAllowedException( sprintf(
-                'Order %d has payment_status "%s"; refunds require one of: %s.',
-                $order->id,
-                $order->payment_status,
-                implode( ', ', self::REFUNDABLE_PAYMENT_STATUSES ),
-            ) );
+            throw new RefundNotAllowedException( __( 'Order :order has payment_status ":status"; refunds require one of: :allowed.', [
+                'order'   => $order->id,
+                'status'  => $order->payment_status,
+                'allowed' => implode( ', ', self::REFUNDABLE_PAYMENT_STATUSES ),
+            ] ) );
         }
     }
 
@@ -292,27 +288,24 @@ class RefundService
         $key = (string) ( $order->payment_gateway_key ?? '' );
 
         if ( '' === $key ) {
-            throw new RefundNotAllowedException( sprintf(
-                'Order %d has no payment_gateway_key set; cannot resolve a gateway to refund through.',
-                $order->id,
-            ) );
+            throw new RefundNotAllowedException( __( 'Order :order has no payment_gateway_key set; cannot resolve a gateway to refund through.', [
+                'order' => $order->id,
+            ] ) );
         }
 
         if ( ! $this->gateways->has( $key ) ) {
-            throw new RefundNotAllowedException( sprintf(
-                'PaymentGateway "%s" for order %d is not registered.',
-                $key,
-                $order->id,
-            ) );
+            throw new RefundNotAllowedException( __( 'PaymentGateway ":gateway" for order :order is not registered.', [
+                'gateway' => $key,
+                'order'   => $order->id,
+            ] ) );
         }
 
         $gateway = $this->gateways->get( $key );
 
         if ( ! $gateway->supportsRefunds() ) {
-            throw new RefundNotAllowedException( sprintf(
-                'PaymentGateway "%s" does not support refunds.',
-                $key,
-            ) );
+            throw new RefundNotAllowedException( __( 'PaymentGateway ":gateway" does not support refunds.', [
+                'gateway' => $key,
+            ] ) );
         }
 
         return $gateway;
@@ -363,11 +356,10 @@ class RefundService
             }
 
             if ( ! in_array( $orderItemId, $orderItemIds, true ) ) {
-                throw new RefundNotAllowedException( sprintf(
-                    'Order item %d does not belong to order %d.',
-                    $orderItemId,
-                    $order->id,
-                ) );
+                throw new RefundNotAllowedException( __( 'Order item :item does not belong to order :order.', [
+                    'item'  => $orderItemId,
+                    'order' => $order->id,
+                ] ) );
             }
 
             $out[] = [
@@ -398,12 +390,11 @@ class RefundService
         $outstanding = (int) $order->total_amount - (int) $order->total_refunded_amount;
 
         if ( $refundAmount > $outstanding ) {
-            throw new RefundNotAllowedException( sprintf(
-                'Refund total %d exceeds outstanding refundable balance %d for order %d.',
-                $refundAmount,
-                $outstanding,
-                $order->id,
-            ) );
+            throw new RefundNotAllowedException( __( 'Refund total :total exceeds outstanding refundable balance :outstanding for order :order.', [
+                'total'       => $refundAmount,
+                'outstanding' => $outstanding,
+                'order'       => $order->id,
+            ] ) );
         }
     }
 
@@ -432,12 +423,11 @@ class RefundService
         $outstanding = (int) $order->total_amount - (int) $order->total_refunded_amount;
 
         if ( $refundAmount !== $outstanding ) {
-            throw new RefundNotAllowedException( sprintf(
-                'PaymentGateway "%s" does not support partial refunds; refund total (%d) must equal the outstanding balance (%d).',
-                $gateway->key(),
-                $refundAmount,
-                $outstanding,
-            ) );
+            throw new RefundNotAllowedException( __( 'PaymentGateway ":gateway" does not support partial refunds; refund total (:total) must equal the outstanding balance (:outstanding).', [
+                'gateway'     => $gateway->key(),
+                'total'       => $refundAmount,
+                'outstanding' => $outstanding,
+            ] ) );
         }
     }
 
@@ -478,12 +468,11 @@ class RefundService
             $remaining   = (int) $item->quantity - $alreadyRfnd;
 
             if ( $qty > $remaining ) {
-                throw new RefundNotAllowedException( sprintf(
-                    'Refund quantity %d for order item %d exceeds the %d unit(s) still refundable on that line.',
-                    $qty,
-                    $itemId,
-                    $remaining,
-                ) );
+                throw new RefundNotAllowedException( __( 'Refund quantity :quantity for order item :item exceeds the :remaining unit(s) still refundable on that line.', [
+                    'quantity'  => $qty,
+                    'item'      => $itemId,
+                    'remaining' => $remaining,
+                ] ) );
             }
         }
     }

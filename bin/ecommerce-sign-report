@@ -1,0 +1,75 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * Signs a satellite verification report without booting the application.
+ *
+ * Usage: ecommerce-sign-report [report=.ecommerce-verify-report.json] [signature=verify-report.sig]
+ *
+ * Reads the Base64 Ed25519 key from ECOMMERCE_VERIFY_SIGNING_KEY. Only the
+ * engine's ReportSigner is loaded — no Composer autoloader, no service
+ * providers, no satellite or dependency code — so CI can hand the signing
+ * key to this step alone, never to the step that runs the satellite's
+ * tests. Refuses to sign a report whose `verified` flag is not true.
+ *
+ * @package    ArtisanPack_UI
+ * @subpackage Ecommerce
+ *
+ * @since      1.0.0
+ */
+
+declare( strict_types=1 );
+
+if ( ! function_exists( '__' ) ) {
+    /**
+     * Minimal stand-in for Laravel's translator (placeholder replacement only).
+     *
+     * @param  array<string, scalar>  $replace
+     */
+    function __( string $key, array $replace = [] ): string
+    {
+        foreach ( $replace as $name => $value ) {
+            $key = str_replace( ':' . $name, (string) $value, $key );
+        }
+
+        return $key;
+    }
+}
+
+require __DIR__ . '/../src/Testing/Verification/ReportSigner.php';
+
+use ArtisanPackUI\Ecommerce\Testing\Verification\ReportSigner;
+
+$reportPath    = $argv[1] ?? '.ecommerce-verify-report.json';
+$signaturePath = $argv[2] ?? dirname( $reportPath ) . DIRECTORY_SEPARATOR . 'verify-report.sig';
+$key           = (string) getenv( 'ECOMMERCE_VERIFY_SIGNING_KEY' );
+
+if ( '' === $key ) {
+    fwrite( STDERR, "No signing key. Set ECOMMERCE_VERIFY_SIGNING_KEY.\n" );
+    exit( 1 );
+}
+
+if ( ! is_file( $reportPath ) ) {
+    fwrite( STDERR, "Report not found: {$reportPath}\n" );
+    exit( 1 );
+}
+
+$report   = (string) file_get_contents( $reportPath );
+$document = json_decode( $report, true );
+
+if ( ! is_array( $document ) || true !== ( $document['verified'] ?? null ) ) {
+    fwrite( STDERR, "Refusing to sign: the report is not verified.\n" );
+    exit( 1 );
+}
+
+try {
+    $signer    = new ReportSigner();
+    $signature = $signer->sign( $report, $key );
+} catch ( Throwable $e ) {
+    fwrite( STDERR, $e->getMessage() . "\n" );
+    exit( 1 );
+}
+
+file_put_contents( $signaturePath, $signer->encode( $signature ) );
+
+fwrite( STDOUT, "Signature written to {$signaturePath} (key {$signature['key_id']}).\n" );

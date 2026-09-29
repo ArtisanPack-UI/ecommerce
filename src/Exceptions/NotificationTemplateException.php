@@ -39,6 +39,6 @@ class NotificationTemplateException extends EcommerceException
      */
     public function __construct( public readonly array $errors, ?Throwable $previous = null )
     {
-        parent::__construct( (string) ( $errors[0]['message'] ?? 'Invalid notification template.' ), [ 'errors' => $errors ], 0, $previous );
+        parent::__construct( (string) ( $errors[0]['message'] ?? __( 'Invalid notification template.' ) ), [ 'errors' => $errors ], 0, $previous );
     }
 }

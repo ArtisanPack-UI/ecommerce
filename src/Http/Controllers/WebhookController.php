@@ -82,11 +82,11 @@ class WebhookController
 
             $this->ledger( $request, $provider, WebhookResult::unverified(
                 'gateway_not_registered',
-                sprintf( 'Payment gateway "%s" is not registered.', $provider ),
+                __( 'Payment gateway ":provider" is not registered.', [ 'provider' => $provider ] ),
             ), 404, false );
 
             return new JsonResponse(
-                [ 'code' => 'gateway_not_registered', 'message' => sprintf( 'Payment gateway "%s" is not registered.', $provider ) ],
+                [ 'code' => 'gateway_not_registered', 'message' => __( 'Payment gateway ":provider" is not registered.', [ 'provider' => $provider ] ) ],
                 404,
             );
         }

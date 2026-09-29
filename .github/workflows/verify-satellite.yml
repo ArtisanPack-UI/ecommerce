@@ -1,0 +1,129 @@
+# Reusable satellite contract-verification workflow (parent plan §15.2).
+#
+# Satellites call this from their own repository; it is `workflow_call`
+# only, so it never runs on the engine's own pushes. Copy
+# `stubs/workflows/verify-satellite.yml` into a satellite as the caller.
+#
+# On every call it runs `ecommerce-verify-satellite` and uploads the report
+# as a workflow artifact. On a tag ref it also signs the report in a
+# separate step (when the `ECOMMERCE_VERIFY_SIGNING_KEY` secret is provided;
+# the step that runs satellite code never sees the key) and attaches
+# `.ecommerce-verify-report.json` + `verify-report.sig` to the GitHub
+# release for that tag — which is what the docs site checks to grant the
+# "contract-verified" badge.
+name: Verify satellite
+
+on:
+  workflow_call:
+    inputs:
+      php-version:
+        description: PHP version to run the contract suites on.
+        type: string
+        default: '8.4'
+      php-extensions:
+        description: PHP extensions to install (intl and sodium are always added).
+        type: string
+        default: 'dom, curl, libxml, mbstring, zip, pdo, sqlite, pdo_sqlite'
+      working-directory:
+        description: Satellite root, relative to the repository root.
+        type: string
+        default: '.'
+      extra-args:
+        description: Extra arguments passed to ecommerce-verify-satellite (e.g. --allow-empty).
+        type: string
+        default: ''
+      upload-release-assets:
+        description: Attach the report and signature to the tag's GitHub release.
+        type: boolean
+        default: true
+    secrets:
+      ECOMMERCE_VERIFY_SIGNING_KEY:
+        description: Base64 Ed25519 secret key used to sign the report on tagged releases.
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    name: Contract verification
+    permissions:
+      contents: write
+
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+
+    env:
+      IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
+      HAS_SIGNING_KEY: ${{ secrets.ECOMMERCE_VERIFY_SIGNING_KEY != '' }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: ${{ inputs.php-version }}
+          extensions: ${{ inputs.php-extensions }}, intl, sodium
+          coverage: none
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-php${{ inputs.php-version }}-verify-${{ hashFiles('**/composer.json', '**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-php${{ inputs.php-version }}-verify-
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      # Runs the satellite's (and its dependencies') code, so it never sees
+      # the signing key.
+      - name: Verify contracts
+        env:
+          EXTRA_ARGS: ${{ inputs.extra-args }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          # shellcheck disable=SC2086
+          vendor/bin/ecommerce-verify-satellite --package-version="$REF_NAME" $EXTRA_ARGS
+
+      # The key is only exposed here, to a script that loads the engine's
+      # ReportSigner and nothing else (no autoloader, no satellite code).
+      - name: Sign report
+        if: ${{ success() && env.IS_TAG == 'true' && env.HAS_SIGNING_KEY == 'true' }}
+        env:
+          ECOMMERCE_VERIFY_SIGNING_KEY: ${{ secrets.ECOMMERCE_VERIFY_SIGNING_KEY }}
+        run: vendor/bin/ecommerce-sign-report .ecommerce-verify-report.json verify-report.sig
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecommerce-verify-report
+          path: |
+            ${{ inputs.working-directory }}/.ecommerce-verify-report.json
+            ${{ inputs.working-directory }}/verify-report.sig
+          if-no-files-found: ignore
+
+      - name: Attach report to the release
+        if: ${{ success() && inputs.upload-release-assets && startsWith(github.ref, 'refs/tags/') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --verify-tag --title "$TAG" --notes ""
+          assets=(.ecommerce-verify-report.json)
+          if [ -f verify-report.sig ]; then
+            assets+=(verify-report.sig)
+          fi
+          gh release upload "$TAG" "${assets[@]}" --clobber

@@ -39,11 +39,10 @@ class ClaimVerificationFailedException extends EcommerceException
         public readonly string $orderNumber,
     ) {
         parent::__construct(
-            sprintf(
-                'Claim verification failed for customer #%d and order "%s".',
-                $customer->id ?? 0,
-                $orderNumber,
-            ),
+            __( 'Claim verification failed for customer #:customer and order ":order".', [
+                'customer' => $customer->id ?? 0,
+                'order'    => $orderNumber,
+            ] ),
         );
     }
 }

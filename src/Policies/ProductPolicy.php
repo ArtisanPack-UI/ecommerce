@@ -18,6 +18,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Policies;
 
+use ArtisanPackUI\Ecommerce\Models\Product;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 
@@ -91,6 +92,12 @@ class ProductPolicy extends EcommercePolicy
      */
     public function update( Authenticatable $user, Model $subject ): bool
     {
+        // A product whose type's satellite is uninstalled is read-only
+        // until the satellite returns (parent plan §16.6).
+        if ( $subject instanceof Product && $subject->typeIsMissing() ) {
+            return false;
+        }
+
         return $this->decide( $user, 'update', $subject );
     }
 

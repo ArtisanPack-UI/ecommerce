@@ -211,13 +211,39 @@ class RateLimitPolicyRegistrar
      */
     protected static function limit( string $path, int $default ): int
     {
-        $configured = config( 'artisanpack.ecommerce.rate_limits.' . $path );
+        $configured = config( 'artisanpack.ecommerce.rate_limits.' . $path ) ?? self::fromPolicyArray( $path );
 
         if ( is_numeric( $configured ) && (int) $configured > 0 ) {
             return (int) $configured;
         }
 
         return $default;
+    }
+
+    /**
+     * Reads `$path` (`checkout.finalize.per_ip`) from the shipped config
+     * shape, where the policy name is a single dotted array key
+     * (`'checkout.finalize' => [ 'per_ip' => … ]`). Laravel's dot-notation
+     * lookup can't reach through such a key, so without this a published
+     * config or `ECOMMERCE_RATE_*` override would silently never apply.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $path  Policy name plus bucket, dot-separated.
+     *
+     * @return mixed
+     */
+    protected static function fromPolicyArray( string $path ): mixed
+    {
+        $separator = strrpos( $path, '.' );
+
+        if ( false === $separator ) {
+            return null;
+        }
+
+        $limits = config( 'artisanpack.ecommerce.rate_limits' );
+
+        return is_array( $limits ) ? ( $limits[ substr( $path, 0, $separator ) ][ substr( $path, $separator + 1 ) ] ?? null ) : null;
     }
 
     /**

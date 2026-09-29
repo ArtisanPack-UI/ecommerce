@@ -44,6 +44,7 @@ use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\Models\ProductVariant;
 use ArtisanPackUI\Ecommerce\ValueObjects\PromotionResult;
 use Closure;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Money\Money;
@@ -64,6 +65,17 @@ class StorefrontCartService
      * @var string
      */
     public const COUPON_META_KEY = 'coupon_code';
+
+    /**
+     * `carts.meta` key listing the ids of lines that can no longer be sold
+     * (see {@see self::unsellableItems()}), so storefronts can flag them and
+     * checkouts can refuse before converting the cart.
+     *
+     * @since 1.0.0
+     *
+     * @var string
+     */
+    public const UNSELLABLE_META_KEY = 'unsellable_item_ids';
 
     /**
      * Most units one cart line can hold.
@@ -291,11 +303,21 @@ class StorefrontCartService
      */
     public function refreshTotals( Cart $cart ): Cart
     {
-        $cart->load( 'items' );
+        $cart->load( 'items.product' );
 
         $cart->subtotal_amount = (int) $cart->items->sum( 'line_subtotal_amount' );
 
-        $meta   = (array) ( $cart->meta ?? [] );
+        $meta       = (array) ( $cart->meta ?? [] );
+        $unsellable = $this->unsellableItems( $cart )->modelKeys();
+
+        if ( [] === $unsellable ) {
+            unset( $meta[ self::UNSELLABLE_META_KEY ] );
+        } else {
+            $meta[ self::UNSELLABLE_META_KEY ] = $unsellable;
+        }
+
+        $cart->meta = $meta;
+
         $coupon = $meta[ self::COUPON_META_KEY ] ?? null;
         $result = $this->promotions->evaluate( $cart, is_string( $coupon ) ? $coupon : null );
 
@@ -312,6 +334,28 @@ class StorefrontCartService
         $cart->save();
 
         return $cart;
+    }
+
+    /**
+     * Lines that can no longer be sold: their product was deleted, or its
+     * product type's satellite was uninstalled after the line was added.
+     * Adding such a product is already refused; lines added before the
+     * satellite went away stay in the cart (as lines of unpublished
+     * products do) but are listed here — and under
+     * {@see self::UNSELLABLE_META_KEY} in `carts.meta` after every totals
+     * refresh — so a checkout can refuse to convert the cart.
+     *
+     * @since 1.0.0
+     *
+     * @param  Cart  $cart  Cart.
+     *
+     * @return Collection<int, CartItem>
+     */
+    public function unsellableItems( Cart $cart ): Collection
+    {
+        return $cart->loadMissing( 'items.product' )->items
+            ->filter( static fn ( CartItem $item ): bool => null === $item->product || $item->product->typeIsMissing() )
+            ->values();
     }
 
     /**
@@ -367,6 +411,11 @@ class StorefrontCartService
 
         if ( null === $product ) {
             throw new CartOperationException( 'product_id', 'product-unavailable', __( 'That product is not available.' ) );
+        }
+
+        // Its type's satellite is uninstalled: listed, but not sellable.
+        if ( $product->typeIsMissing() ) {
+            throw new CartOperationException( 'product_id', 'product-type-missing', __( 'That product is not available right now.' ) );
         }
 
         $variant = null;

@@ -25,6 +25,9 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Notifications;
 
+use ArtisanPackUI\Ecommerce\Support\MoneyFormatter;
+use ArtisanPackUI\Ecommerce\Support\TaxLabel;
+
 /**
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -144,6 +147,7 @@ final class NotificationCatalog
             'Order.discount',
             'Order.shipping',
             'Order.tax',
+            'Order.tax_label',
             'Order.total',
             'Order.shipping_address',
             'Order.customer.name',
@@ -173,7 +177,7 @@ final class NotificationCatalog
                 __( 'Your :store order :number', [ 'store' => '{{ Store.name }}', 'number' => '{{ Order.number }}' ] ),
                 __( '<p>Hi {{ Order.customer.first_name|default(Order.customer.name) }},</p><p>Thanks for your order! Here is your summary.</p>' )
                     . '<table>' . $orderTable . '</table>'
-                    . __( '<p>Total: <strong>{{ Order.total }}</strong></p><p>We will let you know when it ships.</p>' ),
+                    . __( '<p>Subtotal: {{ Order.subtotal }}<br>Shipping: {{ Order.shipping }}<br>{{ Order.tax_label }}: {{ Order.tax }}<br>Total: <strong>{{ Order.total }}</strong></p><p>We will let you know when it ships.</p>' ),
             ),
             new CatalogNotificationTemplate(
                 self::ORDER_PAID_ADMIN,
@@ -249,7 +253,7 @@ final class NotificationCatalog
                 ] ),
                 $pick( 'Store', 'Order', 'Downloads', 'Licenses' ),
                 __( 'Your downloads for order :number', [ 'number' => '{{ Order.number }}' ] ),
-                __( '<p>Hi {{ Order.customer.first_name|default(Order.customer.name) }},</p><p>Your files are ready:</p><ul>{% for download in Downloads %}<li>{% if download.is_streaming_only %}<a href="{{ download.stream_url }}">Watch {{ download.label }}</a>{% else %}<a href="{{ download.url }}">{{ download.label }}</a>{% endif %}{% if download.downloads_remaining %} ({{ download.downloads_remaining }} downloads{% if download.expires_at %}, until {{ download.expires_at|date("F j, Y") }}{% endif %}){% endif %}</li>{% endfor %}</ul>{% if Licenses %}<p>Your license keys:</p><ul>{% for license in Licenses %}<li>{{ license.product }}: <code>{{ license.key }}</code></li>{% endfor %}</ul>{% endif %}' ),
+                __( '<p>Hi {{ Order.customer.first_name|default(Order.customer.name) }},</p><p>Your files are ready:</p><ul>{% for download in Downloads %}<li>{% if download.is_streaming_only %}<a href="{{ download.stream_url }}">Watch {{ download.label }}</a>{% else %}<a href="{{ download.url }}">{{ download.label }}</a>{% endif %}{% if download.downloads_remaining %} ({{ download.downloads_remaining }} downloads{% if download.expires_at %}, until {{ download.expires_at|localized_date }}{% endif %}){% endif %}</li>{% endfor %}</ul>{% if Licenses %}<p>Your license keys:</p><ul>{% for license in Licenses %}<li>{{ license.product }}: <code>{{ license.key }}</code></li>{% endfor %}</ul>{% endif %}' ),
             ),
             new CatalogNotificationTemplate(
                 self::DIGITAL_PRODUCT_UPDATED,
@@ -325,16 +329,17 @@ final class NotificationCatalog
                 'placed_at'        => '2026-09-29T14:03:00+00:00',
                 'email'            => 'ada@example.com',
                 'currency'         => 'USD',
-                'subtotal'         => '$42.00',
-                'discount'         => '$0.00',
-                'shipping'         => '$5.00',
-                'tax'              => '$3.36',
-                'total'            => '$50.36',
+                'subtotal'         => MoneyFormatter::format( 4200, 'USD' ),
+                'discount'         => MoneyFormatter::format( 0, 'USD' ),
+                'shipping'         => MoneyFormatter::format( 500, 'USD' ),
+                'tax'              => MoneyFormatter::format( 336, 'USD' ),
+                'tax_label'        => TaxLabel::for(),
+                'total'            => MoneyFormatter::format( 5036, 'USD' ),
                 'shipping_address' => 'Ada Lovelace, 12 Analytical Way, London, NW1 6XE, GB',
                 'customer'         => [ 'name' => 'Ada Lovelace', 'first_name' => 'Ada', 'email' => 'ada@example.com' ],
                 'items'            => [
-                    [ 'name' => 'Difference Engine Poster', 'sku' => 'POSTER-01', 'quantity' => 2, 'unit_price' => '$12.00', 'total' => '$24.00' ],
-                    [ 'name' => 'Notes on the Engine (PDF)', 'sku' => 'EBOOK-01', 'quantity' => 1, 'unit_price' => '$18.00', 'total' => '$18.00' ],
+                    [ 'name' => 'Difference Engine Poster', 'sku' => 'POSTER-01', 'quantity' => 2, 'unit_price' => MoneyFormatter::format( 1200, 'USD' ), 'total' => MoneyFormatter::format( 2400, 'USD' ) ],
+                    [ 'name' => 'Notes on the Engine (PDF)', 'sku' => 'EBOOK-01', 'quantity' => 1, 'unit_price' => MoneyFormatter::format( 1800, 'USD' ), 'total' => MoneyFormatter::format( 1800, 'USD' ) ],
                 ],
             ],
             'Customer'      => [ 'name' => 'Ada Lovelace', 'first_name' => 'Ada', 'email' => 'ada@example.com' ],
@@ -346,10 +351,11 @@ final class NotificationCatalog
                 'shipped_at'      => '2026-09-30T09:00:00+00:00',
                 'delivered_at'    => '2026-10-02T16:30:00+00:00',
             ],
-            'Refund'        => [ 'amount' => '$18.00', 'reason' => 'Damaged in transit', 'created_at' => '2026-10-03T10:00:00+00:00' ],
+            'Refund'        => [ 'amount' => MoneyFormatter::format( 1800, 'USD' ), 'reason' => 'Damaged in transit', 'created_at' => '2026-10-03T10:00:00+00:00' ],
             'Product'       => [ 'name' => 'Notes on the Engine (PDF)', 'sku' => 'EBOOK-01' ],
             'Review'        => [
                 'rating'               => 5,
+                // i18n-lint:ignore reason:sample review content (store data), not interface copy
                 'title'                => 'Beautifully written',
                 'body'                 => "Clear, thorough, and inspiring.\nHighly recommended.",
                 'author_name'          => 'Ada Lovelace',
@@ -358,6 +364,7 @@ final class NotificationCatalog
             ],
             'Downloads'     => [
                 [
+                    // i18n-lint:ignore reason:sample product name (store data), not interface copy
                     'label'               => 'Notes on the Engine (PDF)',
                     'url'                 => 'https://shop.example.com/api/ecommerce/v1/downloads/sample-token',
                     'stream_url'          => 'https://shop.example.com/api/ecommerce/v1/downloads/sample-token/stream',
@@ -369,6 +376,7 @@ final class NotificationCatalog
             'Licenses'      => [
                 [ 'key' => 'K7QM2-XW9RT-4HJ8P-LMN3Q-ZX2CV', 'product' => 'Notes on the Engine (PDF)', 'activations_limit' => 5, 'expires_at' => null ],
             ],
+            // i18n-lint:ignore reason:sample product name (store data), not interface copy
             'File'          => [ 'label' => 'Notes on the Engine (PDF)', 'version' => '2.0.0' ],
             'License'       => [ 'key_hint' => 'ZX2CV', 'activations_count' => 2, 'activations_limit' => 5, 'expires_at' => null ],
             'Activation'    => [ 'activated_at' => '2026-10-04T08:15:00+00:00', 'ip_address' => '203.0.113.7' ],

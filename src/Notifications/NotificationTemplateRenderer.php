@@ -34,6 +34,8 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Notifications;
 
 use ArtisanPackUI\Ecommerce\Exceptions\NotificationTemplateException;
+use ArtisanPackUI\Ecommerce\Support\LocalizedDate;
+use DateTimeInterface;
 use Twig\Environment;
 use Twig\Error\Error as TwigError;
 use Twig\Extension\SandboxExtension;
@@ -48,6 +50,7 @@ use Twig\Node\Node;
 use Twig\Sandbox\SecurityError;
 use Twig\Sandbox\SecurityPolicy;
 use Twig\Source;
+use Twig\TwigFilter;
 
 /**
  * @package    ArtisanPack_UI
@@ -68,11 +71,13 @@ class NotificationTemplateRenderer
     public const ALLOWED_TAGS = [ 'if', 'for', 'apply' ];
 
     /**
-     * Filters a template may use. Deliberately absent: callable-taking
-     * filters (`map`, `filter`, `reduce`, `sort`), `raw`, and filters that
-     * can build arbitrarily large values from a short source — `batch`
-     * (its fill argument pads to any size), `format` (sprintf widths), and
-     * `split` (turns a literal into a loopable list).
+     * Filters a template may use. `localized_date` is the engine's own: it
+     * formats a date in the active locale via `Carbon::translatedFormat()`
+     * (Twig's `date` filter always prints English month names). Deliberately
+     * absent: callable-taking filters (`map`, `filter`, `reduce`, `sort`),
+     * `raw`, and filters that can build arbitrarily large values from a
+     * short source — `batch` (its fill argument pads to any size), `format`
+     * (sprintf widths), and `split` (turns a literal into a loopable list).
      *
      * @since 1.0.0
      *
@@ -90,6 +95,7 @@ class NotificationTemplateRenderer
         'keys',
         'last',
         'length',
+        'localized_date',
         'lower',
         'merge',
         'nl2br',
@@ -262,6 +268,14 @@ class NotificationTemplateRenderer
             'strict_variables' => false,
             'autoescape'       => static fn ( string $name ): string|false => str_starts_with( $name, 'html:' ) ? 'html' : false,
         ] );
+
+        $environment->addFilter( new TwigFilter(
+            'localized_date',
+            static fn ( mixed $date, ?string $format = null ): string => LocalizedDate::format(
+                $date instanceof DateTimeInterface || is_string( $date ) ? $date : null,
+                $format,
+            ),
+        ) );
 
         $environment->addExtension( new SandboxExtension( $this->policy(), true ) );
 

@@ -146,6 +146,8 @@ final class ResourceSchemas
         return [
             'Product' => self::schema( Resources\ProductResource::class, Models\Product::class, 'A catalog product.', [
                 'product_type'            => 'String!',
+                'type_missing'            => 'Boolean!',
+                'type_warning'            => 'String',
                 'name'                    => 'String!',
                 'slug'                    => 'String!',
                 'sku'                     => 'String',

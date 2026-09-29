@@ -52,10 +52,9 @@ class InvalidOrderStatusTransitionException extends EcommerceException
         $this->from = $from;
         $this->to   = $to;
 
-        parent::__construct( sprintf(
-            'Illegal order system_status transition: "%s" → "%s".',
-            $from,
-            $to,
-        ) );
+        parent::__construct( __( 'Illegal order system_status transition: ":from" → ":to".', [
+            'from' => $from,
+            'to'   => $to,
+        ] ) );
     }
 }

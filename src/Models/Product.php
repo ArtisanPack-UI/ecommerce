@@ -26,6 +26,7 @@ namespace ArtisanPackUI\Ecommerce\Models;
 
 use ArtisanPackUI\Ecommerce\Contracts\ProductType;
 use ArtisanPackUI\Ecommerce\Database\Factories\ProductFactory;
+use ArtisanPackUI\Ecommerce\ProductTypes\MissingProductType;
 use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -43,7 +44,7 @@ use Laravel\Scout\Searchable;
  *
  * The `type` column resolves through the {@see ProductTypeRegistry} at
  * runtime via {@see self::productType()}. An unknown value returns a
- * {@see \ArtisanPackUI\Ecommerce\ProductTypes\MissingProductType} placeholder
+ * {@see MissingProductType} placeholder
  * so orphaned rows never fatal the storefront.
  *
  * @package    ArtisanPack_UI
@@ -169,6 +170,46 @@ class Product extends Model
     public function productType(): ProductType
     {
         return app( ProductTypeRegistry::class )->get( $this->type );
+    }
+
+    /**
+     * Whether this product's `type` is not registered — typically because
+     * the satellite providing it was uninstalled (parent plan §16.6). The
+     * product stays queryable but is read-only and cannot be sold.
+     *
+     * @since 1.0.0
+     *
+     * @return bool
+     */
+    public function typeIsMissing(): bool
+    {
+        return $this->productType() instanceof MissingProductType;
+    }
+
+    /**
+     * Whether admin surfaces may edit this product.
+     *
+     * @since 1.0.0
+     *
+     * @return bool
+     */
+    public function isEditable(): bool
+    {
+        return ! $this->typeIsMissing();
+    }
+
+    /**
+     * The read-only warning for a product whose type is missing, or null.
+     *
+     * @since 1.0.0
+     *
+     * @return string|null
+     */
+    public function typeWarning(): ?string
+    {
+        $type = $this->productType();
+
+        return $type instanceof MissingProductType ? $type->readOnlyWarning() : null;
     }
 
     /**

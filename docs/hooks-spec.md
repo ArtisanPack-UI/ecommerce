@@ -1,5 +1,7 @@
 # Ecommerce Hooks Spec
 
+> For the hooks the engine actually fires today (names, arguments, return types, and where each one fires), see the authoritative [hooks reference](hooks.md). This page is the original design-time spec.
+
 Design-time specification for every extension hook this package fires. Locked
 in before implementation so nothing drifts as subsystems land.
 

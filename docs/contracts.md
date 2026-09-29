@@ -1,4 +1,212 @@
-# Contract test suites
+# Contracts
+
+Every swappable piece of the engine is a PHP interface in
+`ArtisanPackUI\Ecommerce\Contracts\` (parent plan §6.1, engine spec §4). A
+satellite implements the interface, registers the implementation in a
+registry (or rebinds it in the container), and proves it behaves by extending
+the matching abstract contract-test suite.
+
+## Contract reference
+
+| Contract | Registered through | Core implementations (key) | Contract-test suite |
+|---|---|---|---|
+| [`ProductType`](../src/Contracts/ProductType.php) | `ProductTypeRegistry` | `SimpleProductType` (`simple`), `DigitalProductType` (`digital`); `MissingProductType` placeholder for unknown keys | `ProductTypeContractTest` |
+| [`PaymentGateway`](../src/Contracts/PaymentGateway.php) | `PaymentGatewayRegistry` | `StripeGateway` (`stripe`, when `gateways.stripe.enabled`) | `PaymentGatewayContractTest` |
+| [`FraudProvider`](../src/Contracts/FraudProvider.php) | `FraudProviderRegistry` | `AlwaysApproveFraudProvider` (`always-approve`), `StripeRadarFraudProvider` (`stripe-radar`, with Stripe); `ChainFraudProvider` (`chain`) runs a comma-separated `fraud.provider` list | `FraudProviderContractTest` |
+| [`TaxProvider`](../src/Contracts/TaxProvider.php) | `TaxProviderRegistry` (active: `tax.provider`) | `ManualTaxProvider` (`manual`) | `TaxProviderContractTest` |
+| [`ContextAwareTaxProvider`](../src/Contracts/ContextAwareTaxProvider.php) (extends `TaxProvider`) | `TaxProviderRegistry` | `ManualTaxProvider` | `TaxProviderContractTest` |
+| [`ShippingRateProvider`](../src/Contracts/ShippingRateProvider.php) | `ShippingRateProviderRegistry` (empty by default; carrier satellites) | `ZoneShippingRateProvider` (`zones`, used internally for zone/method rates) | `ShippingRateProviderContractTest` |
+| [`ShippingMethodType`](../src/Contracts/ShippingMethodType.php) | `ShippingMethodTypeRegistry` | `flat-rate`, `free-shipping`, `local-pickup`, `weight-based`, `price-based` (`src/Shipping/Methods/`) | none |
+| [`ShippingLabelProvider`](../src/Contracts/ShippingLabelProvider.php) | `ShippingLabelProviderRegistry` (empty by default) | none | none |
+| [`FulfillmentAllocationStrategy`](../src/Contracts/FulfillmentAllocationStrategy.php) | `FulfillmentAllocationStrategyRegistry` (active: `fulfillment.allocation_strategy`) | `ProportionalByLineTotalStrategy` (`proportional-by-line-total`) | `FulfillmentAllocationStrategyContractTest` |
+| [`CurrencyRateProvider`](../src/Contracts/CurrencyRateProvider.php) | `CurrencyRateProviderRegistry` (active: `currency.provider`) | `ConfigRateProvider` (`config`), `FrankfurterRateProvider` (`frankfurter`) | none |
+| [`CartStorage`](../src/Contracts/CartStorage.php) | Container singleton (rebind to swap) | `DatabaseCartStorage` | `CartStorageContractTest` |
+| [`OrderNumberGenerator`](../src/Contracts/OrderNumberGenerator.php) | Container singleton | `RandomEightCharGenerator` | `OrderNumberGeneratorContractTest` |
+| [`ReviewModerator`](../src/Contracts/ReviewModerator.php) | Container singleton | `NoopReviewModerator` (`noop`) | `ReviewModeratorContractTest` |
+| [`PromotionCondition`](../src/Contracts/PromotionCondition.php) | `PromotionConditionRegistry` | `min-subtotal`, `cart-contains-product`, `cart-contains-product-type`, `customer-in-group`, `day-of-week`, `customer-first-order` | `PromotionConditionContractTest` |
+| [`OrderAwarePromotionCondition`](../src/Contracts/OrderAwarePromotionCondition.php) (extends `PromotionCondition`) | `PromotionConditionRegistry` | `cart-contains-product-type`, `customer-first-order` | `PromotionConditionContractTest` |
+| [`PromotionAction`](../src/Contracts/PromotionAction.php) | `PromotionActionRegistry` | `percent-off-cart`, `fixed-off-cart`, `percent-off-product`, `free-shipping`, `buy-x-get-y`, `add-free-item`, `tiered-discount` | `PromotionActionContractTest` |
+| [`KanbanCardWidget`](../src/Contracts/KanbanCardWidget.php) | `KanbanCardWidgetRegistry` | `total`, `item-count`, `customer`, `shipping-method`, `tags`, `days-in-column`, `payment-status`, `fulfillment-status` | `KanbanCardWidgetContractTest` |
+| [`KanbanAutomationTrigger`](../src/Contracts/KanbanAutomationTrigger.php) | `KanbanAutomationRegistry` | `send-email`, `dispatch-job`, `webhook`, `update-order-field`, `create-shipment`, `print-shipping-label` | `KanbanAutomationTriggerContractTest` |
+| [`NotificationTemplate`](../src/Contracts/NotificationTemplate.php) | `NotificationTemplateRegistry` | The catalog in `NotificationCatalog` | `NotificationTemplateContractTest` |
+| [`SatelliteUninstaller`](../src/Contracts/SatelliteUninstaller.php) | Declared on the satellite's `SatelliteRegistry` descriptor | none | none. See [satellite-lifecycle.md](satellite-lifecycle.md) |
+
+All registries live in `ArtisanPackUI\Ecommerce\Registries\` and are container
+singletons. Each has `register( string $key, string|object $entry, array $meta = [] )`,
+`has()`, `get()`, `all()`, `meta()`, and `keys()`. `$entry` is either a class
+name (resolved from the container on first use) or an instance. Registering
+the same key twice throws in `local`/`testing` and logs a warning everywhere
+else. `ProductTypeRegistry::get()` returns a `MissingProductType` for unknown
+keys instead of throwing.
+
+```php
+// In your satellite's service provider boot():
+$this->app->make( \ArtisanPackUI\Ecommerce\Registries\ShippingRateProviderRegistry::class )->register(
+    'acme:shippo',
+    ShippoRateProvider::class,
+    [ 'label' => __( 'Shippo' ) ],
+);
+
+// Container-bound contracts are swapped by rebinding:
+$this->app->singleton( \ArtisanPackUI\Ecommerce\Contracts\CartStorage::class, RedisCartStorage::class );
+```
+
+Registry keys are `kebab-case`, optionally prefixed with the publisher
+(`acme:shippo`); see engine spec §2.5.
+
+### Method signatures
+
+```php
+interface ProductType {
+    public function key(): string;
+    public function label(): string;
+    public function icon(): ?string;
+    public function validateCartOptions( Product $product, array $options ): array;
+    public function priceLine( Product $product, array $options, int $quantity, string $currency ): Money;
+    public function requiresFulfillment(): bool;
+    public function isInventoryTracked(): bool;
+    public function buildOrderSnapshot( CartItem $item ): array;
+    public function onOrderPlaced( Order $order, OrderItem $orderItem ): void;
+}
+
+interface PaymentGateway {
+    public function key(): string;
+    public function label(): string;
+    public function supportsRefunds(): bool;
+    public function supportsPartialRefunds(): bool;
+    public function supportsSavedInstruments(): bool;
+    public function createPaymentSession( Cart $cart, array $context = [] ): PaymentSession;
+    public function capturePayment( Order $order, PaymentSession $session ): PaymentResult;
+    public function voidPendingPayment( Order $order ): void;
+    public function refund( Order $order, Money $amount, ?string $reason = null ): RefundResult;
+    public function handleWebhook( Request $request ): WebhookResult;
+}
+
+interface FraudProvider {
+    public function key(): string;
+    public function label(): string;
+    public function assess( Cart $cart, Address $shipping, PaymentSession $session ): FraudDecision;
+}
+
+interface TaxProvider {
+    public function key(): string;
+    public function label(): string;
+    public function calculate( Cart $cart, Address $destination ): TaxResult;
+}
+
+interface ContextAwareTaxProvider extends TaxProvider {
+    public function calculateWithContext( Cart $cart, TaxContext $context ): TaxResult;
+}
+
+interface ShippingRateProvider {
+    public function key(): string;
+    public function label(): string;
+    public function getRatesForCart( Cart $cart, Address $destination ): Collection; // Collection<ShippingRate>
+}
+
+interface ShippingMethodType {
+    public function key(): string;
+    public function label(): string;
+    public function calculate( Cart $cart, Address $destination, array $config ): ?Money; // null = not available
+}
+
+interface ShippingLabelProvider {
+    public function key(): string;
+    public function buyLabel( Shipment $shipment ): ShippingLabel;
+    public function voidLabel( ShippingLabel $label ): void;
+    public function trackLabel( ShippingLabel $label ): TrackingStatus;
+}
+
+interface FulfillmentAllocationStrategy {
+    public function key(): string;
+    public function allocate( Order $order, iterable $items ): array; // [ orderItemId => [ 'shipping' => Money, 'tax' => Money ] ]
+}
+
+interface CurrencyRateProvider {
+    public function key(): string;
+    public function getRateE8( Currency $from, Currency $to ): int; // rate × 10^8
+}
+
+interface CartStorage {
+    public function find( string $token ): ?Cart;
+    public function findForCustomer( int $customerId ): ?Cart;
+    public function persist( Cart $cart ): void;
+    public function delete( Cart $cart ): void;
+}
+
+interface OrderNumberGenerator {
+    public function generate( Order $order ): string;
+}
+
+interface ReviewModerator {
+    public function key(): string;
+    public function moderate( ProductReview $review ): string; // approve | reject | spam | pending
+}
+
+interface PromotionCondition {
+    public function key(): string;
+    public function label(): string;
+    public function evaluate( Cart $cart, array $config ): bool;
+}
+
+interface OrderAwarePromotionCondition extends PromotionCondition {
+    public function evaluateOrder( Order $order, array $config ): bool;
+}
+
+interface PromotionAction {
+    public function key(): string;
+    public function label(): string;
+    public function apply( Cart $cart, DiscountLedger $ledger, array $config ): void;
+}
+
+interface KanbanCardWidget {
+    public function key(): string;
+    public function label(): string;
+    public function render( Order $order, KanbanColumn $column ): array; // render payload, never HTML
+    public function refreshSubscription( Order $order ): ?string;
+}
+
+interface KanbanAutomationTrigger {
+    public function key(): string;
+    public function label(): string;
+    public function fire( Order $order, KanbanAutomation $automation, array $config ): void;
+}
+
+interface NotificationTemplate {
+    public function key(): string;
+    public function label(): string;
+    public function channel(): string;
+    public function category(): string;
+    public function variables(): array;
+    public function previewData(): array;
+    public function defaultSubject(): ?string;
+    public function defaultBody(): string;
+}
+
+interface SatelliteUninstaller {
+    public function uninstall( SatelliteDescriptor $satellite, bool $purge ): void;
+}
+```
+
+> **Not implemented:** the parent plan's `SearchIndexer` contract (§6.1). Product
+> search runs through Laravel Scout (`artisanpack.ecommerce.search.driver`), and
+> satellites feed extra fields with the `ap.ecommerce.product.searchableData`
+> filter. See [search.md](search.md).
+
+## Verifying a satellite
+
+Contract compliance is advisory but public (parent plan §15.2). The engine
+boots any satellite that implements a contract. Running
+`vendor/bin/ecommerce-verify-satellite` (which runs
+`ecommerce:verify-satellite` through the satellite's `vendor/bin/testbench`;
+satellites usually alias it as a composer script) finds the implementations a
+satellite registers and runs the matching suites below against them. It then
+writes a JSON report that CI can sign and attach to a release, which earns the
+satellite a "contract-verified" badge. See
+[satellite-verification.md](satellite-verification.md) and the satellite
+directory in [satellites.md](satellites.md).
+
+## Contract test suites
 
 Every engine contract that satellites can implement ships with a companion
 abstract test class under `ArtisanPackUI\Ecommerce\Testing\Contracts\`. Extend
@@ -35,7 +243,45 @@ protected function getPackageProviders( $app ): array
 }
 ```
 
-## `ProductTypeContractTest`
+A complete satellite suite, for example
+`tests/Contracts/ShippoRateProviderContractTest.php` in a hypothetical
+`acme/ecommerce-shippo` package:
+
+```php
+<?php
+
+declare( strict_types=1 );
+
+namespace Acme\Shippo\Tests\Contracts;
+
+use Acme\Shippo\ShippoRateProvider;
+use Acme\Shippo\ShippoServiceProvider;
+use ArtisanPackUI\Ecommerce\Contracts\ShippingRateProvider;
+use ArtisanPackUI\Ecommerce\Testing\Contracts\ShippingRateProviderContractTest;
+use Illuminate\Support\Facades\Http;
+
+final class ShippoRateProviderContractTest extends ShippingRateProviderContractTest
+{
+    protected function getPackageProviders( $app ): array
+    {
+        return [ ...parent::getPackageProviders( $app ), ShippoServiceProvider::class ];
+    }
+
+    protected function provider(): ShippingRateProvider
+    {
+        return $this->app->make( ShippoRateProvider::class );
+    }
+
+    protected function seedServiceableDestination(): void
+    {
+        Http::fake( [ 'api.goshippo.com/*' => Http::response( [ 'rates' => [ /* … fixture … */ ] ] ) ] );
+    }
+}
+```
+
+Every test in the parent suite then runs against `ShippoRateProvider`.
+
+### `ProductTypeContractTest`
 
 Contract: [`ProductType`](../src/Contracts/ProductType.php) (engine spec §4.1).
 
@@ -68,7 +314,7 @@ Reference implementation:
 [`SimpleProductType`](../src/ProductTypes/SimpleProductType.php) — see
 `tests/Feature/Contracts/SimpleProductTypeContractTest.php`.
 
-## `CartStorageContractTest`
+### `CartStorageContractTest`
 
 Contract: [`CartStorage`](../src/Contracts/CartStorage.php) (engine spec §4.8).
 
@@ -92,7 +338,7 @@ Reference implementation:
 [`DatabaseCartStorage`](../src/Services/DatabaseCartStorage.php) — see
 `tests/Feature/Contracts/DatabaseCartStorageContractTest.php`.
 
-## `OrderNumberGeneratorContractTest`
+### `OrderNumberGeneratorContractTest`
 
 Contract: [`OrderNumberGenerator`](../src/Contracts/OrderNumberGenerator.php)
 (engine spec §4.9).
@@ -117,7 +363,7 @@ Reference implementation:
 [`RandomEightCharGenerator`](../src/Services/RandomEightCharGenerator.php) —
 see `tests/Feature/Contracts/RandomEightCharGeneratorContractTest.php`.
 
-## `FulfillmentAllocationStrategyContractTest`
+### `FulfillmentAllocationStrategyContractTest`
 
 Contract:
 [`FulfillmentAllocationStrategy`](../src/Contracts/FulfillmentAllocationStrategy.php)
@@ -139,7 +385,7 @@ Reference implementation:
 [`ProportionalByLineTotalStrategy`](../src/Fulfillment/ProportionalByLineTotalStrategy.php)
 — see `tests/Feature/Contracts/ProportionalByLineTotalStrategyContractTest.php`.
 
-## `PaymentGatewayContractTest`
+### `PaymentGatewayContractTest`
 
 Contract: [`PaymentGateway`](../src/Contracts/PaymentGateway.php) (engine spec §4.2).
 
@@ -164,7 +410,7 @@ Invariants verified:
 Reference implementation: an in-memory gateway — see
 `tests/Feature/Contracts/InMemoryPaymentGatewayContractTest.php`.
 
-## `TaxProviderContractTest`
+### `TaxProviderContractTest`
 
 Contract: [`TaxProvider`](../src/Contracts/TaxProvider.php) (engine spec §4.5).
 
@@ -194,7 +440,7 @@ Invariants verified:
 Reference implementation: [`ManualTaxProvider`](../src/Tax/ManualTaxProvider.php)
 — see `tests/Feature/Contracts/ManualTaxProviderContractTest.php`.
 
-## `ShippingRateProviderContractTest`
+### `ShippingRateProviderContractTest`
 
 Contract: [`ShippingRateProvider`](../src/Contracts/ShippingRateProvider.php)
 (engine spec §4.3).
@@ -219,7 +465,7 @@ Reference implementation:
 [`ZoneShippingRateProvider`](../src/Shipping/ZoneShippingRateProvider.php) — see
 `tests/Feature/Contracts/ZoneShippingRateProviderContractTest.php`.
 
-## `FraudProviderContractTest`
+### `FraudProviderContractTest`
 
 Contract: [`FraudProvider`](../src/Contracts/FraudProvider.php) (engine spec §4.17).
 
@@ -247,7 +493,7 @@ and [`StripeRadarFraudProvider`](../src/Services/Fraud/StripeRadarFraudProvider.
 — see `tests/Feature/Contracts/AlwaysApproveFraudProviderContractTest.php` and
 `tests/Feature/Contracts/StripeRadarFraudProviderContractTest.php`.
 
-## `PromotionConditionContractTest`
+### `PromotionConditionContractTest`
 
 Contract: [`PromotionCondition`](../src/Contracts/PromotionCondition.php)
 (engine spec §4.10).
@@ -271,7 +517,7 @@ Reference implementations: `min-subtotal`, `cart-contains-product`,
 [`src/Promotions/Conditions/`](../src/Promotions/Conditions/) — see
 `tests/Feature/Contracts/*ConditionContractTest.php`.
 
-## `PromotionActionContractTest`
+### `PromotionActionContractTest`
 
 Contract: [`PromotionAction`](../src/Contracts/PromotionAction.php)
 (engine spec §4.11).
@@ -300,7 +546,7 @@ Reference implementations: `percent-off-cart`, `fixed-off-cart`,
 `tiered-discount` under [`src/Promotions/Actions/`](../src/Promotions/Actions/) —
 see `tests/Feature/Contracts/*ActionContractTest.php`.
 
-## `KanbanCardWidgetContractTest`
+### `KanbanCardWidgetContractTest`
 
 Contract: [`KanbanCardWidget`](../src/Contracts/KanbanCardWidget.php)
 (engine spec §4.12). Fixtures come from
@@ -327,7 +573,7 @@ Reference implementations: `total`, `item-count`, `customer`,
 `fulfillment-status` under [`src/Kanban/Widgets/`](../src/Kanban/Widgets/) —
 see `tests/Feature/Contracts/*WidgetContractTest.php`.
 
-## `KanbanAutomationTriggerContractTest`
+### `KanbanAutomationTriggerContractTest`
 
 Contract: [`KanbanAutomationTrigger`](../src/Contracts/KanbanAutomationTrigger.php)
 (engine spec §4.13).
@@ -354,7 +600,7 @@ Reference implementations: `send-email`, `dispatch-job`, `webhook`,
 [`src/Kanban/Triggers/`](../src/Kanban/Triggers/) — see
 `tests/Feature/Contracts/*TriggerContractTest.php`.
 
-## `ReviewModeratorContractTest`
+### `ReviewModeratorContractTest`
 
 Contract: [`ReviewModerator`](../src/Contracts/ReviewModerator.php)
 (engine spec §4.16).
@@ -377,7 +623,7 @@ Reference implementation:
 [`NoopReviewModerator`](../src/Reviews/NoopReviewModerator.php) — see
 `tests/Feature/Contracts/NoopReviewModeratorContractTest.php`.
 
-## `NotificationTemplateContractTest`
+### `NotificationTemplateContractTest`
 
 Contract: [`NotificationTemplate`](../src/Contracts/NotificationTemplate.php)
 (engine spec §4.14).
@@ -400,7 +646,7 @@ Reference implementation: the engine catalog in
 `tests/Feature/Contracts/OrderShippedTemplateContractTest.php` (every catalog
 entry is also checked in `tests/Feature/Notifications/NotificationTemplateRendererTest.php`).
 
-## Adding a new contract test suite
+### Adding a new contract test suite
 
 When a Phase 2+ contract lands, add:
 

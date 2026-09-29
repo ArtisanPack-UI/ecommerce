@@ -71,14 +71,14 @@ class EnsureEcommerceAbility
         $user = $request->user();
 
         if ( null === $user ) {
-            return Problem::make( 401, 'unauthenticated', 'Unauthenticated', 'Authentication is required.', $request );
+            return Problem::make( 401, 'unauthenticated', __( 'Unauthenticated' ), __( 'Authentication is required.' ), $request );
         }
 
         $ability = sprintf( 'ecommerce.%s.%s', $resource, $action );
         $allowed = $this->authorizer->allows( $user, $resource, $action, $request, $request );
 
         if ( ! $allowed ) {
-            return Problem::make( 403, 'forbidden', 'Forbidden', sprintf( 'Missing ability %s.', $ability ), $request );
+            return Problem::make( 403, 'forbidden', __( 'Forbidden' ), __( 'Missing ability :ability.', [ 'ability' => $ability ] ), $request );
         }
 
         $request->attributes->set( self::ADMIN_ATTRIBUTE, true );

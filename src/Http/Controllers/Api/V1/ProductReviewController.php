@@ -100,7 +100,7 @@ class ProductReviewController extends ApiController
         $user = $request->user();
 
         if ( null !== $user && ! TokenAbilities::allowsStorefront( $user ) ) {
-            return Problem::make( 403, 'forbidden', __( 'Forbidden' ), sprintf( 'Missing ability %s.', TokenAbilities::STOREFRONT ), $request );
+            return Problem::make( 403, 'forbidden', __( 'Forbidden' ), __( 'Missing ability :ability.', [ 'ability' => TokenAbilities::STOREFRONT ] ), $request );
         }
 
         $customer = Customer::forUser( $user );

@@ -65,11 +65,10 @@ final class ListQuery
         $unknown   = array_diff( $requested, array_keys( $allowed ) );
 
         if ( [] !== $unknown ) {
-            self::fail( $request, 'include', sprintf(
-                'Unsupported include "%s". Allowed: %s.',
-                implode( ', ', $unknown ),
-                [] === $allowed ? '(none)' : implode( ', ', array_keys( $allowed ) ),
-            ) );
+            self::fail( $request, 'include', __( 'Unsupported include ":include". Allowed: :allowed.', [
+                'include' => implode( ', ', $unknown ),
+                'allowed' => [] === $allowed ? __( '(none)' ) : implode( ', ', array_keys( $allowed ) ),
+            ] ) );
         }
 
         $with = [];
@@ -107,20 +106,19 @@ final class ListQuery
         $requestedFilters = $request->query( 'filter', [] );
 
         if ( ! is_array( $requestedFilters ) ) {
-            self::fail( $request, 'filter', 'The filter parameter must be of the form filter[field]=value.' );
+            self::fail( $request, 'filter', __( 'The filter parameter must be of the form filter[field]=value.' ) );
         }
 
         foreach ( $requestedFilters as $name => $value ) {
             if ( ! isset( $filters[ $name ] ) ) {
-                self::fail( $request, 'filter', sprintf(
-                    'Unsupported filter "%s". Allowed: %s.',
-                    $name,
-                    [] === $filters ? '(none)' : implode( ', ', array_keys( $filters ) ),
-                ) );
+                self::fail( $request, 'filter', __( 'Unsupported filter ":filter". Allowed: :allowed.', [
+                    'filter'  => $name,
+                    'allowed' => [] === $filters ? __( '(none)' ) : implode( ', ', array_keys( $filters ) ),
+                ] ) );
             }
 
             if ( ! is_scalar( $value ) ) {
-                self::fail( $request, 'filter', sprintf( 'Filter "%s" must be a scalar value.', $name ) );
+                self::fail( $request, 'filter', __( 'Filter ":filter" must be a scalar value.', [ 'filter' => $name ] ) );
             }
 
             $target = $filters[ $name ];
@@ -149,11 +147,10 @@ final class ListQuery
             $name       = ltrim( $sort, '-' );
 
             if ( 'id' !== $name && ! isset( $sorts[ $name ] ) ) {
-                self::fail( $request, 'sort', sprintf(
-                    'Unsupported sort "%s". Allowed: %s.',
-                    $name,
-                    implode( ', ', [ 'id', ...array_keys( $sorts ) ] ),
-                ) );
+                self::fail( $request, 'sort', __( 'Unsupported sort ":sort". Allowed: :allowed.', [
+                    'sort'    => $name,
+                    'allowed' => implode( ', ', [ 'id', ...array_keys( $sorts ) ] ),
+                ] ) );
             }
 
             $column = 'id' === $name ? $query->getModel()->getQualifiedKeyName() : $sorts[ $name ];
@@ -207,7 +204,7 @@ final class ListQuery
             $bool = filter_var( $value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE );
 
             if ( null === $bool ) {
-                self::fail( $request, 'filter', sprintf( 'Filter "%s" must be true or false.', $name ) );
+                self::fail( $request, 'filter', __( 'Filter ":filter" must be true or false.', [ 'filter' => $name ] ) );
             }
 
             return $bool;
@@ -215,7 +212,7 @@ final class ListQuery
 
         if ( 'int' === $type ) {
             if ( ! ctype_digit( $value ) ) {
-                self::fail( $request, 'filter', sprintf( 'Filter "%s" must be a whole number.', $name ) );
+                self::fail( $request, 'filter', __( 'Filter ":filter" must be a whole number.', [ 'filter' => $name ] ) );
             }
 
             return (int) $value;
@@ -260,7 +257,7 @@ final class ListQuery
         throw new HttpResponseException( Problem::make(
             400,
             'invalid-list-query',
-            'Invalid list query',
+            __( 'Invalid list query' ),
             $message,
             $request,
             [ [ 'field' => $field, 'code' => 'unsupported', 'message' => $message ] ],

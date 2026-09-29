@@ -20,13 +20,7 @@ namespace ArtisanPackUI\Ecommerce\Kanban\Widgets;
 
 use ArtisanPackUI\Ecommerce\Models\KanbanColumn;
 use ArtisanPackUI\Ecommerce\Models\Order;
-use Money\Currencies\ISOCurrencies;
-use Money\Currency;
-use Money\Formatter\DecimalMoneyFormatter;
-use Money\Formatter\IntlMoneyFormatter;
-use Money\Money;
-use NumberFormatter;
-use Throwable;
+use ArtisanPackUI\Ecommerce\Support\MoneyFormatter;
 
 /**
  * @package    ArtisanPack_UI
@@ -86,7 +80,7 @@ class TotalWidget extends AbstractKanbanCardWidget
     }
 
     /**
-     * Formats minor units for display, using intl when available.
+     * Formats minor units for display in the active locale.
      *
      * @since 1.0.0
      *
@@ -97,17 +91,6 @@ class TotalWidget extends AbstractKanbanCardWidget
      */
     protected function format( int $amount, string $currency ): string
     {
-        try {
-            $money      = new Money( $amount, new Currency( strtoupper( $currency ) ) );
-            $currencies = new ISOCurrencies();
-
-            if ( class_exists( NumberFormatter::class ) ) {
-                return ( new IntlMoneyFormatter( new NumberFormatter( app()->getLocale(), NumberFormatter::CURRENCY ), $currencies ) )->format( $money );
-            }
-
-            return ( new DecimalMoneyFormatter( $currencies ) )->format( $money ) . ' ' . strtoupper( $currency );
-        } catch ( Throwable ) {
-            return $amount . ' ' . strtoupper( $currency );
-        }
+        return MoneyFormatter::format( $amount, $currency );
     }
 }

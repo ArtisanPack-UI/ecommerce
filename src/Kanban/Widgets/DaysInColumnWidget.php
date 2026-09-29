@@ -22,6 +22,7 @@ namespace ArtisanPackUI\Ecommerce\Kanban\Widgets;
 use ArtisanPackUI\Ecommerce\Models\KanbanColumn;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderBoardAssignment;
+use ArtisanPackUI\Ecommerce\Support\LocalizedDate;
 use Illuminate\Support\Carbon;
 
 /**
@@ -89,7 +90,7 @@ class DaysInColumnWidget extends AbstractKanbanCardWidget
         };
 
         return $this->payload( (string) $days, $tone, [
-            'tooltip' => __( 'In this column since :date', [ 'date' => $since->toDateString() ] ),
+            'tooltip' => __( 'In this column since :date', [ 'date' => LocalizedDate::format( $since ) ] ),
         ] );
     }
 }
