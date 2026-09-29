@@ -60,3 +60,49 @@ if ( ! function_exists( 'makeAnonymousModel' ) ) {
         return new class extends Illuminate\Database\Eloquent\Model {};
     }
 }
+
+if ( ! function_exists( 'cartWithLines' ) ) {
+    /**
+     * Builds a persisted cart whose lines are described by `$lines`, with
+     * the `items` relation (and each item's product) loaded.
+     *
+     * Each line: `[ 'unit' => int, 'qty' => int, 'product' => array|Product, 'variant' => ?ProductVariant ]`.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<int, array<string, mixed>>  $lines
+     * @param  string                            $currency
+     * @param  array<string, mixed>              $cartAttributes
+     */
+    function cartWithLines( array $lines, string $currency = 'USD', array $cartAttributes = [] ): ArtisanPackUI\Ecommerce\Models\Cart
+    {
+        $cart = ArtisanPackUI\Ecommerce\Models\Cart::factory()
+            ->currency( $currency )
+            ->create( $cartAttributes );
+
+        foreach ( $lines as $line ) {
+            $product = $line['product'] ?? [];
+            $product = $product instanceof ArtisanPackUI\Ecommerce\Models\Product
+                ? $product
+                : ArtisanPackUI\Ecommerce\Models\Product::factory()->create( $product );
+
+            $unit = (int) ( $line['unit'] ?? 1_000 );
+            $qty  = (int) ( $line['qty'] ?? 1 );
+
+            ArtisanPackUI\Ecommerce\Models\CartItem::factory()->create( [
+                'cart_id'                => $cart->id,
+                'product_id'             => $product->id,
+                'product_variant_id'     => isset( $line['variant'] ) ? $line['variant']->id : null,
+                'quantity'               => $qty,
+                'unit_price_amount'      => $unit,
+                'unit_price_currency'    => $currency,
+                'line_subtotal_amount'   => $unit * $qty,
+                'line_subtotal_currency' => $currency,
+                'line_total_amount'      => $unit * $qty,
+                'line_total_currency'    => $currency,
+            ] );
+        }
+
+        return $cart->load( 'items.product' );
+    }
+}

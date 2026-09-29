@@ -5,7 +5,7 @@
  *
  * Resolves the effective per-currency price of a priceable (Product or
  * ProductVariant) at a given time, falling back to the store's base currency
- * (converted via the active {@see CurrencyRateProvider}) when no explicit
+ * (converted via the active {@see \ArtisanPackUI\Ecommerce\Contracts\CurrencyRateProvider}) when no explicit
  * row exists in the requested currency.
  *
  * Engine spec §3.2 (schema), §4.7 (rate provider contract).
@@ -22,7 +22,6 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Services;
 
-use ArtisanPackUI\Ecommerce\Contracts\CurrencyRateProvider;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\Models\ProductPrice;
 use ArtisanPackUI\Ecommerce\Models\ProductVariant;
@@ -40,7 +39,7 @@ use Money\Money;
  * Lookup order for `resolve($priceable, $currency, $at)`:
  *   1. Active `product_prices` row for the priceable in `$currency` at `$at`.
  *   2. Otherwise: active row in the store's base currency, converted via the
- *      active {@see CurrencyRateProvider} using the E8 rate.
+ *      active {@see \ArtisanPackUI\Ecommerce\Contracts\CurrencyRateProvider} using the E8 rate.
  *   3. Otherwise: `null`. The caller decides how to surface a missing price.
  *
  * Windowing rules (§3.2): the row whose `[starts_at, ends_at]` contains `$at`
@@ -126,22 +125,9 @@ final class ProductPriceResolver
      */
     private function convert( Money $amount, string $fromCode, string $toCode ): Money
     {
-        /** @var string $providerKey */
-        $providerKey = (string) $this->config->get( 'artisanpack.ecommerce.currency.provider', 'config' );
-
-        /** @var CurrencyRateProvider $provider */
-        $provider = $this->rateProviders->get( $providerKey );
-
-        $rateE8 = $provider->getRateE8( new MoneyCurrency( $fromCode ), new MoneyCurrency( $toCode ) );
-
-        // Multiply by the E8 rate, then divide back by 10^8. Money::multiply
-        // accepts a string multiplier, Money::divide a string divisor —
-        // banker's rounding on the divide step is the money-ledger default.
-        // Money is currency-locked, so a target-currency Money is rebuilt
-        // from the converted amount rather than mutated in place.
-        $converted = $amount->multiply( (string) $rateE8 )->divide( '100000000' );
-
-        return new Money( $converted->getAmount(), new MoneyCurrency( $toCode ) );
+        // One conversion implementation engine-wide — including the
+        // minor-unit (subunit) scaling between currencies like USD and JPY.
+        return app( CurrencyConverter::class )->convert( $amount, $toCode );
     }
 
     /**
