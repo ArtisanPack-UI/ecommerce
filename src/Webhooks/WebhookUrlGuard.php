@@ -114,6 +114,31 @@ class WebhookUrlGuard
     }
 
     /**
+     * Guzzle options that pin the connection for `$url` to `$address`, so a
+     * DNS change between vetting and sending can't redirect the request.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $url      Endpoint URL.
+     * @param  string  $address  Vetted IP address (from {@see self::vettedAddress()}).
+     *
+     * @return array<string, mixed>
+     */
+    public static function pinOptions( string $url, string $address ): array
+    {
+        $host = (string) parse_url( $url, PHP_URL_HOST );
+
+        if ( ! defined( 'CURLOPT_RESOLVE' ) || false !== filter_var( trim( $host, '[]' ), FILTER_VALIDATE_IP ) ) {
+            return [];
+        }
+
+        $port = parse_url( $url, PHP_URL_PORT ) ?? ( 'http' === parse_url( $url, PHP_URL_SCHEME ) ? 80 : 443 );
+        $ip   = false !== filter_var( $address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6 ) ? '[' . $address . ']' : $address;
+
+        return [ 'curl' => [ CURLOPT_RESOLVE => [ sprintf( '%s:%d:%s', $host, $port, $ip ) ] ] ];
+    }
+
+    /**
      * Whether `$url` may be used as a webhook endpoint.
      *
      * @since 1.0.0

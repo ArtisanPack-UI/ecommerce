@@ -9,6 +9,10 @@
  * the identity isn't known yet — so checkout MUST re-evaluate promotions
  * once the email is captured, before the order is placed.
  *
+ * Kanban routing evaluates the condition against the placed order itself
+ * ({@see OrderAwarePromotionCondition}), leaving that order out of the
+ * history it checks.
+ *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
  *
@@ -21,7 +25,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Promotions\Conditions;
 
-use ArtisanPackUI\Ecommerce\Contracts\PromotionCondition;
+use ArtisanPackUI\Ecommerce\Contracts\OrderAwarePromotionCondition;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\Order;
 
@@ -31,7 +35,7 @@ use ArtisanPackUI\Ecommerce\Models\Order;
  *
  * @since      1.0.0
  */
-class CustomerFirstOrderCondition implements PromotionCondition
+class CustomerFirstOrderCondition implements OrderAwarePromotionCondition
 {
     /**
      * @since 1.0.0
@@ -70,17 +74,51 @@ class CustomerFirstOrderCondition implements PromotionCondition
      */
     public function evaluate( Cart $cart, array $config ): bool
     {
-        $email = null === $cart->email ? '' : strtolower( trim( (string) $cart->email ) );
+        return ! $this->hasPriorOrder( $cart->customer_id, (string) $cart->email );
+    }
 
-        if ( null === $cart->customer_id && '' === $email ) {
-            return true;
+    /**
+     * Whether `$order` is the shopper's first (non-failed) order.
+     *
+     * @since 1.0.0
+     *
+     * @param  Order                 $order   Placed order.
+     * @param  array<string, mixed>  $config  Unused.
+     *
+     * @return bool
+     */
+    public function evaluateOrder( Order $order, array $config ): bool
+    {
+        return ! $this->hasPriorOrder( $order->customer_id, (string) $order->email, (int) $order->id );
+    }
+
+    /**
+     * Whether the shopper identified by customer id or email has a
+     * non-failed order other than `$excludeOrderId`. An unknown shopper
+     * has none.
+     *
+     * @since 1.0.0
+     *
+     * @param  int|null  $customerId      Customer id.
+     * @param  string    $email           Shopper email.
+     * @param  int|null  $excludeOrderId  Order to leave out.
+     *
+     * @return bool
+     */
+    protected function hasPriorOrder( ?int $customerId, string $email, ?int $excludeOrderId = null ): bool
+    {
+        $email = strtolower( trim( $email ) );
+
+        if ( null === $customerId && '' === $email ) {
+            return false;
         }
 
-        return ! Order::query()
+        return Order::query()
             ->where( 'system_status', '!=', 'failed' )
-            ->where( function ( $query ) use ( $cart, $email ): void {
-                if ( null !== $cart->customer_id ) {
-                    $query->orWhere( 'customer_id', $cart->customer_id );
+            ->when( null !== $excludeOrderId, static fn ( $query ) => $query->whereKeyNot( $excludeOrderId ) )
+            ->where( function ( $query ) use ( $customerId, $email ): void {
+                if ( null !== $customerId ) {
+                    $query->orWhere( 'customer_id', $customerId );
                 }
 
                 if ( '' !== $email ) {

@@ -18,9 +18,10 @@
  * | `paymentSucceeded`      | `private-ecommerce.admin`       | `PaymentSucceeded` event               |
  * | `stockChanged`          | `private-ecommerce.admin`       | `ap.ecommerce.inventory.adjusted` hook |
  * | `webhookDeliveryFailed` | `private-ecommerce.admin`       | `WebhookFailed` event                  |
+ * | `kanbanCardMoved`       | `private-ecommerce.kanban.board.{boardId}` | `KanbanCardMoved` event (enabled by `artisanpack.ecommerce.kanban.broadcast`) |
  *
- * `orderPlaced`, `kanbanCardMoved`, and `reviewSubmitted` join this list
- * with the checkout, kanban, and review services that fire them. Satellites
+ * `orderPlaced` and `reviewSubmitted` join this list with the checkout and
+ * review services that fire them. Satellites
  * add their own through `ap.ecommerce.graphql.extend` and broadcast a
  * {@see \ArtisanPackUI\Ecommerce\Broadcasting\GraphQLSubscriptionBroadcast}.
  *
@@ -79,6 +80,10 @@ class Subscriptions
                 'description' => 'An outbound webhook delivery attempt failed.',
                 'fields'      => [ 'delivery' => 'WebhookDelivery!', 'reason' => 'String!' ],
             ],
+            'KanbanCardMovedEvent' => [
+                'description' => 'A card moved between columns on a kanban board.',
+                'fields'      => [ 'card' => 'KanbanCard!', 'from_column_id' => 'Int', 'to_column_id' => 'Int!', 'board_id' => 'Int!' ],
+            ],
         ];
     }
 
@@ -98,6 +103,7 @@ class Subscriptions
             'paymentSucceeded'      => [ 'type' => 'PaymentSucceededEvent', 'resolve' => $payload ],
             'stockChanged'          => [ 'type' => 'StockChangedEvent', 'resolve' => $payload ],
             'webhookDeliveryFailed' => [ 'type' => 'WebhookDeliveryFailedEvent', 'resolve' => $payload ],
+            'kanbanCardMoved'       => [ 'type' => 'KanbanCardMovedEvent', 'resolve' => $payload ],
         ];
     }
 }

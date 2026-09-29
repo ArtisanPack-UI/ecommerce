@@ -60,12 +60,14 @@ Gate::authorize( 'viewAny', Product::class );
 | `TaxRatePolicy` | `TaxRate`, `TaxClass` | `viewAny`, `create`, `update`, `delete` |
 | `ShippingZonePolicy` | `ShippingZone`, `ShippingMethod` | `viewAny`, `create`, `update`, `delete` |
 | `WebhookSubscriptionPolicy` | `WebhookSubscription` | `viewAny`, `create`, `update`, `delete` |
+| `KanbanBoardPolicy` | `KanbanBoard`, `KanbanColumn`, `KanbanAutomation` | `viewAny`, `view`, `create`, `update`, `delete` |
+| `KanbanCardPolicy` | `OrderBoardAssignment` | `move` |
 
 `OrderPolicy::view()` also lets a shopper see their own order (the order's
 customer is linked to their user id) when their token allows storefront access.
 A policy the host app already registered for one of these models takes
-precedence. Kanban, review, digital-delivery, and notification policies arrive
-with those subsystems.
+precedence. Review, digital-delivery, and notification policies arrive with
+those subsystems.
 
 ## Sanctum token abilities
 

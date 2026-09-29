@@ -23,6 +23,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Console\Commands;
 
 use ArtisanPackUI\Ecommerce\Models\Order;
+use ArtisanPackUI\Ecommerce\Services\OrderStatusMachine;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -136,8 +137,10 @@ class AuditOrderStatusCommand extends Command
 
     /**
      * Returns rows on `order_board_assignments` where the assignment's
-     * sub-status disagrees with the owning order's `system_status`. Returns
-     * an empty array when the boards satellite is not installed.
+     * sub-status is incompatible with the owning order's `system_status` —
+     * a different status, unless both sit in the forward chain where boards
+     * may lead or lag the order. Removed assignments are ignored. Returns an
+     * empty array when the `order_board_assignments` table does not exist.
      *
      * @since 1.0.0
      *
@@ -157,7 +160,14 @@ class AuditOrderStatusCommand extends Command
                 '=',
                 'order_substatuses.id',
             )
+            ->whereNull( 'order_board_assignments.removed_at' )
             ->whereColumn( 'orders.system_status', '!=', 'order_substatuses.system_status' )
+            // Boards may lead or lag the order within the forward chain
+            // (OrderStatusMachine::isBoardAssignmentCompatible()).
+            ->where( function ( $query ): void {
+                $query->whereNotIn( 'orders.system_status', OrderStatusMachine::FORWARD_STATUSES )
+                    ->orWhereNotIn( 'order_substatuses.system_status', OrderStatusMachine::FORWARD_STATUSES );
+            } )
             ->select( [
                 'orders.id as order_id',
                 'orders.system_status as order_system_status',
