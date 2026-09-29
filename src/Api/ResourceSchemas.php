@@ -522,6 +522,68 @@ final class ResourceSchemas
                 'created_at'        => 'DateTime',
             ] ),
 
+            'KanbanBoard' => self::schema( Resources\KanbanBoardResource::class, Models\KanbanBoard::class, 'A kanban board over orders.', [
+                'key'           => 'String!',
+                'name'          => 'String!',
+                'description'   => 'String',
+                'routing_rules' => 'JSON',
+                'is_default'    => 'Boolean!',
+                'is_active'     => 'Boolean!',
+                'position'      => 'Int!',
+                'settings'      => 'JSON',
+            ] + $timestamps, [
+                'columns'     => [ 'KanbanColumn', true, 'columns' ],
+                'automations' => [ 'KanbanAutomation', true, 'automations' ],
+            ] ),
+
+            'KanbanColumn' => self::schema( Resources\KanbanColumnResource::class, Models\KanbanColumn::class, 'A column on a kanban board, 1:1 with an order sub-status.', [
+                'board_id'          => 'Int!',
+                'substatus_id'      => 'Int!',
+                'system_status'     => 'String',
+                'label'             => 'String!',
+                'label_override'    => 'String',
+                'color'             => 'String',
+                'color_override'    => 'String',
+                'icon'              => 'String',
+                'icon_override'     => 'String',
+                'position'          => 'Int!',
+                'wip_limit'         => 'Int',
+                'card_count'        => 'Int!',
+                'is_over_wip_limit' => 'Boolean!',
+                'card_widgets'      => '[String!]!',
+            ] + $timestamps ),
+
+            'KanbanAutomation' => self::schema( Resources\KanbanAutomationResource::class, Models\KanbanAutomation::class, 'An automation fired when a card moves between columns.', [
+                'board_id'       => 'Int!',
+                'from_column_id' => 'Int',
+                'to_column_id'   => 'Int!',
+                'trigger_key'    => 'String!',
+                'trigger_config' => 'JSON',
+                'has_secret'     => 'Boolean!',
+                'conditions'     => 'JSON',
+                'is_active'      => 'Boolean!',
+            ] + $timestamps ),
+
+            'KanbanCardWidget' => self::schema( Resources\KanbanCardWidgetResource::class, Models\KanbanCardWidget::class, 'A card widget type available to kanban columns.', [
+                'key'            => 'String!',
+                'label'          => 'String!',
+                'default_config' => 'JSON',
+                'provided_by'    => 'String!',
+            ] ),
+
+            'KanbanCard' => self::schema( Resources\KanbanCardResource::class, Models\OrderBoardAssignment::class, "An order's card on a kanban board, with rendered widget payloads.", [
+                'order_id'     => 'Int!',
+                'board_id'     => 'Int!',
+                'substatus_id' => 'Int!',
+                'column_id'    => 'Int',
+                'assigned_at'  => 'DateTime',
+                'moved_at'     => 'DateTime',
+                'removed_at'   => 'DateTime',
+                'widgets'      => 'JSON',
+            ], [
+                'order' => [ 'Order', false, 'order' ],
+            ] ),
+
             'WebhookSubscription' => self::schema( Resources\WebhookSubscriptionResource::class, Models\WebhookSubscription::class, 'An outbound webhook endpoint.', [
                 'name'                 => 'String!',
                 'url'                  => 'String!',

@@ -29,6 +29,12 @@ use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CartController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CouponController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CustomerController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\InventoryController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanAssignmentController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanAutomationController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanBoardController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanCardController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanCatalogController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanColumnController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderRefundController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderShipmentController;
@@ -100,6 +106,34 @@ Route::patch( 'orders/{order}/shipments/{shipment}', [ OrderShipmentController::
 Route::get( 'customers', [ CustomerController::class, 'index' ] )->middleware( $admin( 'customer', 'viewAny' ) )->name( 'customers.index' );
 Route::get( 'customers/{customer}', [ CustomerController::class, 'show' ] )->middleware( $admin( 'customer', 'view' ) )->name( 'customers.show' );
 Route::patch( 'customers/{customer}', [ CustomerController::class, 'update' ] )->middleware( $admin( 'customer', 'update', true ) )->name( 'customers.update' );
+
+// Kanban (engine spec §9.10, parent plan §9.5).
+Route::prefix( 'kanban' )
+    ->name( 'kanban.' )
+    ->where( [ 'board' => '[0-9]+', 'column' => '[0-9]+', 'automation' => '[0-9]+', 'order' => '[0-9]+' ] )
+    ->group( function () use ( $admin ): void {
+        Route::get( 'boards', [ KanbanBoardController::class, 'index' ] )->middleware( $admin( 'kanbanBoard', 'viewAny' ) )->name( 'boards.index' );
+        Route::post( 'boards', [ KanbanBoardController::class, 'store' ] )->middleware( $admin( 'kanbanBoard', 'create', true ) )->name( 'boards.store' );
+        Route::get( 'boards/{board}', [ KanbanBoardController::class, 'show' ] )->middleware( $admin( 'kanbanBoard', 'view' ) )->name( 'boards.show' );
+        Route::patch( 'boards/{board}', [ KanbanBoardController::class, 'update' ] )->middleware( $admin( 'kanbanBoard', 'update', true ) )->name( 'boards.update' );
+        Route::delete( 'boards/{board}', [ KanbanBoardController::class, 'destroy' ] )->middleware( $admin( 'kanbanBoard', 'delete', true ) )->name( 'boards.destroy' );
+        Route::get( 'boards/{board}/cards', [ KanbanCardController::class, 'index' ] )->middleware( $admin( 'kanbanBoard', 'view' ) )->name( 'cards.index' );
+        Route::post( 'cards/{order}/move', [ KanbanCardController::class, 'move' ] )->middleware( $admin( 'kanbanCard', 'move', true ) )->name( 'cards.move' );
+
+        Route::post( 'boards/{board}/columns', [ KanbanColumnController::class, 'store' ] )->middleware( $admin( 'kanbanBoard', 'update', true ) )->name( 'columns.store' );
+        Route::patch( 'columns/{column}', [ KanbanColumnController::class, 'update' ] )->middleware( $admin( 'kanbanBoard', 'update', true ) )->name( 'columns.update' );
+        Route::delete( 'columns/{column}', [ KanbanColumnController::class, 'destroy' ] )->middleware( $admin( 'kanbanBoard', 'update', true ) )->name( 'columns.destroy' );
+
+        Route::post( 'boards/{board}/automations', [ KanbanAutomationController::class, 'store' ] )->middleware( $admin( 'kanbanBoard', 'update', true ) )->name( 'automations.store' );
+        Route::patch( 'automations/{automation}', [ KanbanAutomationController::class, 'update' ] )->middleware( $admin( 'kanbanBoard', 'update', true ) )->name( 'automations.update' );
+        Route::delete( 'automations/{automation}', [ KanbanAutomationController::class, 'destroy' ] )->middleware( $admin( 'kanbanBoard', 'update', true ) )->name( 'automations.destroy' );
+
+        Route::post( 'boards/{board}/assignments/{order}', [ KanbanAssignmentController::class, 'store' ] )->middleware( $admin( 'kanbanCard', 'move', true ) )->name( 'assignments.store' );
+        Route::delete( 'boards/{board}/assignments/{order}', [ KanbanAssignmentController::class, 'destroy' ] )->middleware( $admin( 'kanbanCard', 'move', true ) )->name( 'assignments.destroy' );
+
+        Route::get( 'widgets', [ KanbanCatalogController::class, 'widgets' ] )->middleware( $admin( 'kanbanBoard', 'viewAny' ) )->name( 'widgets.index' );
+        Route::get( 'triggers', [ KanbanCatalogController::class, 'triggers' ] )->middleware( $admin( 'kanbanBoard', 'viewAny' ) )->name( 'triggers.index' );
+    } );
 
 Route::prefix( 'admin' )->name( 'admin.' )->group( function () use ( $admin ): void {
     // Inventory.

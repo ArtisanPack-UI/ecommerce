@@ -29,6 +29,7 @@ use ArtisanPackUI\Ecommerce\Contracts\OrderNumberGenerator;
 use ArtisanPackUI\Ecommerce\CurrencyRates\ConfigRateProvider;
 use ArtisanPackUI\Ecommerce\CurrencyRates\FrankfurterRateProvider;
 use ArtisanPackUI\Ecommerce\Ecommerce;
+use ArtisanPackUI\Ecommerce\Events\KanbanCardMoved;
 use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
 use ArtisanPackUI\Ecommerce\Fulfillment\ProportionalByLineTotalStrategy;
 use ArtisanPackUI\Ecommerce\Gateways\Stripe\StripeGateway;
@@ -45,13 +46,32 @@ use ArtisanPackUI\Ecommerce\Http\Middleware\RateLimitEcommerce;
 use ArtisanPackUI\Ecommerce\Http\Middleware\RequestIdMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Middleware\ServiceSignatureMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
+use ArtisanPackUI\Ecommerce\Kanban\Triggers\CreateShipmentTrigger;
+use ArtisanPackUI\Ecommerce\Kanban\Triggers\DispatchJobTrigger;
+use ArtisanPackUI\Ecommerce\Kanban\Triggers\PrintShippingLabelTrigger;
+use ArtisanPackUI\Ecommerce\Kanban\Triggers\SendEmailTrigger;
+use ArtisanPackUI\Ecommerce\Kanban\Triggers\UpdateOrderFieldTrigger;
+use ArtisanPackUI\Ecommerce\Kanban\Triggers\WebhookTrigger;
+use ArtisanPackUI\Ecommerce\Kanban\Widgets\CustomerWidget;
+use ArtisanPackUI\Ecommerce\Kanban\Widgets\DaysInColumnWidget;
+use ArtisanPackUI\Ecommerce\Kanban\Widgets\FulfillmentStatusWidget;
+use ArtisanPackUI\Ecommerce\Kanban\Widgets\ItemCountWidget;
+use ArtisanPackUI\Ecommerce\Kanban\Widgets\PaymentStatusWidget;
+use ArtisanPackUI\Ecommerce\Kanban\Widgets\ShippingMethodWidget;
+use ArtisanPackUI\Ecommerce\Kanban\Widgets\TagsWidget;
+use ArtisanPackUI\Ecommerce\Kanban\Widgets\TotalWidget;
 use ArtisanPackUI\Ecommerce\Listeners\BroadcastGraphQLSubscriptions;
+use ArtisanPackUI\Ecommerce\Listeners\BroadcastKanbanCardMoved;
 use ArtisanPackUI\Ecommerce\Listeners\DispatchWebhooksForEvent;
 use ArtisanPackUI\Ecommerce\Listeners\LinkCustomerOnUserVerified;
 use ArtisanPackUI\Ecommerce\Logging\EcommerceLogFormatter;
 use ArtisanPackUI\Ecommerce\Models\Coupon;
 use ArtisanPackUI\Ecommerce\Models\Customer;
+use ArtisanPackUI\Ecommerce\Models\KanbanAutomation;
+use ArtisanPackUI\Ecommerce\Models\KanbanBoard;
+use ArtisanPackUI\Ecommerce\Models\KanbanColumn;
 use ArtisanPackUI\Ecommerce\Models\Order;
+use ArtisanPackUI\Ecommerce\Models\OrderBoardAssignment;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\Models\Promotion;
 use ArtisanPackUI\Ecommerce\Models\Refund;
@@ -62,6 +82,8 @@ use ArtisanPackUI\Ecommerce\Models\TaxRate;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
 use ArtisanPackUI\Ecommerce\Policies\CouponPolicy;
 use ArtisanPackUI\Ecommerce\Policies\CustomerPolicy;
+use ArtisanPackUI\Ecommerce\Policies\KanbanBoardPolicy;
+use ArtisanPackUI\Ecommerce\Policies\KanbanCardPolicy;
 use ArtisanPackUI\Ecommerce\Policies\OrderPolicy;
 use ArtisanPackUI\Ecommerce\Policies\ProductPolicy;
 use ArtisanPackUI\Ecommerce\Policies\PromotionPolicy;
@@ -79,6 +101,7 @@ use ArtisanPackUI\Ecommerce\Promotions\Actions\PercentOffCartAction;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\PercentOffProductAction;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\TieredDiscountAction;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\CartContainsProductCondition;
+use ArtisanPackUI\Ecommerce\Promotions\Conditions\CartContainsProductTypeCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\CustomerFirstOrderCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\CustomerInGroupCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\DayOfWeekCondition;
@@ -86,6 +109,8 @@ use ArtisanPackUI\Ecommerce\Promotions\Conditions\MinSubtotalCondition;
 use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\FraudProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\FulfillmentAllocationStrategyRegistry;
+use ArtisanPackUI\Ecommerce\Registries\KanbanAutomationRegistry;
+use ArtisanPackUI\Ecommerce\Registries\KanbanCardWidgetRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PromotionActionRegistry;
@@ -98,6 +123,8 @@ use ArtisanPackUI\Ecommerce\Registries\TaxProviderRegistry;
 use ArtisanPackUI\Ecommerce\Services\DatabaseCartStorage;
 use ArtisanPackUI\Ecommerce\Services\Fraud\AlwaysApproveFraudProvider;
 use ArtisanPackUI\Ecommerce\Services\Fraud\StripeRadarFraudProvider;
+use ArtisanPackUI\Ecommerce\Services\KanbanAutomationRunner;
+use ArtisanPackUI\Ecommerce\Services\KanbanRoutingService;
 use ArtisanPackUI\Ecommerce\Services\RandomEightCharGenerator;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\FlatRateMethod;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\FreeShippingMethod;
@@ -180,6 +207,8 @@ class EcommerceServiceProvider extends ServiceProvider
             PromotionConditionRegistry::class,
             PromotionActionRegistry::class,
             PromotionSourceRegistry::class,
+            KanbanCardWidgetRegistry::class,
+            KanbanAutomationRegistry::class,
         ] as $registry ) {
             $this->app->singleton( $registry, static fn ( $app ) => new $registry( $app ) );
         }
@@ -219,12 +248,14 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->registerCoreTaxProviders();
         $this->registerCoreShippingMethodTypes();
         $this->registerCorePromotionRules();
+        $this->registerCoreKanban();
         $this->registerWebhookRoute();
         $this->registerPolicies();
         $this->registerRestRoutes();
         $this->registerCustomerListeners();
         $this->registerWebhookListeners();
         $this->registerGraphQLSubscriptions();
+        $this->registerKanbanListeners();
 
         if ( $this->app->runningInConsole() ) {
             $this->publishes( [
@@ -619,6 +650,7 @@ class EcommerceServiceProvider extends ServiceProvider
         foreach ( [
             MinSubtotalCondition::class,
             CartContainsProductCondition::class,
+            CartContainsProductTypeCondition::class,
             CustomerInGroupCondition::class,
             DayOfWeekCondition::class,
             CustomerFirstOrderCondition::class,
@@ -640,6 +672,92 @@ class EcommerceServiceProvider extends ServiceProvider
         ] as $action ) {
             $actions->register( $action::KEY, $action );
         }
+    }
+
+    /**
+     * Registers the built-in kanban card widgets and automation triggers
+     * (parent plan §9.3 / §9.4, engine spec §5 rows 10–11). Satellites add
+     * their own (`printful:order-status`, `notify-slack`, …) from their own
+     * `boot()`.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCoreKanban(): void
+    {
+        /** @var KanbanCardWidgetRegistry $widgets */
+        $widgets = $this->app->make( KanbanCardWidgetRegistry::class );
+
+        foreach ( [
+            TotalWidget::class,
+            ItemCountWidget::class,
+            CustomerWidget::class,
+            ShippingMethodWidget::class,
+            TagsWidget::class,
+            DaysInColumnWidget::class,
+            PaymentStatusWidget::class,
+            FulfillmentStatusWidget::class,
+        ] as $widget ) {
+            $widgets->register( $widget::KEY, $widget, [ 'provided_by' => 'ecommerce' ] );
+        }
+
+        /** @var KanbanAutomationRegistry $triggers */
+        $triggers = $this->app->make( KanbanAutomationRegistry::class );
+
+        foreach ( [
+            SendEmailTrigger::class,
+            DispatchJobTrigger::class,
+            WebhookTrigger::class,
+            UpdateOrderFieldTrigger::class,
+            CreateShipmentTrigger::class,
+            PrintShippingLabelTrigger::class,
+        ] as $trigger ) {
+            $triggers->register( $trigger::KEY, $trigger, [ 'provided_by' => 'ecommerce' ] );
+        }
+    }
+
+    /**
+     * Wires the kanban engine: automations run on every card move; with
+     * `artisanpack.ecommerce.kanban.auto_route`, orders are routed onto
+     * boards when placed and re-routed when edited; with
+     * `artisanpack.ecommerce.kanban.broadcast`, card moves are broadcast on
+     * `private-ecommerce.kanban.board.{board}`, authorized by the
+     * `kanbanBoard.view` ability.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerKanbanListeners(): void
+    {
+        $config = $this->app['config'];
+
+        /** @var Dispatcher $events */
+        $events = $this->app->make( Dispatcher::class );
+        $events->listen( KanbanCardMoved::class, [ KanbanAutomationRunner::class, 'handle' ] );
+
+        if ( (bool) $config->get( 'artisanpack.ecommerce.kanban.auto_route', true ) ) {
+            addAction( 'ap.ecommerce.order.placed', function ( Order $order ): void {
+                $this->app->make( KanbanRoutingService::class )->route( $order );
+            } );
+
+            addAction( 'ap.ecommerce.order.edited', function ( Order $order ): void {
+                $this->app->make( KanbanRoutingService::class )->reroute( $order );
+            } );
+        }
+
+        if ( ! (bool) $config->get( 'artisanpack.ecommerce.kanban.broadcast', false ) ) {
+            return;
+        }
+
+        $events->listen( KanbanCardMoved::class, BroadcastKanbanCardMoved::class );
+
+        Broadcast::channel( BroadcastKanbanCardMoved::CHANNEL, function ( $user, $board ): bool {
+            $model = KanbanBoard::query()->find( $board );
+
+            return null !== $model && $this->app->make( EcommerceAuthorizer::class )->allows( $user, 'kanbanBoard', 'view', $model );
+        } );
     }
 
     /**
@@ -804,17 +922,21 @@ class EcommerceServiceProvider extends ServiceProvider
     protected function registerPolicies(): void
     {
         $policies = [
-            Product::class             => ProductPolicy::class,
-            Order::class               => OrderPolicy::class,
-            Refund::class              => RefundPolicy::class,
-            Customer::class            => CustomerPolicy::class,
-            Promotion::class           => PromotionPolicy::class,
-            Coupon::class              => CouponPolicy::class,
-            TaxRate::class             => TaxRatePolicy::class,
-            TaxClass::class            => TaxRatePolicy::class,
-            ShippingZone::class        => ShippingZonePolicy::class,
-            ShippingMethod::class      => ShippingZonePolicy::class,
-            WebhookSubscription::class => WebhookSubscriptionPolicy::class,
+            Product::class              => ProductPolicy::class,
+            Order::class                => OrderPolicy::class,
+            Refund::class               => RefundPolicy::class,
+            Customer::class             => CustomerPolicy::class,
+            Promotion::class            => PromotionPolicy::class,
+            Coupon::class               => CouponPolicy::class,
+            TaxRate::class              => TaxRatePolicy::class,
+            TaxClass::class             => TaxRatePolicy::class,
+            ShippingZone::class         => ShippingZonePolicy::class,
+            ShippingMethod::class       => ShippingZonePolicy::class,
+            WebhookSubscription::class  => WebhookSubscriptionPolicy::class,
+            KanbanBoard::class          => KanbanBoardPolicy::class,
+            KanbanColumn::class         => KanbanBoardPolicy::class,
+            KanbanAutomation::class     => KanbanBoardPolicy::class,
+            OrderBoardAssignment::class => KanbanCardPolicy::class,
         ];
 
         $registered = Gate::policies();

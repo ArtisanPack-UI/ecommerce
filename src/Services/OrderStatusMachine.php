@@ -21,6 +21,15 @@
  * {@see IncompatibleBoardSubstatusException} at the service boundary. Plan
  * §5.7 / §9.2.
  *
+ * Kanban boards relax that rule within the forward chain
+ * ({@see self::FORWARD_STATUSES}): an order can be "Printing" (processing)
+ * on a production board while already "Shipped" (complete) on a shipping
+ * board. The order's own status is the roll-up of its boards
+ * ({@see self::rollUpBoardStatus()}) — the most-progressed board wins,
+ * except that `complete` needs every board on a terminal `complete`
+ * sub-status. Exit statuses (cancelled, refunded, failed) always match
+ * exactly.
+ *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
  *
@@ -37,12 +46,12 @@ use ArtisanPackUI\Ecommerce\Events\OrderStatusChanged;
 use ArtisanPackUI\Ecommerce\Events\OrderSubstatusChanged;
 use ArtisanPackUI\Ecommerce\Exceptions\IncompatibleBoardSubstatusException;
 use ArtisanPackUI\Ecommerce\Exceptions\InvalidOrderStatusTransitionException;
+use ArtisanPackUI\Ecommerce\Exceptions\SubstatusTransitionRejectedException;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderSubstatus;
 use ArtisanPackUI\Ecommerce\Models\OrderTimelineEntry;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
-use RuntimeException;
 
 /**
  * @package    ArtisanPack_UI
@@ -72,6 +81,16 @@ class OrderStatusMachine
         'refunded'   => [],
         'failed'     => [ 'pending', 'cancelled' ],
     ];
+
+    /**
+     * System statuses an order progresses through, in order. Kanban board
+     * assignments may sit anywhere in this chain relative to the order.
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    public const FORWARD_STATUSES = [ 'pending', 'processing', 'complete' ];
 
     /**
      * Moves `$order` to the given `system_status`.
@@ -139,12 +158,12 @@ class OrderStatusMachine
      * specific kanban board.
      *
      * When `$boardId` is null (the default), the change updates
-     * `orders.substatus_id` and the target sub-status must belong to a
-     * `system_status` compatible with `$order->system_status`. When `$boardId`
-     * is provided, the caller is responsible for writing the
-     * `order_board_assignments` row itself; this method only checks board
-     * compatibility, fires the hook, writes the timeline entry, and dispatches
-     * the event.
+     * `orders.substatus_id` and the target sub-status must belong to the
+     * order's own `system_status`. When `$boardId` is provided, the caller is
+     * responsible for writing the `order_board_assignments` row itself; this
+     * method only checks board compatibility
+     * ({@see self::assertBoardAssignmentCompatible()}), fires the hook,
+     * writes the timeline entry, and dispatches the event.
      *
      * **Board-move callers must wrap the assignment write and this call in the
      * same outer `DB::transaction`** so the timeline row and the assignment row
@@ -156,7 +175,7 @@ class OrderStatusMachine
      *
      * Sub-status transitions are unrestricted by default. Store owners can
      * gate them with `ap.ecommerce.order.canTransitionSubstatus`; returning
-     * a falsy value from the filter throws {@see RuntimeException} at the
+     * a falsy value from the filter throws {@see SubstatusTransitionRejectedException} at the
      * service boundary.
      *
      * @since 1.0.0
@@ -168,6 +187,7 @@ class OrderStatusMachine
      * @param  int|null        $boardId      Kanban board id whose column drove this change, or `null` for global default.
      *
      * @throws IncompatibleBoardSubstatusException When the sub-status belongs to a system_status the order is not on.
+     * @throws SubstatusTransitionRejectedException When a canTransitionSubstatus filter vetoes the change.
      *
      * @return Order The refreshed order.
      */
@@ -181,7 +201,9 @@ class OrderStatusMachine
         return DB::transaction( function () use ( $order, $to, $actorUserId, $reason, $boardId ): Order {
             $locked = Order::query()->lockForUpdate()->findOrFail( $order->id );
 
-            $this->assertBoardSubstatusCompatible( $locked, $to );
+            null === $boardId
+                ? $this->assertBoardSubstatusCompatible( $locked, $to )
+                : $this->assertBoardAssignmentCompatible( $locked, $to );
 
             $from = null !== $locked->substatus_id
                 ? OrderSubstatus::query()->find( $locked->substatus_id )
@@ -197,7 +219,7 @@ class OrderStatusMachine
             );
 
             if ( ! $allowed ) {
-                throw new RuntimeException( sprintf(
+                throw new SubstatusTransitionRejectedException( sprintf(
                     'Sub-status transition on order %d to "%s" was rejected by a canTransitionSubstatus filter.',
                     $locked->id,
                     $to->key,
@@ -265,6 +287,98 @@ class OrderStatusMachine
             (int) $substatus->id,
             (string) $substatus->system_status,
         );
+    }
+
+    /**
+     * Whether a kanban board assignment may sit on `$substatus` while the
+     * order is on its current `system_status`: the statuses match, or both
+     * are in {@see self::FORWARD_STATUSES} (boards may lead or lag the
+     * order within the forward chain).
+     *
+     * @since 1.0.0
+     *
+     * @param  Order           $order      Order.
+     * @param  OrderSubstatus  $substatus  Board sub-status.
+     *
+     * @return bool
+     */
+    public function isBoardAssignmentCompatible( Order $order, OrderSubstatus $substatus ): bool
+    {
+        $orderStatus     = (string) $order->system_status;
+        $substatusStatus = (string) $substatus->system_status;
+
+        return $orderStatus === $substatusStatus
+            || ( in_array( $orderStatus, self::FORWARD_STATUSES, true ) && in_array( $substatusStatus, self::FORWARD_STATUSES, true ) );
+    }
+
+    /**
+     * Throwing form of {@see self::isBoardAssignmentCompatible()}.
+     *
+     * @since 1.0.0
+     *
+     * @param  Order           $order      Order.
+     * @param  OrderSubstatus  $substatus  Board sub-status.
+     *
+     * @throws IncompatibleBoardSubstatusException
+     *
+     * @return void
+     */
+    public function assertBoardAssignmentCompatible( Order $order, OrderSubstatus $substatus ): void
+    {
+        if ( $this->isBoardAssignmentCompatible( $order, $substatus ) ) {
+            return;
+        }
+
+        throw new IncompatibleBoardSubstatusException(
+            (int) $order->id,
+            (string) $order->system_status,
+            (int) $substatus->id,
+            (string) $substatus->system_status,
+        );
+    }
+
+    /**
+     * The order `system_status` implied by its kanban board sub-statuses
+     * (parent plan §9.2): the most-progressed forward status across the
+     * boards, where `complete` requires every board to be on a terminal
+     * `complete` sub-status — otherwise a board that finished early holds
+     * the order at `processing`. Returns `null` when there are no boards or
+     * any board sits on an exit status (exit statuses are order-wide and
+     * not rolled up).
+     *
+     * @since 1.0.0
+     *
+     * @param  iterable<OrderSubstatus>  $substatuses  One sub-status per active board assignment.
+     *
+     * @return string|null
+     */
+    public function rollUpBoardStatus( iterable $substatuses ): ?string
+    {
+        $highest     = -1;
+        $allComplete = true;
+        $count       = 0;
+
+        foreach ( $substatuses as $substatus ) {
+            $rank = array_search( (string) $substatus->system_status, self::FORWARD_STATUSES, true );
+
+            if ( false === $rank ) {
+                return null;
+            }
+
+            $count++;
+            $highest     = max( $highest, $rank );
+            $allComplete = $allComplete && 'complete' === $substatus->system_status && $substatus->is_terminal;
+        }
+
+        if ( 0 === $count ) {
+            return null;
+        }
+
+        if ( $allComplete ) {
+            return 'complete';
+        }
+
+        return self::FORWARD_STATUSES[ min( $highest, 1 ) ];
     }
 
     /**

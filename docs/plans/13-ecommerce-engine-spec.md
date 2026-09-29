@@ -1063,6 +1063,7 @@ CREATE TABLE order_board_assignments (
     board_id      BIGINT UNSIGNED NOT NULL,
     substatus_id  BIGINT UNSIGNED NOT NULL,
     assigned_at   TIMESTAMP NOT NULL,
+    moved_at      TIMESTAMP NULL,                                         -- when the card entered its current column (days-in-column widget)
     removed_at    TIMESTAMP NULL,
     UNIQUE KEY order_board_assignments_uk (order_id, board_id),
     KEY order_board_assignments_board_substatus_idx (board_id, substatus_id),
@@ -1675,8 +1676,8 @@ All registries live under `ArtisanPackUI\Ecommerce\Registries\` and are bound as
 | 7 | `PromotionConditionRegistry` | `ArtisanPackUI\Ecommerce\Registries\PromotionConditionRegistry` | `Contracts\PromotionCondition` | Core registers `min-subtotal`, `min-quantity`, `cart-contains-product`, `cart-contains-category`, `cart-contains-tag`, `customer-first-order`, `customer-lifetime-value-over`, `day-of-week`, `date-range`, `currency-is`. |
 | 8 | `PromotionActionRegistry` | `ArtisanPackUI\Ecommerce\Registries\PromotionActionRegistry` | `Contracts\PromotionAction` | Core registers `percent-off-cart`, `fixed-off-cart`, `percent-off-product`, `fixed-off-product`, `free-shipping`, `buy-x-get-y`, `add-free-item`, `tiered-discount`. |
 | 9 | `PromotionSourceRegistry` | `ArtisanPackUI\Ecommerce\Registries\PromotionSourceRegistry` | (marker sources) | Core registers `coupon`, `automatic`. Satellites add `gift-card`, `referral`, `loyalty`, etc. |
-| 10 | `KanbanCardWidgetRegistry` | `ArtisanPackUI\Ecommerce\Registries\KanbanCardWidgetRegistry` | `Contracts\KanbanCardWidget` | Core registers: `total`, `item-count`, `customer`, `shipping-method`, `tags`, `days-in-column`, `substatus-age`, `payment-status`, `fulfillment-status`. |
-| 11 | `KanbanAutomationRegistry` | `ArtisanPackUI\Ecommerce\Registries\KanbanAutomationRegistry` | `Contracts\KanbanAutomationTrigger` | Core registers: `send-email`, `dispatch-job`, `webhook`, `update-order-field`, `create-shipment`. Satellites add `print-shipping-label`, `notify-slack`, etc. |
+| 10 | `KanbanCardWidgetRegistry` | `ArtisanPackUI\Ecommerce\Registries\KanbanCardWidgetRegistry` | `Contracts\KanbanCardWidget` | Core registers: `total`, `item-count`, `customer`, `shipping-method`, `tags`, `days-in-column` (time on the card's current sub-status — covers the earlier `substatus-age` idea), `payment-status`, `fulfillment-status`. |
+| 11 | `KanbanAutomationRegistry` | `ArtisanPackUI\Ecommerce\Registries\KanbanAutomationRegistry` | `Contracts\KanbanAutomationTrigger` | Core registers: `send-email`, `dispatch-job`, `webhook`, `update-order-field`, `create-shipment`, `print-shipping-label` (delegates to any `ShippingLabelProviderRegistry` entry). Satellites add `notify-slack`, etc. |
 | 12 | `FraudProviderRegistry` | `ArtisanPackUI\Ecommerce\Registries\FraudProviderRegistry` | `Contracts\FraudProvider` | Core registers `stripe-radar`, `always-approve`. Supports `chain` mode (§6.1 parent plan) — a comma-list in settings runs providers in sequence, most-conservative verdict wins. |
 | 13 | `NotificationChannelRegistry` | `ArtisanPackUI\Ecommerce\Registries\NotificationChannelRegistry` | Laravel channel drivers | Thin wrapper for discoverability. Core surfaces `mail`, `database`. |
 | 14 | `SubStatusRegistry` | `ArtisanPackUI\Ecommerce\Registries\SubStatusRegistry` | DB-backed | Populated from `order_substatuses`, cached in the settings tag. Not directly extensible via `register()`; use the admin API to add rows. Exposed as a registry so downstream code shares one lookup surface. |

@@ -43,7 +43,7 @@ function lineDiscounts( DiscountLedger $ledger ): array
 it( 'registers the core sources, conditions, and actions', function (): void {
     expect( app( PromotionSourceRegistry::class )->keys() )->toBe( [ 'automatic', 'coupon' ] );
     expect( app( PromotionConditionRegistry::class )->keys() )->toBe( [
-        'min-subtotal', 'cart-contains-product', 'customer-in-group', 'day-of-week', 'customer-first-order',
+        'min-subtotal', 'cart-contains-product', 'cart-contains-product-type', 'customer-in-group', 'day-of-week', 'customer-first-order',
     ] );
     expect( app( PromotionActionRegistry::class )->keys() )->toBe( [
         'percent-off-cart', 'fixed-off-cart', 'percent-off-product', 'free-shipping', 'buy-x-get-y', 'add-free-item', 'tiered-discount',

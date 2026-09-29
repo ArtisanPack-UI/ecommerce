@@ -131,8 +131,11 @@ Echo.private('ecommerce.admin').listen('.orderStatusChanged', ({ data }) => {
 ```
 
 The channel is authorized by the `ecommerce.order.viewAny` ability.
-`orderPlaced`, `kanbanCardMoved`, and `reviewSubmitted` join the list with the
-services that fire them.
+`kanbanCardMoved` (`{ card, from_column_id, to_column_id, board_id }`) is
+broadcast on `private-ecommerce.kanban.board.{boardId}` when
+`ECOMMERCE_KANBAN_BROADCAST=true`; that channel needs the `kanbanBoard.view`
+ability (see [kanban.md](kanban.md)). `orderPlaced` and `reviewSubmitted` join
+the list with the services that fire them.
 
 ## Extending the schema
 

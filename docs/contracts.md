@@ -6,11 +6,11 @@ the abstract class from your satellite's test suite, wire the required
 factory method(s), and PHPUnit / Pest will run every invariant the engine's
 reference implementations are held to against your driver.
 
-There are ten suites — one per engine spec §4 contract that satellites
+There are twelve suites — one per engine spec §4 contract that satellites
 implement: `ProductType`, `CartStorage`, `OrderNumberGenerator`,
 `FulfillmentAllocationStrategy`, `PaymentGateway`, `TaxProvider`,
-`ShippingRateProvider`, `FraudProvider`, `PromotionCondition`, and
-`PromotionAction`.
+`ShippingRateProvider`, `FraudProvider`, `PromotionCondition`,
+`PromotionAction`, `KanbanCardWidget`, and `KanbanAutomationTrigger`.
 
 Phase 2 database-backed suites share the
 [`InteractsWithEcommerceCarts`](../src/Testing/Contracts/Concerns/InteractsWithEcommerceCarts.php)
@@ -265,7 +265,8 @@ Invariants verified:
 - Evaluation leaves the cart and its lines untouched.
 
 Reference implementations: `min-subtotal`, `cart-contains-product`,
-`customer-in-group`, `day-of-week`, `customer-first-order` under
+`cart-contains-product-type`, `customer-in-group`, `day-of-week`,
+`customer-first-order` under
 [`src/Promotions/Conditions/`](../src/Promotions/Conditions/) — see
 `tests/Feature/Contracts/*ConditionContractTest.php`.
 
@@ -297,6 +298,60 @@ Reference implementations: `percent-off-cart`, `fixed-off-cart`,
 `percent-off-product`, `free-shipping`, `buy-x-get-y`, `add-free-item`,
 `tiered-discount` under [`src/Promotions/Actions/`](../src/Promotions/Actions/) —
 see `tests/Feature/Contracts/*ActionContractTest.php`.
+
+## `KanbanCardWidgetContractTest`
+
+Contract: [`KanbanCardWidget`](../src/Contracts/KanbanCardWidget.php)
+(engine spec §4.12). Fixtures come from
+[`InteractsWithKanban`](../src/Testing/Contracts/Concerns/InteractsWithKanban.php),
+which builds on `InteractsWithEcommerceCarts` and adds `makeKanbanOrder()`,
+`makeKanbanColumnFor()`, and `makeKanbanAutomation()`.
+
+Extension points a satellite must provide:
+
+- `widget(): KanbanCardWidget` — the widget under test.
+- Optionally `order(): Order` — a richer order to render.
+
+Invariants verified:
+
+- `render()` returns string `label` + `value`, a known `tone` when present,
+  and string `icon` / `tooltip` / `href` when present — never HTML.
+- A bare order (no lines, customer, addresses, or shipping method) renders
+  without throwing.
+- Rendering leaves the order untouched in storage and memory.
+- `refreshSubscription()` returns `null` or a non-empty channel name.
+
+Reference implementations: `total`, `item-count`, `customer`,
+`shipping-method`, `tags`, `days-in-column`, `payment-status`,
+`fulfillment-status` under [`src/Kanban/Widgets/`](../src/Kanban/Widgets/) —
+see `tests/Feature/Contracts/*WidgetContractTest.php`.
+
+## `KanbanAutomationTriggerContractTest`
+
+Contract: [`KanbanAutomationTrigger`](../src/Contracts/KanbanAutomationTrigger.php)
+(engine spec §4.13).
+
+Extension points a satellite must provide:
+
+- `trigger(): KanbanAutomationTrigger` — the trigger under test.
+- `validConfig(): array` — a config the trigger must accept.
+- `invalidConfig(): array` — a config it must reject with
+  `InvalidArgumentException`.
+- `assertFired( Order, KanbanAutomation ): void` — asserts the side effect of
+  firing with the valid config. Fake Mail / Bus / Http in `setUp()`.
+
+Invariants verified:
+
+- The valid config produces the side effect.
+- The invalid config throws `InvalidArgumentException` (the runner logs it
+  and carries on with the board's other automations).
+- Garbage config (objects, nested arrays in place of scalars) either works or
+  throws `InvalidArgumentException` — never a `TypeError` or other crash.
+
+Reference implementations: `send-email`, `dispatch-job`, `webhook`,
+`update-order-field`, `create-shipment`, `print-shipping-label` under
+[`src/Kanban/Triggers/`](../src/Kanban/Triggers/) — see
+`tests/Feature/Contracts/*TriggerContractTest.php`.
 
 ## Adding a new contract test suite
 

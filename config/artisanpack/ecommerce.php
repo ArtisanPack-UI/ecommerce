@@ -541,4 +541,37 @@ return [
         'subscriptions' => (bool) env( 'ECOMMERCE_GRAPHQL_SUBSCRIPTIONS', false ),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Kanban
+    |--------------------------------------------------------------------------
+    |
+    | Order kanban boards (parent plan §9).
+    |
+    | `auto_route`           — Put orders on their matching boards when
+    |                          `ap.ecommerce.order.placed` fires, and re-run
+    |                          routing when `ap.ecommerce.order.edited` fires.
+    | `broadcast`            — Broadcast card moves on
+    |                          `private-ecommerce.kanban.board.{board}`
+    |                          (requires a configured broadcaster). Channel
+    |                          members need the `kanbanBoard.view` ability.
+    | `default_card_widgets` — Widgets on cards in columns (and boards) that
+    |                          don't choose their own.
+    | `stale_after_days`     — The `days-in-column` widget turns `warning`
+    |                          after this many days and `danger` after twice
+    |                          as many.
+    | `dispatchable_jobs`    — Job classes the `dispatch-job` automation may
+    |                          queue. Automations are admin data, so only
+    |                          listed classes can be instantiated.
+    |
+    */
+
+    'kanban' => [
+        'auto_route'           => (bool) env( 'ECOMMERCE_KANBAN_AUTO_ROUTE', true ),
+        'broadcast'            => (bool) env( 'ECOMMERCE_KANBAN_BROADCAST', false ),
+        'default_card_widgets' => [ 'total', 'item-count', 'customer' ],
+        'stale_after_days'     => (int) env( 'ECOMMERCE_KANBAN_STALE_AFTER_DAYS', 3 ),
+        'dispatchable_jobs'    => [],
+    ],
+
 ];

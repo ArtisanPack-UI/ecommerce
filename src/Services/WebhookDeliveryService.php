@@ -319,16 +319,7 @@ class WebhookDeliveryService
      */
     protected function pinTo( string $url, string $address ): array
     {
-        $host = (string) parse_url( $url, PHP_URL_HOST );
-
-        if ( ! defined( 'CURLOPT_RESOLVE' ) || false !== filter_var( trim( $host, '[]' ), FILTER_VALIDATE_IP ) ) {
-            return [];
-        }
-
-        $port = parse_url( $url, PHP_URL_PORT ) ?? ( 'http' === parse_url( $url, PHP_URL_SCHEME ) ? 80 : 443 );
-        $ip   = false !== filter_var( $address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6 ) ? '[' . $address . ']' : $address;
-
-        return [ 'curl' => [ CURLOPT_RESOLVE => [ sprintf( '%s:%d:%s', $host, $port, $ip ) ] ] ];
+        return WebhookUrlGuard::pinOptions( $url, $address );
     }
 
     /**

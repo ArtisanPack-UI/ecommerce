@@ -79,6 +79,7 @@ use Illuminate\Support\Carbon;
  * @property \Illuminate\Database\Eloquent\Collection<int, Refund>                  $refunds
  * @property \Illuminate\Database\Eloquent\Collection<int, Shipment>                $shipments
  * @property \Illuminate\Database\Eloquent\Collection<int, PromotionUsage>          $promotionUsages
+ * @property \Illuminate\Database\Eloquent\Collection<int, OrderBoardAssignment>    $boardAssignments
  */
 class Order extends Model
 {
@@ -252,6 +253,18 @@ class Order extends Model
     public function promotionUsages(): HasMany
     {
         return $this->hasMany( PromotionUsage::class );
+    }
+
+    /**
+     * Kanban board assignments (cards) for this order, including removed ones.
+     *
+     * @since 1.0.0
+     *
+     * @return HasMany<OrderBoardAssignment, $this>
+     */
+    public function boardAssignments(): HasMany
+    {
+        return $this->hasMany( OrderBoardAssignment::class );
     }
 
     /**
