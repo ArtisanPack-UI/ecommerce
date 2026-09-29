@@ -5,8 +5,11 @@ declare( strict_types=1 );
 namespace Tests;
 
 use ArtisanPackUI\Ecommerce\Providers\EcommerceServiceProvider;
+use ArtisanPackUI\Ecommerce\Webhooks\WebhookUrlGuard;
 use Laravel\Sanctum\SanctumServiceProvider;
+use Laravel\Scout\ScoutServiceProvider;
 use Orchestra\Testbench\TestCase as BaseTestCase;
+use Rebing\GraphQL\GraphQLServiceProvider;
 
 /**
  * Base Test Case
@@ -23,6 +26,20 @@ abstract class TestCase extends BaseTestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // Webhook hosts in tests (hooks.example.test, …) don't resolve;
+        // treat them as public unless a test says otherwise.
+        WebhookUrlGuard::resolveUsing( static fn (): array => [ '93.184.216.34' ] );
+    }
+
+    /**
+     * Tear down the test environment.
+     */
+    protected function tearDown(): void
+    {
+        WebhookUrlGuard::resolveUsing( null );
+
+        parent::tearDown();
     }
 
     /**
@@ -38,6 +55,8 @@ abstract class TestCase extends BaseTestCase
     {
         return [
             SanctumServiceProvider::class,
+            ScoutServiceProvider::class,
+            GraphQLServiceProvider::class,
             EcommerceServiceProvider::class,
         ];
     }

@@ -1,0 +1,173 @@
+<?php
+
+/**
+ * WebhookSubscriptionController.
+ *
+ * `admin/webhook-subscriptions` (engine spec §9.11). Every action delegates
+ * to {@see WebhookSubscriptionService}, the same service the GraphQL
+ * mutations use.
+ *
+ * @package    ArtisanPack_UI
+ * @subpackage Ecommerce
+ *
+ * @author     Jacob Martella <me@jacobmartella.com>
+ *
+ * @since      1.0.0
+ */
+
+declare( strict_types=1 );
+
+namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
+
+use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\WebhookSubscriptionRequest;
+use ArtisanPackUI\Ecommerce\Http\Resources\WebhookDeliveryResource;
+use ArtisanPackUI\Ecommerce\Http\Resources\WebhookSubscriptionResource;
+use ArtisanPackUI\Ecommerce\Http\Support\Problem;
+use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
+use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
+use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
+use ArtisanPackUI\Ecommerce\Services\WebhookSubscriptionService;
+use Closure;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+
+/**
+ * @package    ArtisanPack_UI
+ * @subpackage Ecommerce
+ *
+ * @since      1.0.0
+ */
+class WebhookSubscriptionController extends ApiController
+{
+    /**
+     * @since 1.0.0
+     *
+     * @param  WebhookSubscriptionService  $subscriptions  Subscription service.
+     */
+    public function __construct( private readonly WebhookSubscriptionService $subscriptions )
+    {
+    }
+
+    /**
+     * @since 1.0.0
+     *
+     * @param  Request  $request  Request.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'List webhook subscriptions', resource: WebhookSubscriptionResource::class, collection: true )]
+    public function index( Request $request ): JsonResponse
+    {
+        return $this->listResponse(
+            WebhookSubscription::query(),
+            $request,
+            WebhookSubscriptionResource::class,
+            [ 'is_active' => [ 'is_active', 'bool' ] ],
+            [ 'name' => 'name', 'created_at' => 'created_at' ],
+            self::includes(),
+        );
+    }
+
+    /**
+     * Creates a subscription. The response is the only one that reveals the
+     * signing secret.
+     *
+     * @since 1.0.0
+     *
+     * @param  WebhookSubscriptionRequest  $request  Validated request.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Create a webhook subscription', resource: WebhookSubscriptionResource::class, status: 201 )]
+    public function store( WebhookSubscriptionRequest $request ): JsonResponse
+    {
+        // The secret is shown once: keep it out of the stored idempotent
+        // replay. Set on the container's request — the one the middleware
+        // holds — not on this FormRequest copy.
+        request()->attributes->set( IdempotencyMiddleware::REDACT_ATTRIBUTE, [ 'secret' ] );
+
+        $subscription = $this->subscriptions->create( $request->validated() );
+
+        if ( null === $subscription ) {
+            return Problem::make( 422, 'webhook-subscription-rejected', __( 'Subscription rejected' ), __( 'The subscription was rejected by a filter.' ), $request );
+        }
+
+        return ( new WebhookSubscriptionResource( $subscription ) )->withSecret()->response( $request )->setStatusCode( 201 );
+    }
+
+    /**
+     * @since 1.0.0
+     *
+     * @param  WebhookSubscriptionRequest  $request       Validated request.
+     * @param  WebhookSubscription         $subscription  Subscription.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Update a webhook subscription', resource: WebhookSubscriptionResource::class )]
+    public function update( WebhookSubscriptionRequest $request, WebhookSubscription $subscription ): JsonResponse
+    {
+        return $this->resourceResponse(
+            $this->subscriptions->update( $subscription, $request->validated() ),
+            $request,
+            WebhookSubscriptionResource::class,
+            self::includes(),
+        );
+    }
+
+    /**
+     * Deletes the subscription (its deliveries cascade).
+     *
+     * @since 1.0.0
+     *
+     * @param  Request              $request       Request.
+     * @param  WebhookSubscription  $subscription  Subscription.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Delete a webhook subscription', resource: WebhookSubscriptionResource::class )]
+    public function destroy( Request $request, WebhookSubscription $subscription ): JsonResponse
+    {
+        $subscription->delete();
+
+        return $this->resourceResponse( $subscription, $request, WebhookSubscriptionResource::class );
+    }
+
+    /**
+     * Re-sends a past delivery as a new ledger row.
+     *
+     * @since 1.0.0
+     *
+     * @param  Request              $request       Request.
+     * @param  WebhookSubscription  $subscription  Subscription (scopes the delivery).
+     * @param  WebhookDelivery      $delivery      Delivery to replay.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Replay a webhook delivery', resource: WebhookDeliveryResource::class, status: 202 )]
+    public function replay( Request $request, WebhookSubscription $subscription, WebhookDelivery $delivery ): JsonResponse
+    {
+        $replayed = $this->subscriptions->replay( $delivery );
+
+        if ( null === $replayed ) {
+            return Problem::make( 422, 'webhook-subscription-inactive', __( 'Subscription inactive' ), __( 'Re-enable the subscription before replaying its deliveries.' ), $request );
+        }
+
+        return $this->resourceResponse( $replayed, $request, WebhookDeliveryResource::class, [], 202 );
+    }
+
+    /**
+     * Allowed includes. Deliveries are capped to the newest 20 per
+     * subscription so a noisy endpoint can't blow up the listing.
+     *
+     * @since 1.0.0
+     *
+     * @return array<string, array{0: string, 1: Closure}>
+     */
+    protected static function includes(): array
+    {
+        return [
+            'deliveries' => [ 'deliveries', static fn ( $query ) => $query->latest( 'id' )->limit( 20 ) ],
+        ];
+    }
+}

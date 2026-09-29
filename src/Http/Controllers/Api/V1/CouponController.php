@@ -22,6 +22,7 @@ use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CouponRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\CouponResource;
 use ArtisanPackUI\Ecommerce\Models\Coupon;
 use ArtisanPackUI\Ecommerce\Models\Promotion;
+use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -41,6 +42,7 @@ class CouponController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Create a coupon for a promotion', resource: CouponResource::class, status: 201 )]
     public function store( CouponRequest $request, Promotion $promotion ): JsonResponse
     {
         return $this->resourceResponse( $promotion->coupons()->create( $request->validated() ), $request, CouponResource::class, [], 201 );
@@ -54,6 +56,7 @@ class CouponController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Update a coupon', resource: CouponResource::class )]
     public function update( CouponRequest $request, Coupon $coupon ): JsonResponse
     {
         $coupon->fill( $request->validated() )->save();
@@ -69,6 +72,7 @@ class CouponController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Delete a coupon', resource: CouponResource::class )]
     public function destroy( Request $request, Coupon $coupon ): JsonResponse
     {
         $coupon->delete();

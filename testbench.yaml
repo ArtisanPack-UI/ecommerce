@@ -1,0 +1,8 @@
+# Boots the package in Orchestra Testbench's skeleton so its Artisan
+# commands can run outside a host app — e.g. the release workflow's
+# `vendor/bin/testbench ecommerce:generate-openapi`.
+providers:
+  - Laravel\Sanctum\SanctumServiceProvider
+  - Laravel\Scout\ScoutServiceProvider
+  - Rebing\GraphQL\GraphQLServiceProvider
+  - ArtisanPackUI\Ecommerce\Providers\EcommerceServiceProvider

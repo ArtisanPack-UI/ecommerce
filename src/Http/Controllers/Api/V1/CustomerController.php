@@ -21,6 +21,7 @@ namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateCustomerRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\CustomerResource;
 use ArtisanPackUI\Ecommerce\Models\Customer;
+use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -40,6 +41,7 @@ class CustomerController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'List customers', resource: CustomerResource::class, collection: true )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(
@@ -60,6 +62,7 @@ class CustomerController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Get a customer', resource: CustomerResource::class )]
     public function show( Request $request, Customer $customer ): JsonResponse
     {
         return $this->resourceResponse( $customer, $request, CustomerResource::class, [ 'addresses' => 'addresses' ] );
@@ -73,6 +76,7 @@ class CustomerController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Update a customer', resource: CustomerResource::class )]
     public function update( UpdateCustomerRequest $request, Customer $customer ): JsonResponse
     {
         $data = $request->validated();

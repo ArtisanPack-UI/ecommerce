@@ -20,6 +20,7 @@ namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ShippingZoneRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\ShippingZoneResource;
 use ArtisanPackUI\Ecommerce\Models\ShippingZone;
+use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -45,6 +46,7 @@ class ShippingZoneController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'List shipping zones', resource: ShippingZoneResource::class, collection: true )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse( ShippingZone::query(), $request, ShippingZoneResource::class, [ 'is_active' => [ 'is_active', 'bool' ] ], [ 'priority' => 'priority', 'name' => 'name' ], self::INCLUDES, 'priority' );
@@ -57,6 +59,7 @@ class ShippingZoneController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Create a shipping zone', resource: ShippingZoneResource::class, status: 201 )]
     public function store( ShippingZoneRequest $request ): JsonResponse
     {
         return $this->resourceResponse( ShippingZone::query()->create( $request->validated() ), $request, ShippingZoneResource::class, self::INCLUDES, 201 );
@@ -70,6 +73,7 @@ class ShippingZoneController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Update a shipping zone', resource: ShippingZoneResource::class )]
     public function update( ShippingZoneRequest $request, ShippingZone $zone ): JsonResponse
     {
         $zone->fill( $request->validated() )->save();
@@ -87,6 +91,7 @@ class ShippingZoneController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Delete a shipping zone', resource: ShippingZoneResource::class )]
     public function destroy( Request $request, ShippingZone $zone ): JsonResponse
     {
         $zone->delete();

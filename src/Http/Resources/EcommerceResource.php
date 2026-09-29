@@ -7,6 +7,8 @@
  * flat JSON objects: `id`, `type`, the resource's own fields (foreign keys
  * as related ids), and any relation the client asked for via `include`.
  * Money is always `{ amount: int (minor units), currency: string }`.
+ * Relations flagged admin-only in {@see ResourceSchemas} (internal notes,
+ * audit timeline, a cart's customer, …) render only on admin requests.
  *
  * The final array runs through `ap.ecommerce.api.resource.{name}` (engine
  * spec §6.17) so satellites can decorate any resource — e.g. the
@@ -24,6 +26,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Resources;
 
+use ArtisanPackUI\Ecommerce\Api\ResourceSchemas;
 use ArtisanPackUI\Ecommerce\Http\Middleware\EnsureEcommerceAbility;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -113,10 +116,11 @@ abstract class EcommerceResource extends JsonResource
      */
     protected function includes( Request $request ): array
     {
-        $included = [];
+        $included  = [];
+        $adminOnly = $this->isAdmin( $request ) ? [] : $this->adminOnlyRelations();
 
         foreach ( $this->relations() as $name => [ $relation, $resourceClass ] ) {
-            if ( ! $this->resource->relationLoaded( $relation ) ) {
+            if ( ! $this->resource->relationLoaded( $relation ) || in_array( $name, $adminOnly, true ) ) {
                 continue;
             }
 
@@ -130,6 +134,28 @@ abstract class EcommerceResource extends JsonResource
         }
 
         return $included;
+    }
+
+    /**
+     * Include names flagged admin-only in {@see ResourceSchemas} — never
+     * rendered on a non-admin request, even if something loaded them.
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, string>
+     */
+    protected function adminOnlyRelations(): array
+    {
+        $type = ResourceSchemas::typeForResource( static::class );
+
+        if ( null === $type ) {
+            return [];
+        }
+
+        return array_keys( array_filter(
+            ResourceSchemas::get( $type )['relations'] ?? [],
+            static fn ( array $definition ): bool => (bool) ( $definition[3] ?? false ),
+        ) );
     }
 
     /**

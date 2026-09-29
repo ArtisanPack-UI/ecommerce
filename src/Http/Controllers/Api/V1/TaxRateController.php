@@ -20,6 +20,7 @@ namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\TaxRateRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\TaxRateResource;
 use ArtisanPackUI\Ecommerce\Models\TaxRate;
+use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -38,6 +39,7 @@ class TaxRateController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'List tax rates', resource: TaxRateResource::class, collection: true )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(
@@ -58,6 +60,7 @@ class TaxRateController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Create a tax rate', resource: TaxRateResource::class, status: 201 )]
     public function store( TaxRateRequest $request ): JsonResponse
     {
         return $this->resourceResponse( TaxRate::query()->create( $request->validated() ), $request, TaxRateResource::class, [], 201 );
@@ -71,6 +74,7 @@ class TaxRateController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Update a tax rate', resource: TaxRateResource::class )]
     public function update( TaxRateRequest $request, TaxRate $rate ): JsonResponse
     {
         $rate->fill( $request->validated() )->save();
@@ -86,6 +90,7 @@ class TaxRateController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Delete a tax rate', resource: TaxRateResource::class )]
     public function destroy( Request $request, TaxRate $rate ): JsonResponse
     {
         $rate->delete();

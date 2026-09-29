@@ -19,6 +19,7 @@ namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
 use ArtisanPackUI\Ecommerce\Http\Resources\InventoryItemResource;
 use ArtisanPackUI\Ecommerce\Models\InventoryItem;
+use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -38,6 +39,7 @@ class InventoryController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'List inventory items', resource: InventoryItemResource::class, collection: true )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(

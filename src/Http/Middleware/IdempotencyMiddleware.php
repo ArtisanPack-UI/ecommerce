@@ -27,6 +27,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Middleware;
 
+use ArtisanPackUI\Ecommerce\Auth\ServiceActor;
 use ArtisanPackUI\Ecommerce\Models\IdempotencyRecord;
 use Closure;
 use Illuminate\Database\QueryException;
@@ -72,20 +73,49 @@ class IdempotencyMiddleware
     public const MAX_KEY_LENGTH = 255;
 
     /**
+     * Mode for endpoints that serve reads and writes alike (GraphQL): the
+     * header is honoured when sent but not required.
+     *
+     * @since 1.0.0
+     */
+    public const MODE_OPTIONAL = 'optional';
+
+    /**
+     * Request attribute listing JSON keys to strip from the stored copy of
+     * the response (at any depth), for responses that reveal a secret
+     * exactly once — e.g. a new webhook subscription's signing secret. A
+     * replay then returns the response without those keys.
+     *
+     * @since 1.0.0
+     */
+    public const REDACT_ATTRIBUTE = 'ecommerce.idempotency.redact';
+
+    /**
+     * {@see self::REDACT_ATTRIBUTE} value that withholds the whole body —
+     * for responses whose keys the client controls (GraphQL aliases), where
+     * stripping by key name can't be relied on.
+     *
+     * @since 1.0.0
+     */
+    public const REDACT_ALL = '*';
+
+    /**
      * Runs the incoming request through the idempotency machinery.
      *
      * @since 1.0.0
      *
-     * @param  Request  $request
-     * @param  Closure  $next
+     * @param  Request      $request
+     * @param  Closure      $next
+     * @param  string|null  $mode     `optional` to let requests without the header through
+     *                                (`->middleware('ecommerce.idempotency:optional')`).
      *
      * @return Response
      */
-    public function handle( Request $request, Closure $next ): Response
+    public function handle( Request $request, Closure $next, ?string $mode = null ): Response
     {
         $key = trim( (string) $request->header( self::HEADER, '' ) );
         if ( '' === $key ) {
-            return $this->missingHeaderResponse( $request );
+            return self::MODE_OPTIONAL === $mode ? $next( $request ) : $this->missingHeaderResponse( $request );
         }
         if ( strlen( $key ) > self::MAX_KEY_LENGTH ) {
             return $this->oversizedKeyResponse( $request );
@@ -155,7 +185,7 @@ class IdempotencyMiddleware
         /** @var Response $response */
         $response = $next( $request );
 
-        $this->persistResponse( $record, $response );
+        $this->persistResponse( $record, $response, $request );
 
         return $response;
     }
@@ -172,6 +202,10 @@ class IdempotencyMiddleware
     protected function resolveActorScope( Request $request ): string
     {
         $user = $request->user();
+        if ( $user instanceof ServiceActor ) {
+            return 'service:' . $user->name;
+        }
+
         if ( null !== $user && method_exists( $user, 'currentAccessToken' ) ) {
             $sanctumToken = $user->currentAccessToken();
             if ( null !== $sanctumToken && isset( $sanctumToken->id ) ) {
@@ -463,7 +497,7 @@ class IdempotencyMiddleware
      *
      * @return void
      */
-    protected function persistResponse( IdempotencyRecord $record, Response $response ): void
+    protected function persistResponse( IdempotencyRecord $record, Response $response, ?Request $request = null ): void
     {
         $headers = [];
         foreach ( $response->headers->all() as $name => $values ) {
@@ -482,10 +516,57 @@ class IdempotencyMiddleware
             ->update( [
                 'response_status'  => $response->getStatusCode(),
                 'response_headers' => json_encode( $headers, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ),
-                'response_body'    => $response->getContent(),
+                'response_body'    => $this->redact( (string) $response->getContent(), (array) ( $request?->attributes->get( self::REDACT_ATTRIBUTE ) ?? [] ) ),
                 'locked_at'        => null,
                 'updated_at'       => Carbon::now(),
             ] );
+    }
+
+    /**
+     * Removes `$keys` (at any depth) from a JSON body before it is stored.
+     * Non-JSON bodies are stored unchanged.
+     *
+     * @since 1.0.0
+     *
+     * @param  string              $body  Response body.
+     * @param  array<int, string>  $keys  Keys to strip.
+     *
+     * @return string
+     */
+    protected function redact( string $body, array $keys ): string
+    {
+        if ( [] === $keys ) {
+            return $body;
+        }
+
+        if ( in_array( self::REDACT_ALL, $keys, true ) ) {
+            return (string) json_encode( [
+                'errors' => [ [
+                    'message'    => 'This request already completed. Its response contained a one-time secret, so it is not replayed.',
+                    'extensions' => [ 'code' => 'IDEMPOTENT_REPLAY_WITHHELD' ],
+                ] ],
+            ] );
+        }
+
+        $decoded = json_decode( $body, true );
+
+        if ( ! is_array( $decoded ) ) {
+            return $body;
+        }
+
+        $strip = static function ( array $value ) use ( &$strip, $keys ): array {
+            foreach ( $value as $key => $item ) {
+                if ( in_array( $key, $keys, true ) ) {
+                    unset( $value[ $key ] );
+                } elseif ( is_array( $item ) ) {
+                    $value[ $key ] = $strip( $item );
+                }
+            }
+
+            return $value;
+        };
+
+        return (string) json_encode( $strip( $decoded ), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
     }
 
     /**

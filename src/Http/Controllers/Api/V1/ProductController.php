@@ -22,6 +22,7 @@ namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 use ArtisanPackUI\Ecommerce\Http\Resources\ProductResource;
 use ArtisanPackUI\Ecommerce\Http\Resources\ProductVariantResource;
 use ArtisanPackUI\Ecommerce\Models\Product;
+use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -43,6 +44,7 @@ class ProductController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'List storefront products', resource: ProductResource::class, collection: true )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(
@@ -71,6 +73,7 @@ class ProductController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'Get a storefront product', resource: ProductResource::class )]
     public function show( Request $request, int $product ): JsonResponse
     {
         return $this->resourceResponse( $this->visible()->findOrFail( $product ), $request, ProductResource::class, $this->includes() );
@@ -84,6 +87,7 @@ class ProductController extends ApiController
      *
      * @return JsonResponse
      */
+    #[ApiOperation( summary: 'List the variants of a product', resource: ProductVariantResource::class, collection: true )]
     public function variants( Request $request, int $product ): JsonResponse
     {
         $model = $this->visible()->findOrFail( $product );
@@ -130,8 +134,6 @@ class ProductController extends ApiController
      */
     protected function visible(): Builder
     {
-        return Product::query()
-            ->where( 'status', 'active' )
-            ->where( fn ( Builder $q ) => $q->whereNull( 'published_at' )->orWhere( 'published_at', '<=', Carbon::now() ) );
+        return Product::query()->storefrontVisible();
     }
 }

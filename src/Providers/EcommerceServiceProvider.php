@@ -17,26 +17,58 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Providers;
 
+use ArtisanPackUI\Ecommerce\Auth\EcommerceAuthorizer;
 use ArtisanPackUI\Ecommerce\Console\Commands\AuditOrderStatusCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\GenerateOpenApiCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\LintPciColumnsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\PruneIdempotencyRecordsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\ReleaseExpiredReservationsCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\RetryWebhookDeliveriesCommand;
 use ArtisanPackUI\Ecommerce\Contracts\CartStorage;
 use ArtisanPackUI\Ecommerce\Contracts\OrderNumberGenerator;
 use ArtisanPackUI\Ecommerce\CurrencyRates\ConfigRateProvider;
 use ArtisanPackUI\Ecommerce\CurrencyRates\FrankfurterRateProvider;
 use ArtisanPackUI\Ecommerce\Ecommerce;
+use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
 use ArtisanPackUI\Ecommerce\Fulfillment\ProportionalByLineTotalStrategy;
 use ArtisanPackUI\Ecommerce\Gateways\Stripe\StripeGateway;
+use ArtisanPackUI\Ecommerce\GraphQL\EcommerceSchema;
+use ArtisanPackUI\Ecommerce\GraphQL\Execution\GuardOperations;
+use ArtisanPackUI\Ecommerce\GraphQL\Fields\Subscriptions;
 use ArtisanPackUI\Ecommerce\Http\Controllers\WebhookController;
+use ArtisanPackUI\Ecommerce\Http\Middleware\AuthenticateOptionally;
 use ArtisanPackUI\Ecommerce\Http\Middleware\EnsureEcommerceAbility;
 use ArtisanPackUI\Ecommerce\Http\Middleware\ForceJsonResponse;
 use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
+use ArtisanPackUI\Ecommerce\Http\Middleware\LimitGraphQLBatch;
 use ArtisanPackUI\Ecommerce\Http\Middleware\RateLimitEcommerce;
 use ArtisanPackUI\Ecommerce\Http\Middleware\RequestIdMiddleware;
+use ArtisanPackUI\Ecommerce\Http\Middleware\ServiceSignatureMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
+use ArtisanPackUI\Ecommerce\Listeners\BroadcastGraphQLSubscriptions;
+use ArtisanPackUI\Ecommerce\Listeners\DispatchWebhooksForEvent;
 use ArtisanPackUI\Ecommerce\Listeners\LinkCustomerOnUserVerified;
 use ArtisanPackUI\Ecommerce\Logging\EcommerceLogFormatter;
+use ArtisanPackUI\Ecommerce\Models\Coupon;
+use ArtisanPackUI\Ecommerce\Models\Customer;
+use ArtisanPackUI\Ecommerce\Models\Order;
+use ArtisanPackUI\Ecommerce\Models\Product;
+use ArtisanPackUI\Ecommerce\Models\Promotion;
+use ArtisanPackUI\Ecommerce\Models\Refund;
+use ArtisanPackUI\Ecommerce\Models\ShippingMethod;
+use ArtisanPackUI\Ecommerce\Models\ShippingZone;
+use ArtisanPackUI\Ecommerce\Models\TaxClass;
+use ArtisanPackUI\Ecommerce\Models\TaxRate;
+use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
+use ArtisanPackUI\Ecommerce\Policies\CouponPolicy;
+use ArtisanPackUI\Ecommerce\Policies\CustomerPolicy;
+use ArtisanPackUI\Ecommerce\Policies\OrderPolicy;
+use ArtisanPackUI\Ecommerce\Policies\ProductPolicy;
+use ArtisanPackUI\Ecommerce\Policies\PromotionPolicy;
+use ArtisanPackUI\Ecommerce\Policies\RefundPolicy;
+use ArtisanPackUI\Ecommerce\Policies\ShippingZonePolicy;
+use ArtisanPackUI\Ecommerce\Policies\TaxRatePolicy;
+use ArtisanPackUI\Ecommerce\Policies\WebhookSubscriptionPolicy;
 use ArtisanPackUI\Ecommerce\ProductTypes\DigitalProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\AddFreeItemAction;
@@ -82,7 +114,13 @@ use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Routing\Router;
+use Illuminate\Support\Facades\Broadcast;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
+use Rebing\GraphQL\GraphQL as RebingGraphQL;
+use Rebing\GraphQL\Support\ExecutionMiddleware\AddAuthUserContextValueMiddleware;
+use Rebing\GraphQL\Support\ExecutionMiddleware\AutomaticPersistedQueriesMiddleware;
+use Rebing\GraphQL\Support\ExecutionMiddleware\ValidateOperationParamsMiddleware;
 
 /**
  * Service provider for the Ecommerce package.
@@ -148,6 +186,13 @@ class EcommerceServiceProvider extends ServiceProvider
 
         $this->app->singleton( CartStorage::class, DatabaseCartStorage::class );
         $this->app->singleton( OrderNumberGenerator::class, RandomEightCharGenerator::class );
+
+        // After every provider has registered, before any boots: rebing
+        // registers its schema routes while booting, so the `ecommerce`
+        // schema must be in its config by then.
+        $this->app->booting( function (): void {
+            $this->registerGraphQLSchema();
+        } );
     }
 
     /**
@@ -162,6 +207,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->loadMigrationsFrom( __DIR__ . '/../../database/migrations' );
 
         $this->registerRequestIdMiddleware();
+        $this->registerMiddlewarePriority();
         $this->registerIdempotencyMiddleware();
         $this->registerRateLimitMiddleware();
         $this->registerRateLimiters();
@@ -174,8 +220,11 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->registerCoreShippingMethodTypes();
         $this->registerCorePromotionRules();
         $this->registerWebhookRoute();
+        $this->registerPolicies();
         $this->registerRestRoutes();
         $this->registerCustomerListeners();
+        $this->registerWebhookListeners();
+        $this->registerGraphQLSubscriptions();
 
         if ( $this->app->runningInConsole() ) {
             $this->publishes( [
@@ -188,9 +237,11 @@ class EcommerceServiceProvider extends ServiceProvider
 
             $this->commands( [
                 AuditOrderStatusCommand::class,
+                GenerateOpenApiCommand::class,
                 LintPciColumnsCommand::class,
                 PruneIdempotencyRecordsCommand::class,
                 ReleaseExpiredReservationsCommand::class,
+                RetryWebhookDeliveriesCommand::class,
             ] );
 
             $this->app->booted( function (): void {
@@ -206,6 +257,10 @@ class EcommerceServiceProvider extends ServiceProvider
                     ->runInBackground();
                 $schedule->command( 'ecommerce:prune-idempotency-records' )
                     ->hourly()
+                    ->withoutOverlapping()
+                    ->runInBackground();
+                $schedule->command( 'ecommerce:retry-webhook-deliveries' )
+                    ->everyMinute()
                     ->withoutOverlapping()
                     ->runInBackground();
             } );
@@ -268,6 +323,33 @@ class EcommerceServiceProvider extends ServiceProvider
     }
 
     /**
+     * Orders the engine's auth middleware relative to Laravel's, whatever
+     * order a route lists them in:
+     *
+     * - {@see ServiceSignatureMiddleware} runs before `auth:*`, so a signed
+     *   service request is authenticated before Sanctum looks for a user;
+     * - {@see EnsureEcommerceAbility} runs right after authentication and
+     *   before route-model binding, so a caller without the ability gets
+     *   403 for every id — never a 404 that reveals which orders exist.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerMiddlewarePriority(): void
+    {
+        $kernel = $this->app->make( HttpKernel::class );
+
+        if ( method_exists( $kernel, 'addToMiddlewarePriorityAfter' ) ) {
+            $kernel->addToMiddlewarePriorityAfter( AuthenticatesRequests::class, EnsureEcommerceAbility::class );
+        }
+
+        if ( method_exists( $kernel, 'addToMiddlewarePriorityBefore' ) ) {
+            $kernel->addToMiddlewarePriorityBefore( AuthenticatesRequests::class, ServiceSignatureMiddleware::class );
+        }
+    }
+
+    /**
      * Aliases {@see IdempotencyMiddleware} so route classes can attach it
      * with `->middleware('ecommerce.idempotency')`. Engine spec §11.2.
      *
@@ -299,6 +381,9 @@ class EcommerceServiceProvider extends ServiceProvider
 
         $router->aliasMiddleware( 'ecommerce.rate-limit', RateLimitEcommerce::class );
         $router->aliasMiddleware( 'ecommerce.can', EnsureEcommerceAbility::class );
+        $router->aliasMiddleware( 'ecommerce.service-signature', ServiceSignatureMiddleware::class );
+        $router->aliasMiddleware( 'ecommerce.optional-auth', AuthenticateOptionally::class );
+        $router->aliasMiddleware( 'ecommerce.graphql-batch', LimitGraphQLBatch::class );
         $router->aliasMiddleware( 'ecommerce.json', ForceJsonResponse::class );
     }
 
@@ -600,15 +685,6 @@ class EcommerceServiceProvider extends ServiceProvider
         /** @var Router $router */
         $router = $this->app->make( Router::class );
 
-        // Ability checks run right after authentication and before route-model
-        // binding, so a caller without the ability gets 403 for every id —
-        // never a 404 that reveals which orders / customers exist.
-        $kernel = $this->app->make( HttpKernel::class );
-
-        if ( method_exists( $kernel, 'addToMiddlewarePriorityAfter' ) ) {
-            $kernel->addToMiddlewarePriorityAfter( AuthenticatesRequests::class, EnsureEcommerceAbility::class );
-        }
-
         // 401s on the API render as problem+json (engine spec §11.5).
         $handler = $this->app->make( ExceptionHandler::class );
 
@@ -616,6 +692,15 @@ class EcommerceServiceProvider extends ServiceProvider
             $handler->renderable( static function ( AuthenticationException $e, $request ) {
                 return $request->routeIs( 'ecommerce.api.*' )
                     ? Problem::make( 401, 'unauthenticated', __( 'Unauthenticated' ), __( 'Authentication is required.' ), $request )
+                    : null;
+            } );
+
+            // Expected storefront cart failures (unknown product, bad coupon, …).
+            $handler->renderable( static function ( CartOperationException $e, $request ) {
+                return $request->routeIs( 'ecommerce.api.*' )
+                    ? Problem::make( 422, $e->errorCode, __( 'Cart operation failed' ), $e->getMessage(), $request, [
+                        [ 'field' => $e->field, 'code' => $e->errorCode, 'message' => $e->getMessage() ],
+                    ] )
                     : null;
             } );
         }
@@ -627,6 +712,139 @@ class EcommerceServiceProvider extends ServiceProvider
             ) )
             ->name( 'ecommerce.api.' )
             ->group( __DIR__ . '/../../routes/api.php' );
+    }
+
+    /**
+     * Adds the `ecommerce` schema (engine spec §10) to
+     * rebing/graphql-laravel, served at `/{graphql.route.prefix}/ecommerce`,
+     * when `artisanpack.ecommerce.features.graphql` is on.
+     *
+     * The schema's types live in their own registry (see
+     * {@see \ArtisanPackUI\Ecommerce\GraphQL\TypeRegistry}), so they
+     * never collide with a host app's GraphQL types; it is built on first
+     * use of rebing's GraphQL service, after every provider has booted and
+     * registered its `ap.ecommerce.graphql.extend` filters.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerGraphQLSchema(): void
+    {
+        $config = $this->app['config'];
+
+        if ( ! class_exists( RebingGraphQL::class ) || ! (bool) $config->get( 'artisanpack.ecommerce.features.graphql', true ) ) {
+            return;
+        }
+
+        $config->set( 'graphql.schemas.' . EcommerceSchema::NAME, [
+            'method'               => [ 'GET', 'POST' ],
+            'middleware'           => (array) $config->get( 'artisanpack.ecommerce.graphql.middleware', [] ),
+            'execution_middleware' => [
+                ValidateOperationParamsMiddleware::class,
+                AutomaticPersistedQueriesMiddleware::class,
+                AddAuthUserContextValueMiddleware::class,
+                GuardOperations::class,
+            ],
+        ] );
+
+        $register = function ( RebingGraphQL $graphql ): void {
+            $graphql->addSchema( EcommerceSchema::NAME, $this->app->make( EcommerceSchema::class )->build() );
+        };
+
+        $this->app->afterResolving( RebingGraphQL::class, $register );
+
+        if ( $this->app->resolved( RebingGraphQL::class ) ) {
+            $register( $this->app->make( RebingGraphQL::class ) );
+        }
+    }
+
+    /**
+     * Broadcasts GraphQL subscription events (engine spec §10.4) on the
+     * `private-ecommerce.admin` channel when
+     * `artisanpack.ecommerce.graphql.subscriptions` is on. The channel is
+     * authorized by the `order`, `product`, and `webhookSubscription`
+     * `viewAny` abilities together.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerGraphQLSubscriptions(): void
+    {
+        if ( ! (bool) $this->app['config']->get( 'artisanpack.ecommerce.graphql.subscriptions', false ) ) {
+            return;
+        }
+
+        $this->app->make( Dispatcher::class )->subscribe( BroadcastGraphQLSubscriptions::class );
+
+        // The channel carries order, inventory, and webhook-delivery events,
+        // so a member must be allowed to see all three.
+        Broadcast::channel(
+            Subscriptions::ADMIN_CHANNEL,
+            function ( $user ): bool {
+                $authorizer = $this->app->make( EcommerceAuthorizer::class );
+
+                return $authorizer->allows( $user, 'order', 'viewAny' )
+                    && $authorizer->allows( $user, 'product', 'viewAny' )
+                    && $authorizer->allows( $user, 'webhookSubscription', 'viewAny' );
+            },
+        );
+    }
+
+    /**
+     * Registers the engine policy set (engine spec §6.18) so
+     * `$user->can( 'refund', $order )` works out of the box. A policy the
+     * host app already registered for one of these models wins.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerPolicies(): void
+    {
+        $policies = [
+            Product::class             => ProductPolicy::class,
+            Order::class               => OrderPolicy::class,
+            Refund::class              => RefundPolicy::class,
+            Customer::class            => CustomerPolicy::class,
+            Promotion::class           => PromotionPolicy::class,
+            Coupon::class              => CouponPolicy::class,
+            TaxRate::class             => TaxRatePolicy::class,
+            TaxClass::class            => TaxRatePolicy::class,
+            ShippingZone::class        => ShippingZonePolicy::class,
+            ShippingMethod::class      => ShippingZonePolicy::class,
+            WebhookSubscription::class => WebhookSubscriptionPolicy::class,
+        ];
+
+        $registered = Gate::policies();
+
+        foreach ( $policies as $model => $policy ) {
+            if ( ! array_key_exists( $model, $registered ) ) {
+                Gate::policy( $model, $policy );
+            }
+        }
+    }
+
+    /**
+     * Bridges the domain events listed in
+     * `artisanpack.ecommerce.webhooks.events` to outbound webhook
+     * deliveries (engine spec §8.2).
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerWebhookListeners(): void
+    {
+        /** @var Dispatcher $events */
+        $events = $this->app->make( Dispatcher::class );
+
+        foreach ( (array) $this->app['config']->get( 'artisanpack.ecommerce.webhooks.events', [] ) as $event ) {
+            if ( is_string( $event ) && class_exists( $event ) ) {
+                $events->listen( $event, DispatchWebhooksForEvent::class );
+            }
+        }
     }
 
     /**
