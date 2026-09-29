@@ -262,12 +262,12 @@ class EcommerceSchema
                 try {
                     return Carbon::parse( (string) $value );
                 } catch ( Throwable ) {
-                    throw new Error( 'DateTime must be an ISO 8601 string.' );
+                    throw new Error( __( 'DateTime must be an ISO 8601 string.' ) );
                 }
             },
             'parseLiteral' => static function ( Node $node ): Carbon {
                 if ( ! $node instanceof StringValueNode ) {
-                    throw new Error( 'DateTime must be an ISO 8601 string.' );
+                    throw new Error( __( 'DateTime must be an ISO 8601 string.' ) );
                 }
 
                 return Carbon::parse( $node->value );
@@ -288,14 +288,14 @@ class EcommerceSchema
             'serialize'    => static fn ( mixed $value ): ?int => null === $value ? null : (int) $value,
             'parseValue'   => static function ( mixed $value ): int {
                 if ( ! is_int( $value ) && ! ( is_string( $value ) && preg_match( '/^-?\d+$/', $value ) ) ) {
-                    throw new Error( 'BigInt must be an integer.' );
+                    throw new Error( __( 'BigInt must be an integer.' ) );
                 }
 
                 return (int) $value;
             },
             'parseLiteral' => static function ( Node $node ): int {
                 if ( ! $node instanceof IntValueNode && ! ( $node instanceof StringValueNode && preg_match( '/^-?\d+$/', $node->value ) ) ) {
-                    throw new Error( 'BigInt must be an integer.' );
+                    throw new Error( __( 'BigInt must be an integer.' ) );
                 }
 
                 return (int) $node->value;

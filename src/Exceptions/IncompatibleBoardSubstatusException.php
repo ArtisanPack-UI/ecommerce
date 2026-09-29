@@ -77,12 +77,11 @@ class IncompatibleBoardSubstatusException extends EcommerceException
         $this->substatusId           = $substatusId;
         $this->substatusSystemStatus = $substatusSystemStatus;
 
-        parent::__construct( sprintf(
-            'Order %d is on system_status "%s"; sub-status %d belongs to system_status "%s" and cannot be assigned.',
-            $orderId,
-            $orderSystemStatus,
-            $substatusId,
-            $substatusSystemStatus,
-        ) );
+        parent::__construct( __( 'Order :order is on system_status ":order_status"; sub-status :substatus belongs to system_status ":substatus_status" and cannot be assigned.', [
+            'order'            => $orderId,
+            'order_status'     => $orderSystemStatus,
+            'substatus'        => $substatusId,
+            'substatus_status' => $substatusSystemStatus,
+        ] ) );
     }
 }

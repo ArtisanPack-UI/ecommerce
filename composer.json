@@ -12,6 +12,10 @@
       "src/helpers.php"
     ]
   },
+  "bin": [
+    "bin/ecommerce-sign-report",
+    "bin/ecommerce-verify-satellite"
+  ],
   "autoload-dev": {
     "psr-4": {
       "Tests\\": "tests/"
@@ -25,6 +29,7 @@
   ],
   "require": {
     "php": "^8.2",
+    "ext-intl": "*",
     "illuminate/support": "^12.0|^13.0",
     "illuminate/auth": "^12.0|^13.0",
     "illuminate/database": "^12.0|^13.0",
@@ -53,6 +58,7 @@
     "friendsofphp/php-cs-fixer": "^3.75"
   },
   "suggest": {
+    "sentry/sentry-laravel": "Attaches EcommerceException context to the Sentry scope when installed.",
     "artisanpack-ui/cms-framework": "Auto-registers admin nav entries and reuses cms auth/roles when present.",
     "artisanpack-ui/visual-editor": "Enables commerce blocks (product grid, single-product, add-to-cart, cart, checkout, price, gallery).",
     "artisanpack-ui/media-library": "Product images via media-library; falls back to a nullable image_url on ProductImage.",

@@ -225,12 +225,11 @@ class OrderEditService
                 continue;
             }
 
-            throw new OrderNotEditableException( sprintf(
-                'Order %d is in fulfillment_status "%s"; only shipping/billing address and notes are editable at this stage. Field "%s" is not.',
-                $order->id,
-                $fulfillment,
-                $key,
-            ) );
+            throw new OrderNotEditableException( __( 'Order :order is in fulfillment_status ":status"; only shipping/billing address and notes are editable at this stage. Field ":field" is not.', [
+                'order'  => $order->id,
+                'status' => $fulfillment,
+                'field'  => $key,
+            ] ) );
         }
     }
 

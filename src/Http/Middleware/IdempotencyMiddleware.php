@@ -542,7 +542,7 @@ class IdempotencyMiddleware
         if ( in_array( self::REDACT_ALL, $keys, true ) ) {
             return (string) json_encode( [
                 'errors' => [ [
-                    'message'    => 'This request already completed. Its response contained a one-time secret, so it is not replayed.',
+                    'message'    => __( 'This request already completed. Its response contained a one-time secret, so it is not replayed.' ),
                     'extensions' => [ 'code' => 'IDEMPOTENT_REPLAY_WITHHELD' ],
                 ] ],
             ] );

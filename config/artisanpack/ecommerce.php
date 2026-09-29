@@ -692,4 +692,71 @@ return [
         'dispatchable_jobs'    => [],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Localization
+    |--------------------------------------------------------------------------
+    |
+    | Locale-driven formatting (parent plan §16.5). The engine ships `en`,
+    | `es`, `fr`, and `de` catalogues; money is formatted with PHP's
+    | `NumberFormatter` (the `intl` extension is required).
+    |
+    | `tax_labels` — Per-locale override for the tax line label on receipts
+    |                and checkout summaries. The defaults come from the
+    |                shipped catalogues ("Tax" / "IVA" / "TVA" / "USt.").
+    |                Example: [ 'en' => 'Sales Tax' ].
+    |
+    | `regional_fallback` — Let regional locales (`de_DE`, `es-MX`) fall back
+    |                to their base language's JSON catalogue. Laravel does
+    |                not do this for JSON keys on its own; the engine wraps
+    |                the translation loader to add it. Applies app-wide.
+    |
+    */
+
+    'localization' => [
+        'tax_labels'        => [],
+        'regional_fallback' => (bool) env( 'ECOMMERCE_REGIONAL_LOCALE_FALLBACK', true ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Sentry
+    |--------------------------------------------------------------------------
+    |
+    | When `sentry/sentry-laravel` is installed, the engine attaches every
+    | `EcommerceException::context()` payload to the Sentry scope under the
+    | `ecommerce` key (parent plan §16.3). Set `enabled` to false to opt out
+    | without uninstalling Sentry.
+    |
+    */
+
+    'sentry' => [
+        'enabled' => (bool) env( 'ECOMMERCE_SENTRY_ENABLED', true ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Satellites
+    |--------------------------------------------------------------------------
+    |
+    | Satellite lifecycle + contract verification (parent plan §15.2, §16.6).
+    |
+    | `verification.report_path` — Where `ecommerce:verify-satellite` writes
+    |                              its JSON report (relative to the base path).
+    | `verification.signing_key` — Base64 Ed25519 secret key used to sign the
+    |                              report (`verify-report.sig`). CI only;
+    |                              leave unset locally.
+    | `verification.public_key`  — Base64 Ed25519 public key used to check a
+    |                              signed report.
+    |
+    */
+
+    'satellites' => [
+        'verification' => [
+            'report_path' => env( 'ECOMMERCE_VERIFY_REPORT_PATH', '.ecommerce-verify-report.json' ),
+            'signing_key' => env( 'ECOMMERCE_VERIFY_SIGNING_KEY' ),
+            'public_key'  => env( 'ECOMMERCE_VERIFY_PUBLIC_KEY' ),
+        ],
+    ],
+
 ];

@@ -21,9 +21,15 @@ use ArtisanPackUI\Ecommerce\Auth\EcommerceAuthorizer;
 use ArtisanPackUI\Ecommerce\Console\Commands\AuditOrderStatusCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\GenerateOpenApiCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\LintPciColumnsCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\LintTranslationsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\PruneIdempotencyRecordsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\ReleaseExpiredReservationsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\RetryWebhookDeliveriesCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\SatelliteAuditCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\SatelliteReinstallCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\SatelliteUninstallCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\SeedDemoCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\VerifySatelliteCommand;
 use ArtisanPackUI\Ecommerce\Contracts\CartStorage;
 use ArtisanPackUI\Ecommerce\Contracts\OrderNumberGenerator;
 use ArtisanPackUI\Ecommerce\Contracts\ReviewModerator;
@@ -130,6 +136,7 @@ use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PromotionActionRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PromotionConditionRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PromotionSourceRegistry;
+use ArtisanPackUI\Ecommerce\Registries\SatelliteRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingLabelProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingMethodTypeRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingRateProviderRegistry;
@@ -148,6 +155,7 @@ use ArtisanPackUI\Ecommerce\Shipping\Methods\LocalPickupMethod;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\PriceBasedMethod;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\WeightBasedMethod;
 use ArtisanPackUI\Ecommerce\Support\RateLimitPolicyRegistrar;
+use ArtisanPackUI\Ecommerce\Support\RegionalJsonFallbackLoader;
 use ArtisanPackUI\Ecommerce\Tax\ManualTaxProvider;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Auth\Events\Verified;
@@ -156,6 +164,7 @@ use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
+use Illuminate\Contracts\Translation\Loader;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Gate;
@@ -190,6 +199,8 @@ class EcommerceServiceProvider extends ServiceProvider
         );
 
         $this->registerLogChannel();
+        $this->registerSentryIntegration();
+        $this->registerRegionalLocaleFallback();
 
         $this->app->singleton( 'ecommerce', function ( $app ) {
             return new Ecommerce();
@@ -230,6 +241,8 @@ class EcommerceServiceProvider extends ServiceProvider
             $this->app->singleton( $registry, static fn ( $app ) => new $registry( $app ) );
         }
 
+        $this->app->singleton( SatelliteRegistry::class, static fn ( $app ): SatelliteRegistry => new SatelliteRegistry( $app ) );
+
         $this->app->singleton( CartStorage::class, DatabaseCartStorage::class );
         $this->app->singleton( OrderNumberGenerator::class, RandomEightCharGenerator::class );
         $this->app->singleton( ReviewModerator::class, NoopReviewModerator::class );
@@ -253,6 +266,7 @@ class EcommerceServiceProvider extends ServiceProvider
     {
         $this->loadMigrationsFrom( __DIR__ . '/../../database/migrations' );
 
+        $this->registerTranslations();
         $this->registerRequestIdMiddleware();
         $this->registerMiddlewarePriority();
         $this->registerIdempotencyMiddleware();
@@ -288,13 +302,23 @@ class EcommerceServiceProvider extends ServiceProvider
                 __DIR__ . '/../../database/migrations' => database_path( 'migrations' ),
             ], 'ecommerce-migrations' );
 
+            $this->publishes( [
+                __DIR__ . '/../../lang' => $this->app->langPath( 'vendor/ecommerce' ),
+            ], 'ecommerce-lang' );
+
             $this->commands( [
                 AuditOrderStatusCommand::class,
                 GenerateOpenApiCommand::class,
                 LintPciColumnsCommand::class,
+                LintTranslationsCommand::class,
                 PruneIdempotencyRecordsCommand::class,
                 ReleaseExpiredReservationsCommand::class,
                 RetryWebhookDeliveriesCommand::class,
+                SatelliteAuditCommand::class,
+                SatelliteReinstallCommand::class,
+                SatelliteUninstallCommand::class,
+                SeedDemoCommand::class,
+                VerifySatelliteCommand::class,
             ] );
 
             $this->app->booted( function (): void {
@@ -355,6 +379,72 @@ class EcommerceServiceProvider extends ServiceProvider
         ];
 
         $this->app['config']->set( 'logging.channels', $channels );
+    }
+
+    /**
+     * Registers {@see EcommerceSentryIntegration} when `sentry/sentry-laravel`
+     * is installed and `artisanpack.ecommerce.sentry.enabled` is on (parent
+     * plan §16.3). Detection is at runtime, so Sentry stays an optional
+     * dependency: without it the integration provider is never loaded.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerSentryIntegration(): void
+    {
+        if ( ! EcommerceSentryIntegration::sentryInstalled() ) {
+            return;
+        }
+
+        if ( ! (bool) $this->app['config']->get( 'artisanpack.ecommerce.sentry.enabled', true ) ) {
+            return;
+        }
+
+        $this->app->register( EcommerceSentryIntegration::class );
+    }
+
+    /**
+     * Loads the engine's JSON translation catalogues (parent plan §16.5).
+     *
+     * Every user-facing string runs through `__()` with its English source
+     * as the key, so the engine reads correctly in English with no catalogue
+     * at all. `lang/{en,es,fr,de}.json` ship the shipped locales. JSON paths
+     * merge in registration order and the app's own `lang/{locale}.json` is
+     * read last, so precedence is: shipped catalogue < published copy in
+     * `lang/vendor/ecommerce/` (the `ecommerce-lang` tag) < `lang/{locale}.json`.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerTranslations(): void
+    {
+        $this->loadJsonTranslationsFrom( __DIR__ . '/../../lang' );
+        $this->loadJsonTranslationsFrom( $this->app->langPath( 'vendor/ecommerce' ) );
+    }
+
+    /**
+     * Wraps the translation loader so regional locales (`de_DE`) fall back
+     * to their base language's JSON catalogue (`de`). Laravel applies locale
+     * fallback to PHP group files only, so without this an app running in
+     * `de_DE` would get English engine strings next to German-formatted
+     * money and dates. Opt out with
+     * `artisanpack.ecommerce.localization.regional_fallback`.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerRegionalLocaleFallback(): void
+    {
+        if ( ! (bool) $this->app['config']->get( 'artisanpack.ecommerce.localization.regional_fallback', true ) ) {
+            return;
+        }
+
+        $this->app->extend( 'translation.loader', static function ( Loader $loader ): Loader {
+            return $loader instanceof RegionalJsonFallbackLoader ? $loader : new RegionalJsonFallbackLoader( $loader );
+        } );
     }
 
     /**

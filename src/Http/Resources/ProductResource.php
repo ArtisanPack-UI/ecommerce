@@ -48,6 +48,8 @@ class ProductResource extends EcommerceResource
     {
         return [
             'product_type'            => $this->resource->type,
+            'type_missing'            => $this->resource->typeIsMissing(),
+            'type_warning'            => $this->adminOnly( $request, $this->resource->typeWarning() ),
             'name'                    => $this->resource->name,
             'slug'                    => $this->resource->slug,
             'sku'                     => $this->resource->sku,

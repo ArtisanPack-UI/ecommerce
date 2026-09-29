@@ -219,11 +219,10 @@ class OrderStatusMachine
             );
 
             if ( ! $allowed ) {
-                throw new SubstatusTransitionRejectedException( sprintf(
-                    'Sub-status transition on order %d to "%s" was rejected by a canTransitionSubstatus filter.',
-                    $locked->id,
-                    $to->key,
-                ) );
+                throw new SubstatusTransitionRejectedException( __( 'Sub-status transition on order :order to ":substatus" was rejected by a canTransitionSubstatus filter.', [
+                    'order'     => $locked->id,
+                    'substatus' => $to->key,
+                ] ) );
             }
 
             if ( null === $boardId && (int) $to->id === (int) $locked->substatus_id ) {

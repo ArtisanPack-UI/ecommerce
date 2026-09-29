@@ -41,12 +41,11 @@ class ClaimRateLimitedException extends EcommerceException
         public readonly int $limit,
     ) {
         parent::__construct(
-            sprintf(
-                'Customer #%d has %d claim attempts within the rate window (limit: %d).',
-                $customer->id ?? 0,
-                $attempts,
-                $limit,
-            ),
+            __( 'Customer #:customer has :attempts claim attempts within the rate window (limit: :limit).', [
+                'customer' => $customer->id ?? 0,
+                'attempts' => $attempts,
+                'limit'    => $limit,
+            ] ),
         );
     }
 }

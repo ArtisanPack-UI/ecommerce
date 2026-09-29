@@ -42,12 +42,11 @@ class InsufficientStockException extends EcommerceException
         public readonly int $available,
     ) {
         parent::__construct(
-            sprintf(
-                'Insufficient stock on inventory item #%d: requested %d, %d available.',
-                $item->id ?? 0,
-                $requested,
-                $available,
-            ),
+            __( 'Insufficient stock on inventory item #:item: requested :requested, :available available.', [
+                'item'      => $item->id ?? 0,
+                'requested' => $requested,
+                'available' => $available,
+            ] ),
         );
     }
 }

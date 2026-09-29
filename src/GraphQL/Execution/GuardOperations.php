@@ -72,7 +72,7 @@ class GuardOperations extends AbstractExecutionMiddleware
         }
 
         if ( $params->isReadOnly() && 'query' !== $this->operationType( $document, $params->operation ) ) {
-            return new ExecutionResult( null, [ new Error( 'GET requests may only execute query operations; send mutations with POST.' ) ] );
+            return new ExecutionResult( null, [ new Error( __( 'GET requests may only execute query operations; send mutations with POST.' ) ) ] );
         }
 
         $rules      = [];

@@ -100,3 +100,22 @@ it( 'drops the per-license bucket when the request carries no license key', func
     expect( $limits )->toHaveCount( 1 );
     expect( $limits[0]->maxAttempts )->toBe( 600 );
 } );
+
+it( 'honours overrides in the published config shape (dotted policy keys)', function (): void {
+    $limits                      = config( 'artisanpack.ecommerce.rate_limits' );
+    $limits['catalog.read']      = [ 'per_ip' => 17 ];
+    $limits['checkout.finalize'] = [ 'per_ip' => 3, 'per_cart' => 5 ];
+
+    // Replace the whole array, as a published config file would: no nested
+    // `catalog` / `checkout` keys exist for dot notation to find.
+    config()->set( 'artisanpack.ecommerce.rate_limits', $limits );
+
+    RateLimitPolicyRegistrar::register();
+
+    $catalog  = ( RateLimiter::limiter( 'ecommerce.catalog.read' ) )( Request::create( '/x', 'GET' ) );
+    $checkout = ( RateLimiter::limiter( 'ecommerce.checkout.finalize' ) )( Request::create( '/x', 'POST' ) );
+
+    expect( config( 'artisanpack.ecommerce.rate_limits.catalog.read.per_ip' ) )->toBeNull()
+        ->and( $catalog[0]->maxAttempts )->toBe( 17 )
+        ->and( collect( $checkout )->pluck( 'maxAttempts' )->sort()->values()->all() )->toBe( [ 3, 5 ] );
+} );

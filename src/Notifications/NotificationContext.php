@@ -35,15 +35,10 @@ use ArtisanPackUI\Ecommerce\Models\ProductReview;
 use ArtisanPackUI\Ecommerce\Models\ProductVariant;
 use ArtisanPackUI\Ecommerce\Models\Refund;
 use ArtisanPackUI\Ecommerce\Models\Shipment;
+use ArtisanPackUI\Ecommerce\Support\MoneyFormatter;
+use ArtisanPackUI\Ecommerce\Support\TaxLabel;
 use DateTimeInterface;
 use Illuminate\Support\Facades\Route;
-use Money\Currencies\ISOCurrencies;
-use Money\Currency;
-use Money\Formatter\DecimalMoneyFormatter;
-use Money\Formatter\IntlMoneyFormatter;
-use Money\Money;
-use NumberFormatter;
-use Throwable;
 
 /**
  * @package    ArtisanPack_UI
@@ -93,6 +88,7 @@ class NotificationContext
             'discount'         => $this->money( (int) $order->discount_amount, $currency ),
             'shipping'         => $this->money( (int) $order->shipping_amount, $currency ),
             'tax'              => $this->money( (int) $order->tax_amount, $currency ),
+            'tax_label'        => TaxLabel::for(),
             'total'            => $this->money( (int) $order->total_amount, $currency ),
             'shipping_address' => implode( ', ', array_filter( [
                 trim( ( $address['first_name'] ?? '' ) . ' ' . ( $address['last_name'] ?? '' ) ),
@@ -363,7 +359,7 @@ class NotificationContext
     }
 
     /**
-     * Formats minor units for display, using intl when available.
+     * Formats minor units for display in the active locale.
      *
      * @since 1.0.0
      *
@@ -374,18 +370,7 @@ class NotificationContext
      */
     public function money( int $amount, string $currency ): string
     {
-        try {
-            $money      = new Money( $amount, new Currency( strtoupper( $currency ) ) );
-            $currencies = new ISOCurrencies();
-
-            if ( class_exists( NumberFormatter::class ) ) {
-                return ( new IntlMoneyFormatter( new NumberFormatter( app()->getLocale(), NumberFormatter::CURRENCY ), $currencies ) )->format( $money );
-            }
-
-            return ( new DecimalMoneyFormatter( $currencies ) )->format( $money ) . ' ' . strtoupper( $currency );
-        } catch ( Throwable ) {
-            return $amount . ' ' . strtoupper( $currency );
-        }
+        return MoneyFormatter::format( $amount, $currency );
     }
 
     /**
