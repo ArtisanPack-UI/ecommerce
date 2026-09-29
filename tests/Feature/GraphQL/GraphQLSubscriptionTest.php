@@ -7,7 +7,9 @@ use ArtisanPackUI\Ecommerce\Events\OrderStatusChanged;
 use ArtisanPackUI\Ecommerce\Listeners\BroadcastGraphQLSubscriptions;
 use ArtisanPackUI\Ecommerce\Models\InventoryItem;
 use ArtisanPackUI\Ecommerce\Models\Order;
+use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\Services\InventoryService;
+use ArtisanPackUI\Ecommerce\Services\ReviewService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 
@@ -42,6 +44,14 @@ it( 'broadcasts stock changes from the inventory hook', function (): void {
         && -2 === $broadcast->payload['delta']
         && 3 === $broadcast->payload['new_level']
         && $item->id === $broadcast->payload['inventory_item']['id'] );
+} );
+
+it( 'broadcasts submitted reviews', function (): void {
+    $review = app( ReviewService::class )->submit( Product::factory()->create(), [ 'rating' => 4, 'author_name' => 'Ada' ] );
+
+    Event::assertDispatched( GraphQLSubscriptionBroadcast::class, fn ( GraphQLSubscriptionBroadcast $broadcast ): bool => 'reviewSubmitted' === $broadcast->field
+        && $review->id === $broadcast->payload['review']['id']
+        && 'pending' === $broadcast->payload['review']['status'] );
 } );
 
 it( 'is off unless enabled', function (): void {

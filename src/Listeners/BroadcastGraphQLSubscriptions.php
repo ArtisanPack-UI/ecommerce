@@ -25,6 +25,7 @@ namespace ArtisanPackUI\Ecommerce\Listeners;
 use ArtisanPackUI\Ecommerce\Broadcasting\GraphQLSubscriptionBroadcast;
 use ArtisanPackUI\Ecommerce\Events\OrderStatusChanged;
 use ArtisanPackUI\Ecommerce\Events\PaymentSucceeded;
+use ArtisanPackUI\Ecommerce\Events\ReviewSubmitted;
 use ArtisanPackUI\Ecommerce\Events\WebhookFailed;
 use ArtisanPackUI\Ecommerce\GraphQL\Fields\Subscriptions;
 use ArtisanPackUI\Ecommerce\Models\InventoryItem;
@@ -69,6 +70,7 @@ class BroadcastGraphQLSubscriptions
         $events->listen( OrderStatusChanged::class, [ $this, 'orderStatusChanged' ] );
         $events->listen( PaymentSucceeded::class, [ $this, 'paymentSucceeded' ] );
         $events->listen( WebhookFailed::class, [ $this, 'webhookDeliveryFailed' ] );
+        $events->listen( ReviewSubmitted::class, [ $this, 'reviewSubmitted' ] );
 
         addAction( 'ap.ecommerce.inventory.adjusted', [ $this, 'stockChanged' ] );
     }
@@ -110,6 +112,18 @@ class BroadcastGraphQLSubscriptions
             'delivery' => $this->payloads->serialize( $event->delivery ),
             'reason'   => $event->reason->getMessage(),
         ] );
+    }
+
+    /**
+     * @since 1.0.0
+     *
+     * @param  ReviewSubmitted  $event  Event.
+     *
+     * @return void
+     */
+    public function reviewSubmitted( ReviewSubmitted $event ): void
+    {
+        $this->broadcast( 'reviewSubmitted', [ 'review' => $this->payloads->serialize( $event->review ) ] );
     }
 
     /**

@@ -28,6 +28,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use LogicException;
 
 /**
@@ -59,6 +60,8 @@ use LogicException;
  * @property Order                $order
  * @property Product|null         $product
  * @property ProductVariant|null  $variant
+ * @property \Illuminate\Database\Eloquent\Collection<int, DigitalDownload>  $digitalDownloads
+ * @property \Illuminate\Database\Eloquent\Collection<int, LicenseKey>       $licenseKeys
  */
 class OrderItem extends Model
 {
@@ -145,6 +148,30 @@ class OrderItem extends Model
     public function variant(): BelongsTo
     {
         return $this->belongsTo( ProductVariant::class, 'product_variant_id' );
+    }
+
+    /**
+     * Download entitlements issued for this line.
+     *
+     * @since 1.0.0
+     *
+     * @return HasMany<DigitalDownload, $this>
+     */
+    public function digitalDownloads(): HasMany
+    {
+        return $this->hasMany( DigitalDownload::class );
+    }
+
+    /**
+     * License keys issued for this line.
+     *
+     * @since 1.0.0
+     *
+     * @return HasMany<LicenseKey, $this>
+     */
+    public function licenseKeys(): HasMany
+    {
+        return $this->hasMany( LicenseKey::class );
     }
 
     /**

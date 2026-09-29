@@ -62,12 +62,22 @@ Gate::authorize( 'viewAny', Product::class );
 | `WebhookSubscriptionPolicy` | `WebhookSubscription` | `viewAny`, `create`, `update`, `delete` |
 | `KanbanBoardPolicy` | `KanbanBoard`, `KanbanColumn`, `KanbanAutomation` | `viewAny`, `view`, `create`, `update`, `delete` |
 | `KanbanCardPolicy` | `OrderBoardAssignment` | `move` |
+| `ReviewPolicy` | `ProductReview` | `viewAny`, `view`, `moderate`, `delete` |
+| `DigitalFilePolicy` | `DigitalFile` | `viewAny`, `create`, `update`, `delete` |
+| `LicenseKeyPolicy` | `LicenseKey` | `view`, `revoke` |
+| `NotificationTemplatePolicy` | `NotificationTemplate` | `viewAny`, `view`, `update` |
 
 `OrderPolicy::view()` also lets a shopper see their own order (the order's
 customer is linked to their user id) when their token allows storefront access.
 A policy the host app already registered for one of these models takes
-precedence. Review, digital-delivery, and notification policies arrive with
-those subsystems.
+precedence.
+
+A few endpoints aren't admin endpoints: `GET downloads/{token}` and
+`…/stream` (the token is the credential), `POST license/validate` (public,
+rate-limited per key and IP), `POST products/{product}/reviews` (signed-in
+shoppers, or guests when `reviews.allow_guests` is on), and
+`me/notification-preferences` (the signed-in shopper, with a
+storefront-capable token).
 
 ## Sanctum token abilities
 

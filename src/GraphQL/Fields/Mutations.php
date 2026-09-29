@@ -20,6 +20,8 @@
  * | `updateWebhookSubscription` | `PATCH admin/webhook-subscriptions/{sub}`              |
  * | `deleteWebhookSubscription` | `DELETE admin/webhook-subscriptions/{sub}`             |
  * | `replayWebhookDelivery`     | `POST admin/webhook-subscriptions/{sub}/replay/{id}`   |
+ * | `updateNotificationTemplate`  | `PATCH admin/notification-templates/{template}`      |
+ * | `previewNotificationTemplate` | `POST admin/notification-templates/{template}/preview` |
  *
  * Inputs use the REST payload's snake_case keys. Expected failures
  * (validation, unknown product, bad coupon, refused refund) come back in
@@ -40,6 +42,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\GraphQL\Fields;
 
 use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
+use ArtisanPackUI\Ecommerce\Exceptions\NotificationTemplateException;
 use ArtisanPackUI\Ecommerce\Exceptions\RefundNotAllowedException;
 use ArtisanPackUI\Ecommerce\GraphQL\GraphQLError;
 use ArtisanPackUI\Ecommerce\GraphQL\Support\Resolvers;
@@ -48,14 +51,18 @@ use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\AddCartItemRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ApplyCouponRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CreateCartRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\IssueRefundRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\PreviewNotificationTemplateRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateCartItemRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateNotificationTemplateRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\WebhookSubscriptionRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\WebhookSubscriptionResource;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
+use ArtisanPackUI\Ecommerce\Models\NotificationTemplate;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
+use ArtisanPackUI\Ecommerce\Services\NotificationTemplateService;
 use ArtisanPackUI\Ecommerce\Services\RefundService;
 use ArtisanPackUI\Ecommerce\Services\StorefrontCartService;
 use ArtisanPackUI\Ecommerce\Services\WebhookSubscriptionService;
@@ -143,6 +150,26 @@ class Mutations
             'DeleteWebhookSubscriptionPayload' => $output( [ 'deleted_id' => 'ID' ] ),
             'ReplayWebhookDeliveryInput'       => $input( [ 'subscription_id' => 'ID!', 'delivery_id' => 'ID!' ] ),
             'ReplayWebhookDeliveryPayload'     => $output( [ 'delivery' => 'WebhookDelivery' ] ),
+
+            'RenderedNotification'               => [
+                'description' => 'A notification template rendered through the delivery-time sandbox.',
+                'fields'      => [ 'subject' => 'String', 'body' => 'String!' ],
+            ],
+            'UpdateNotificationTemplateInput'    => $input( [
+                'id'           => 'ID!',
+                'subject'      => 'String',
+                'body'         => 'String',
+                'is_active'    => 'Boolean',
+                'preview_data' => 'JSON',
+            ] ),
+            'UpdateNotificationTemplatePayload'  => $output( [ 'notification_template' => 'NotificationTemplate' ] ),
+            'PreviewNotificationTemplateInput'   => $input( [
+                'id'           => 'ID!',
+                'subject'      => 'String',
+                'body'         => 'String',
+                'preview_data' => 'JSON',
+            ] ),
+            'PreviewNotificationTemplatePayload' => $output( [ 'rendered' => 'RenderedNotification' ] ),
         ];
     }
 
@@ -295,6 +322,29 @@ class Mutations
 
                 return [ 'delivery' => $this->r->present( $replayed, 'WebhookDelivery', $this->r->selection( $info, 'delivery' ), true ) ];
             } ),
+
+            'updateNotificationTemplate' => $this->mutation( 'UpdateNotificationTemplate', function ( array $input, ResolveInfo $info ): array {
+                $template = $this->notificationTemplate( 'update', $input['id'] );
+                $this->validate( $input, UpdateNotificationTemplateRequest::baseRules() );
+
+                app( NotificationTemplateService::class )->update( $template, $this->only( $input, [ 'subject', 'body', 'is_active', 'preview_data' ] ) );
+
+                return [ 'notification_template' => $this->r->present( $template, 'NotificationTemplate', $this->r->selection( $info, 'notification_template' ), true ) ];
+            } ),
+
+            'previewNotificationTemplate' => $this->mutation( 'PreviewNotificationTemplate', function ( array $input ): array {
+                $template = $this->notificationTemplate( 'update', $input['id'] );
+                $this->validate( $input, PreviewNotificationTemplateRequest::baseRules() );
+
+                return [
+                    'rendered' => app( NotificationTemplateService::class )->preview(
+                        $template,
+                        $input['subject'] ?? null,
+                        $input['body'] ?? null,
+                        isset( $input['preview_data'] ) ? (array) $input['preview_data'] : null,
+                    ),
+                ];
+            } ),
         ];
     }
 
@@ -325,6 +375,8 @@ class Mutations
                     $payload = [ 'errors' => [ [ 'field' => $exception->field, 'code' => $exception->errorCode, 'message' => $exception->getMessage() ] ] ];
                 } catch ( RefundNotAllowedException $exception ) {
                     $payload = [ 'errors' => [ [ 'field' => null, 'code' => 'refund-not-allowed', 'message' => $exception->getMessage() ] ] ];
+                } catch ( NotificationTemplateException $exception ) {
+                    $payload = [ 'errors' => $exception->errors ];
                 }
 
                 return $payload + [ 'errors' => [], 'clientMutationId' => $input['clientMutationId'] ?? null ];
@@ -442,6 +494,26 @@ class Mutations
         }
 
         return WebhookSubscription::query()->find( $id ) ?? throw GraphQLError::notFound();
+    }
+
+    /**
+     * Authorizes a notification-template admin action and finds the row.
+     *
+     * @since 1.0.0
+     *
+     * @param  string      $action  Action name.
+     * @param  int|string  $id      Template id.
+     *
+     * @throws GraphQLError When not allowed or not found.
+     *
+     * @return NotificationTemplate
+     */
+    protected function notificationTemplate( string $action, int|string $id ): NotificationTemplate
+    {
+        $this->r->authorize( 'notificationTemplate', $action );
+        $this->r->throttle( 'ecommerce.admin.mutate' );
+
+        return NotificationTemplate::query()->find( $id ) ?? throw GraphQLError::notFound();
     }
 
     /**

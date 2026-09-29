@@ -20,9 +20,11 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Models;
 
 use ArtisanPackUI\Ecommerce\Database\Factories\CustomerFactory;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
 
 /**
@@ -48,10 +50,12 @@ use Illuminate\Support\Carbon;
  * @property array<string, mixed>                                                    $meta
  * @property \Illuminate\Database\Eloquent\Collection<int, CustomerAddress>          $addresses
  * @property \Illuminate\Database\Eloquent\Collection<int, CustomerClaimAttempt>     $claimAttempts
+ * @property \Illuminate\Database\Eloquent\Collection<int, CustomerNotificationPreference>  $notificationPreferences
  */
 class Customer extends Model
 {
     use HasFactory;
+    use Notifiable;
 
     /**
      * @since 1.0.0
@@ -92,6 +96,22 @@ class Customer extends Model
     ];
 
     /**
+     * The customer record linked to a signed-in user, if any.
+     *
+     * @since 1.0.0
+     *
+     * @param  Authenticatable|null  $user  User.
+     *
+     * @return self|null
+     */
+    public static function forUser( ?Authenticatable $user ): ?self
+    {
+        $id = $user?->getAuthIdentifier();
+
+        return is_numeric( $id ) ? self::query()->where( 'user_id', (int) $id )->first() : null;
+    }
+
+    /**
      * Addresses saved for this customer.
      *
      * @since 1.0.0
@@ -113,6 +133,18 @@ class Customer extends Model
     public function claimAttempts(): HasMany
     {
         return $this->hasMany( CustomerClaimAttempt::class );
+    }
+
+    /**
+     * Per-channel, per-category notification opt-ins.
+     *
+     * @since 1.0.0
+     *
+     * @return HasMany<CustomerNotificationPreference, $this>
+     */
+    public function notificationPreferences(): HasMany
+    {
+        return $this->hasMany( CustomerNotificationPreference::class );
     }
 
     /**

@@ -1571,16 +1571,20 @@ interface NotificationTemplate
     public function key(): string;
     public function label(): string;
     public function channel(): string;                     // 'mail'|'database'|satellite key
+    public function category(): string;                    // preference category (§3.30); 'transactional' always sends
 
-    /** @return array<int, string>  Names of variables the template exposes. */
+    /** @return array<int, string>  Dotted paths the template may reference (`Order.items.*.name`). */
     public function variables(): array;
 
     /** @return array<string, mixed>  Preview data injected into the admin editor. */
     public function previewData(): array;
+
+    public function defaultSubject(): ?string;             // default Twig source (null for channels without a subject)
+    public function defaultBody(): string;                 // default Twig source
 }
 ```
 
-Templates are stored in `notification_templates` (see §3.30). The `NotificationTemplateRenderer` service uses this contract's declared `variables()` to validate template source at save-time (rejects references to undeclared variables).
+Templates are stored in `notification_templates` (see §3.30), seeded from `defaultSubject()` / `defaultBody()`. The `NotificationTemplateRenderer` service uses this contract's declared `variables()` to validate template source at save-time (rejects references to undeclared variables). Definitions register against `NotificationTemplateRegistry`.
 
 ### 4.15 `SearchIndexer`
 
@@ -1921,7 +1925,7 @@ Every Laravel Gate ability check routes through `ap.ecommerce.abilities.{resourc
 | `kanbanCard` | `move` |
 | `notificationTemplate` | `viewAny`, `view`, `update` |
 | `webhookSubscription` | `viewAny`, `create`, `update`, `delete` |
-| `digitalFile` | `create`, `update`, `delete` |
+| `digitalFile` | `viewAny`, `create`, `update`, `delete` |
 | `licenseKey` | `view`, `revoke` |
 | `review` | `viewAny`, `view`, `moderate`, `delete` |
 
@@ -2435,3 +2439,4 @@ Authorization: `EcommerceChannelPolicy` gates all three.
 ## 13. Changelog
 
 - **2026-09-06** — Draft v0.1. Initial authoring against parent plan v2.
+- **2026-09-29** — Phase 5: `NotificationTemplate` gains `category()`, `defaultSubject()`, and `defaultBody()` (the catalog needs a preference category and shipped copy); `digitalFile` gains `viewAny` for `GET admin/digital-files`; `LicenseActivated` event added for new license activations. The §10 GraphQL fields for reviews, licenses, digital files, and notification preferences are deferred; the notification-template fields shipped.

@@ -140,7 +140,8 @@ class RateLimitPolicyRegistrar
         } );
 
         RateLimiter::for( 'ecommerce.license.validate', function ( Request $request ): array {
-            $licenseKey = (string) ( $request->route( 'license_key' ) ?? $request->input( 'license_key' ) ?? '' );
+            $licenseKey = $request->route( 'license_key' ) ?? $request->input( 'key' ) ?? $request->input( 'license_key' ) ?? '';
+            $licenseKey = is_string( $licenseKey ) ? strtoupper( trim( $licenseKey ) ) : '';
             $limits     = [
                 Limit::perMinute( self::limit( 'license.validate.per_ip', 600 ) )
                     ->by( 'ecommerce:license:ip:' . sha1( (string) $request->ip() ) ),

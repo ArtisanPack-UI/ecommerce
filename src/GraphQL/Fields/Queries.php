@@ -33,6 +33,7 @@ use ArtisanPackUI\Ecommerce\GraphQL\Support\Resolvers;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\InventoryItem;
+use ArtisanPackUI\Ecommerce\Models\NotificationTemplate;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\Models\Promotion;
@@ -41,6 +42,7 @@ use ArtisanPackUI\Ecommerce\Models\ShippingZone;
 use ArtisanPackUI\Ecommerce\Models\TaxClass;
 use ArtisanPackUI\Ecommerce\Models\TaxRate;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
+use ArtisanPackUI\Ecommerce\Services\NotificationTemplateService;
 use GraphQL\Type\Definition\ResolveInfo;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
@@ -228,15 +230,29 @@ class Queries
                     ),
                 ),
             ],
-            'promotion'            => $this->adminFind( 'Promotion', 'promotion', 'view', Promotion::class ),
-            'promotions'           => $this->adminConnection( 'Promotion', 'promotion', Promotion::class ),
-            'taxClasses'           => $this->adminList( 'TaxClass', 'taxRate', TaxClass::class, 'key' ),
-            'taxRates'             => $this->adminConnection( 'TaxRate', 'taxRate', TaxRate::class ),
-            'shippingZones'        => $this->adminList( 'ShippingZone', 'shippingZone', ShippingZone::class, 'priority' ),
-            'shippingZone'         => $this->adminFind( 'ShippingZone', 'shippingZone', 'viewAny', ShippingZone::class ),
-            'inventoryItems'       => $this->adminConnection( 'InventoryItem', 'product', InventoryItem::class ),
-            'webhookSubscriptions' => $this->adminList( 'WebhookSubscription', 'webhookSubscription', WebhookSubscription::class, 'name' ),
-            'webhookSubscription'  => $this->adminFind( 'WebhookSubscription', 'webhookSubscription', 'viewAny', WebhookSubscription::class ),
+            'promotion'             => $this->adminFind( 'Promotion', 'promotion', 'view', Promotion::class ),
+            'promotions'            => $this->adminConnection( 'Promotion', 'promotion', Promotion::class ),
+            'taxClasses'            => $this->adminList( 'TaxClass', 'taxRate', TaxClass::class, 'key' ),
+            'taxRates'              => $this->adminConnection( 'TaxRate', 'taxRate', TaxRate::class ),
+            'shippingZones'         => $this->adminList( 'ShippingZone', 'shippingZone', ShippingZone::class, 'priority' ),
+            'shippingZone'          => $this->adminFind( 'ShippingZone', 'shippingZone', 'viewAny', ShippingZone::class ),
+            'inventoryItems'        => $this->adminConnection( 'InventoryItem', 'product', InventoryItem::class ),
+            'webhookSubscriptions'  => $this->adminList( 'WebhookSubscription', 'webhookSubscription', WebhookSubscription::class, 'name' ),
+            'webhookSubscription'   => $this->adminFind( 'WebhookSubscription', 'webhookSubscription', 'viewAny', WebhookSubscription::class ),
+            'notificationTemplates' => [
+                'type'        => '[NotificationTemplate!]!',
+                'description' => 'Every notification template, with its declared variables for editor autocomplete.',
+                'resolve'     => fn ( $root, array $args, $context, ResolveInfo $info ): array => $this->admin(
+                    'notificationTemplate',
+                    'viewAny',
+                    function (): array {
+                        app( NotificationTemplateService::class )->sync();
+
+                        return $this->r->renderMany( NotificationTemplate::query()->orderBy( 'key' )->orderBy( 'locale' )->get(), true );
+                    },
+                ),
+            ],
+            'notificationTemplate' => $this->adminFind( 'NotificationTemplate', 'notificationTemplate', 'view', NotificationTemplate::class ),
         ];
     }
 

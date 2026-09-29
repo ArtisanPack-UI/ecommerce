@@ -543,6 +543,124 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Reviews
+    |--------------------------------------------------------------------------
+    |
+    | Product reviews (parent plan §5.12). New reviews wait in the
+    | moderation queue unless the bound `ReviewModerator` decides otherwise
+    | (the default, `NoopReviewModerator`, leaves them all for a human).
+    | Submissions are rate-limited by `rate_limits.review.submit`.
+    |
+    | `allow_guests`   — Accept reviews from shoppers who aren't signed in
+    |                    (they must give a name and email).
+    | `honeypot_field` — Name of a hidden form field real shoppers leave
+    |                    empty. Submissions that fill it in are answered as
+    |                    usual but filed straight to spam.
+    |
+    */
+
+    'reviews' => [
+        'allow_guests'   => (bool) env( 'ECOMMERCE_REVIEWS_ALLOW_GUESTS', true ),
+        'honeypot_field' => env( 'ECOMMERCE_REVIEWS_HONEYPOT_FIELD', 'website' ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Digital delivery
+    |--------------------------------------------------------------------------
+    |
+    | Download entitlements for digital files (parent plan §5.13). Links
+    | carry opaque server-issued tokens (only their sha256 is stored).
+    |
+    | `auto_issue`           — Issue downloads (and license keys) for a paid
+    |                          order when `ap.ecommerce.payment.succeeded`
+    |                          fires, then email the links.
+    | `download_limit`       — Downloads per entitlement (0 = unlimited).
+    | `download_expiry_days` — Days an entitlement stays valid (0 = never
+    |                          expires).
+    | `disk`                 — Filesystem disk for files with a `path` but
+    |                          no `disk`.
+    | `stream_window_minutes`— How long after a stream starts (and spends a
+    |                          download) its later byte-range requests are
+    |                          served without spending another one.
+    | `stream_byte_allowance`— Those range requests may send at most this
+    |                          many times the file size in total.
+    | `allowed_disks`        — Filesystem disks digital files may live on.
+    |                          Keeps an admin from attaching (and so
+    |                          downloading) files from any other disk.
+    | `revoke_on_refund`     — Expire downloads and revoke license keys when
+    |                          an order is fully refunded or cancelled.
+    |
+    */
+
+    'digital' => [
+        'auto_issue'           => (bool) env( 'ECOMMERCE_DIGITAL_AUTO_ISSUE', true ),
+        'download_limit'       => (int) env( 'ECOMMERCE_DIGITAL_DOWNLOAD_LIMIT', 5 ),
+        'download_expiry_days' => (int) env( 'ECOMMERCE_DIGITAL_DOWNLOAD_EXPIRY_DAYS', 30 ),
+        'disk'                 => env( 'ECOMMERCE_DIGITAL_DISK', 'local' ),
+        'stream_window_minutes' => (int) env( 'ECOMMERCE_DIGITAL_STREAM_WINDOW_MINUTES', 240 ),
+        'stream_byte_allowance' => (int) env( 'ECOMMERCE_DIGITAL_STREAM_BYTE_ALLOWANCE', 3 ),
+        'allowed_disks'         => [ env( 'ECOMMERCE_DIGITAL_DISK', 'local' ) ],
+        'revoke_on_refund'      => (bool) env( 'ECOMMERCE_DIGITAL_REVOKE_ON_REFUND', true ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | License keys
+    |--------------------------------------------------------------------------
+    |
+    | Defaults for keys issued to products with `meta.licensing.enabled`
+    | (per-product `activations_limit` / `expires_in_days` win). A line's
+    | quantity multiplies its activation limit.
+    |
+    | `activations_limit` — Machines per key (0 = unlimited).
+    | `expires_in_days`   — Days a key stays valid (null / 0 = never).
+    |
+    */
+
+    'licenses' => [
+        'activations_limit' => (int) env( 'ECOMMERCE_LICENSE_ACTIVATIONS_LIMIT', 5 ),
+        'expires_in_days'   => env( 'ECOMMERCE_LICENSE_EXPIRES_IN_DAYS' ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Notifications
+    |--------------------------------------------------------------------------
+    |
+    | The notification catalog (parent plan §14). Copy is Twig, edited per
+    | template and locale through the admin API and rendered in a sandbox.
+    |
+    | `enabled`                   — Send catalog notifications from the
+    |                               engine's lifecycle hooks.
+    | `admin_emails`              — Recipients of staff notifications (order
+    |                               paid, stock alerts, reviews to moderate).
+    | `store_name`                — `Store.name` in templates (defaults to
+    |                               `app.name`).
+    | `support_email`             — `Store.support_email` (defaults to
+    |                               `mail.from.address`).
+    | `default_locale`            — Locale template rows are seeded in and
+    |                               fall back to (defaults to
+    |                               `app.fallback_locale`).
+    | `preference_channels`       — Channels customers set preferences for.
+    | `review_request_delay_days` — Days after delivery to ask for a review
+    |                               (0 = immediately; needs a queue worker
+    |                               for any delay).
+    |
+    */
+
+    'notifications' => [
+        'enabled'                   => (bool) env( 'ECOMMERCE_NOTIFICATIONS_ENABLED', true ),
+        'admin_emails'              => array_values( array_filter( explode( ',', (string) env( 'ECOMMERCE_NOTIFICATIONS_ADMIN_EMAILS', '' ) ) ) ),
+        'store_name'                => env( 'ECOMMERCE_STORE_NAME' ),
+        'support_email'             => env( 'ECOMMERCE_SUPPORT_EMAIL' ),
+        'default_locale'            => env( 'ECOMMERCE_NOTIFICATIONS_DEFAULT_LOCALE' ),
+        'preference_channels'       => [ 'mail' ],
+        'review_request_delay_days' => (int) env( 'ECOMMERCE_REVIEW_REQUEST_DELAY_DAYS', 7 ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Kanban
     |--------------------------------------------------------------------------
     |
