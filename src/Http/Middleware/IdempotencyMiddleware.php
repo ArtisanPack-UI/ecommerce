@@ -222,7 +222,14 @@ class IdempotencyMiddleware
     }
 
     /**
-     * Canonical sha256 hash of the request payload (body + query string).
+     * Canonical sha256 hash of the request payload (body + query string +
+     * route parameters).
+     *
+     * Route parameters are part of the hash because the endpoint key is the
+     * route *name*: without them `PATCH orders/1` and `PATCH orders/2`
+     * sharing an Idempotency-Key would replay order 1's response for
+     * order 2 and silently drop the second write. With them, the reuse is
+     * a payload divergence and returns 409.
      *
      * @since 1.0.0
      *
@@ -244,10 +251,14 @@ class IdempotencyMiddleware
         // payload — including it would defeat key-order canonicalization
         // for equivalent JSON documents that happen to serialize
         // differently.
+        $route   = $request->route();
         $payload = [
-            'body'  => $body,
-            'query' => $this->canonicalize( $request->query() ),
-            'files' => $files,
+            'body'   => $body,
+            'query'  => $this->canonicalize( $request->query() ),
+            'files'  => $files,
+            'params' => is_object( $route ) && method_exists( $route, 'originalParameters' )
+                ? $this->canonicalize( $route->originalParameters() )
+                : [],
         ];
         if ( [] === $body && [] === $files ) {
             $payload['raw'] = hash( 'sha256', (string) $request->getContent() );

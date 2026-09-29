@@ -29,26 +29,58 @@ use ArtisanPackUI\Ecommerce\Ecommerce;
 use ArtisanPackUI\Ecommerce\Fulfillment\ProportionalByLineTotalStrategy;
 use ArtisanPackUI\Ecommerce\Gateways\Stripe\StripeGateway;
 use ArtisanPackUI\Ecommerce\Http\Controllers\WebhookController;
+use ArtisanPackUI\Ecommerce\Http\Middleware\EnsureEcommerceAbility;
+use ArtisanPackUI\Ecommerce\Http\Middleware\ForceJsonResponse;
 use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Middleware\RateLimitEcommerce;
 use ArtisanPackUI\Ecommerce\Http\Middleware\RequestIdMiddleware;
+use ArtisanPackUI\Ecommerce\Http\Support\Problem;
 use ArtisanPackUI\Ecommerce\Listeners\LinkCustomerOnUserVerified;
 use ArtisanPackUI\Ecommerce\Logging\EcommerceLogFormatter;
 use ArtisanPackUI\Ecommerce\ProductTypes\DigitalProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType;
+use ArtisanPackUI\Ecommerce\Promotions\Actions\AddFreeItemAction;
+use ArtisanPackUI\Ecommerce\Promotions\Actions\BuyXGetYAction;
+use ArtisanPackUI\Ecommerce\Promotions\Actions\FixedOffCartAction;
+use ArtisanPackUI\Ecommerce\Promotions\Actions\FreeShippingAction;
+use ArtisanPackUI\Ecommerce\Promotions\Actions\PercentOffCartAction;
+use ArtisanPackUI\Ecommerce\Promotions\Actions\PercentOffProductAction;
+use ArtisanPackUI\Ecommerce\Promotions\Actions\TieredDiscountAction;
+use ArtisanPackUI\Ecommerce\Promotions\Conditions\CartContainsProductCondition;
+use ArtisanPackUI\Ecommerce\Promotions\Conditions\CustomerFirstOrderCondition;
+use ArtisanPackUI\Ecommerce\Promotions\Conditions\CustomerInGroupCondition;
+use ArtisanPackUI\Ecommerce\Promotions\Conditions\DayOfWeekCondition;
+use ArtisanPackUI\Ecommerce\Promotions\Conditions\MinSubtotalCondition;
 use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\FraudProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\FulfillmentAllocationStrategyRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
+use ArtisanPackUI\Ecommerce\Registries\PromotionActionRegistry;
+use ArtisanPackUI\Ecommerce\Registries\PromotionConditionRegistry;
+use ArtisanPackUI\Ecommerce\Registries\PromotionSourceRegistry;
+use ArtisanPackUI\Ecommerce\Registries\ShippingLabelProviderRegistry;
+use ArtisanPackUI\Ecommerce\Registries\ShippingMethodTypeRegistry;
+use ArtisanPackUI\Ecommerce\Registries\ShippingRateProviderRegistry;
+use ArtisanPackUI\Ecommerce\Registries\TaxProviderRegistry;
 use ArtisanPackUI\Ecommerce\Services\DatabaseCartStorage;
 use ArtisanPackUI\Ecommerce\Services\Fraud\AlwaysApproveFraudProvider;
 use ArtisanPackUI\Ecommerce\Services\Fraud\StripeRadarFraudProvider;
 use ArtisanPackUI\Ecommerce\Services\RandomEightCharGenerator;
+use ArtisanPackUI\Ecommerce\Shipping\Methods\FlatRateMethod;
+use ArtisanPackUI\Ecommerce\Shipping\Methods\FreeShippingMethod;
+use ArtisanPackUI\Ecommerce\Shipping\Methods\LocalPickupMethod;
+use ArtisanPackUI\Ecommerce\Shipping\Methods\PriceBasedMethod;
+use ArtisanPackUI\Ecommerce\Shipping\Methods\WeightBasedMethod;
 use ArtisanPackUI\Ecommerce\Support\RateLimitPolicyRegistrar;
+use ArtisanPackUI\Ecommerce\Tax\ManualTaxProvider;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Routing\Router;
 use Illuminate\Support\ServiceProvider;
 
@@ -102,6 +134,18 @@ class EcommerceServiceProvider extends ServiceProvider
             return new FulfillmentAllocationStrategyRegistry( $app );
         } );
 
+        foreach ( [
+            TaxProviderRegistry::class,
+            ShippingRateProviderRegistry::class,
+            ShippingLabelProviderRegistry::class,
+            ShippingMethodTypeRegistry::class,
+            PromotionConditionRegistry::class,
+            PromotionActionRegistry::class,
+            PromotionSourceRegistry::class,
+        ] as $registry ) {
+            $this->app->singleton( $registry, static fn ( $app ) => new $registry( $app ) );
+        }
+
         $this->app->singleton( CartStorage::class, DatabaseCartStorage::class );
         $this->app->singleton( OrderNumberGenerator::class, RandomEightCharGenerator::class );
     }
@@ -126,7 +170,11 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->registerCoreFulfillmentAllocationStrategies();
         $this->registerCorePaymentGateways();
         $this->registerCoreFraudProviders();
+        $this->registerCoreTaxProviders();
+        $this->registerCoreShippingMethodTypes();
+        $this->registerCorePromotionRules();
         $this->registerWebhookRoute();
+        $this->registerRestRoutes();
         $this->registerCustomerListeners();
 
         if ( $this->app->runningInConsole() ) {
@@ -250,6 +298,8 @@ class EcommerceServiceProvider extends ServiceProvider
         $router = $this->app->make( Router::class );
 
         $router->aliasMiddleware( 'ecommerce.rate-limit', RateLimitEcommerce::class );
+        $router->aliasMiddleware( 'ecommerce.can', EnsureEcommerceAbility::class );
+        $router->aliasMiddleware( 'ecommerce.json', ForceJsonResponse::class );
     }
 
     /**
@@ -423,6 +473,91 @@ class EcommerceServiceProvider extends ServiceProvider
     }
 
     /**
+     * Registers the built-in tax provider (`manual`, reads `tax_rates`).
+     * Satellites (Stripe Tax, TaxJar, Avalara) register theirs from their
+     * own service-provider `boot()`; `artisanpack.ecommerce.tax.provider`
+     * picks the single active one. Engine spec §5 row 5.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCoreTaxProviders(): void
+    {
+        $this->app->make( TaxProviderRegistry::class )->register(
+            ManualTaxProvider::KEY,
+            ManualTaxProvider::class,
+            [ 'label' => __( 'Manual tax rates' ) ],
+        );
+    }
+
+    /**
+     * Registers the built-in shipping-method drivers (parent plan §5.10).
+     * Real-time carrier providers are satellites and register against
+     * {@see ShippingRateProviderRegistry} instead.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCoreShippingMethodTypes(): void
+    {
+        /** @var ShippingMethodTypeRegistry $registry */
+        $registry = $this->app->make( ShippingMethodTypeRegistry::class );
+
+        $registry->register( FlatRateMethod::KEY, FlatRateMethod::class, [ 'label' => __( 'Flat rate' ) ] );
+        $registry->register( FreeShippingMethod::KEY, FreeShippingMethod::class, [ 'label' => __( 'Free shipping' ) ] );
+        $registry->register( LocalPickupMethod::KEY, LocalPickupMethod::class, [ 'label' => __( 'Local pickup' ) ] );
+        $registry->register( WeightBasedMethod::KEY, WeightBasedMethod::class, [ 'label' => __( 'Weight-based' ) ] );
+        $registry->register( PriceBasedMethod::KEY, PriceBasedMethod::class, [ 'label' => __( 'Price-based' ) ] );
+    }
+
+    /**
+     * Registers the built-in promotion sources, conditions, and actions
+     * (parent plan §5.9, engine spec §5 rows 7–9). Satellites add novel
+     * conditions / actions / sources from their own `boot()`.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCorePromotionRules(): void
+    {
+        /** @var PromotionSourceRegistry $sources */
+        $sources = $this->app->make( PromotionSourceRegistry::class );
+        $sources->register( 'automatic', [ 'label' => __( 'Automatic' ) ] );
+        $sources->register( 'coupon', [ 'label' => __( 'Coupon code' ) ] );
+
+        /** @var PromotionConditionRegistry $conditions */
+        $conditions = $this->app->make( PromotionConditionRegistry::class );
+
+        foreach ( [
+            MinSubtotalCondition::class,
+            CartContainsProductCondition::class,
+            CustomerInGroupCondition::class,
+            DayOfWeekCondition::class,
+            CustomerFirstOrderCondition::class,
+        ] as $condition ) {
+            $conditions->register( $condition::KEY, $condition );
+        }
+
+        /** @var PromotionActionRegistry $actions */
+        $actions = $this->app->make( PromotionActionRegistry::class );
+
+        foreach ( [
+            PercentOffCartAction::class,
+            FixedOffCartAction::class,
+            PercentOffProductAction::class,
+            FreeShippingAction::class,
+            BuyXGetYAction::class,
+            AddFreeItemAction::class,
+            TieredDiscountAction::class,
+        ] as $action ) {
+            $actions->register( $action::KEY, $action );
+        }
+    }
+
+    /**
      * Registers the generic inbound-webhook route.
      *
      * `POST /ecommerce/webhooks/{provider}` dispatches to whatever gateway
@@ -443,6 +578,55 @@ class EcommerceServiceProvider extends ServiceProvider
             ->where( 'provider', '[A-Za-z0-9_.-]+' )
             ->middleware( [ 'api', 'ecommerce.request-id', 'ecommerce.rate-limit:ecommerce.webhook.inbound' ] )
             ->name( 'ecommerce.webhooks' );
+    }
+
+    /**
+     * Registers the `/api/ecommerce/v1` REST routes (parent plan §12) when
+     * `artisanpack.ecommerce.features.rest` is enabled. Route names are
+     * prefixed `ecommerce.api.` so idempotency endpoint keys are stable.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerRestRoutes(): void
+    {
+        $config = $this->app['config'];
+
+        if ( ! (bool) $config->get( 'artisanpack.ecommerce.features.rest', true ) ) {
+            return;
+        }
+
+        /** @var Router $router */
+        $router = $this->app->make( Router::class );
+
+        // Ability checks run right after authentication and before route-model
+        // binding, so a caller without the ability gets 403 for every id —
+        // never a 404 that reveals which orders / customers exist.
+        $kernel = $this->app->make( HttpKernel::class );
+
+        if ( method_exists( $kernel, 'addToMiddlewarePriorityAfter' ) ) {
+            $kernel->addToMiddlewarePriorityAfter( AuthenticatesRequests::class, EnsureEcommerceAbility::class );
+        }
+
+        // 401s on the API render as problem+json (engine spec §11.5).
+        $handler = $this->app->make( ExceptionHandler::class );
+
+        if ( method_exists( $handler, 'renderable' ) ) {
+            $handler->renderable( static function ( AuthenticationException $e, $request ) {
+                return $request->routeIs( 'ecommerce.api.*' )
+                    ? Problem::make( 401, 'unauthenticated', __( 'Unauthenticated' ), __( 'Authentication is required.' ), $request )
+                    : null;
+            } );
+        }
+
+        $router->prefix( trim( (string) $config->get( 'artisanpack.ecommerce.api_prefix', 'api/ecommerce' ), '/' ) . '/' . $config->get( 'artisanpack.ecommerce.api.version', 'v1' ) )
+            ->middleware( array_merge(
+                [ 'ecommerce.json' ],
+                (array) $config->get( 'artisanpack.ecommerce.api.middleware', [ 'api', 'ecommerce.request-id' ] ),
+            ) )
+            ->name( 'ecommerce.api.' )
+            ->group( __DIR__ . '/../../routes/api.php' );
     }
 
     /**

@@ -20,6 +20,8 @@ namespace ArtisanPackUI\Ecommerce\Models;
 
 use ArtisanPackUI\Ecommerce\Casts\MoneyCast;
 use ArtisanPackUI\Ecommerce\Database\Factories\ProductPriceFactory;
+use DateTimeInterface;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
@@ -78,6 +80,27 @@ class ProductPrice extends Model
     public function priceable(): MorphTo
     {
         return $this->morphTo();
+    }
+
+    /**
+     * Scope: rows whose schedule window covers `$at` (a row with no window
+     * is always current). Mirrors the window test in
+     * {@see \ArtisanPackUI\Ecommerce\Services\ProductPriceResolver}.
+     *
+     * @since 1.0.0
+     *
+     * @param  Builder<ProductPrice>        $query
+     * @param  DateTimeInterface|null     $at     Reference time (defaults to now).
+     *
+     * @return Builder<ProductPrice>
+     */
+    public function scopeCurrentAt( Builder $query, ?DateTimeInterface $at = null ): Builder
+    {
+        $at ??= \Illuminate\Support\Carbon::now();
+
+        return $query
+            ->where( fn ( Builder $q ) => $q->whereNull( 'starts_at' )->orWhere( 'starts_at', '<=', $at ) )
+            ->where( fn ( Builder $q ) => $q->whereNull( 'ends_at' )->orWhere( 'ends_at', '>=', $at ) );
     }
 
     /**

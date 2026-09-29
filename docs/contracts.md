@@ -6,8 +6,33 @@ the abstract class from your satellite's test suite, wire the required
 factory method(s), and PHPUnit / Pest will run every invariant the engine's
 reference implementations are held to against your driver.
 
-Phase 1 ships four suites — one per Phase 1 contract listed in engine
-spec §4.
+There are ten suites — one per engine spec §4 contract that satellites
+implement: `ProductType`, `CartStorage`, `OrderNumberGenerator`,
+`FulfillmentAllocationStrategy`, `PaymentGateway`, `TaxProvider`,
+`ShippingRateProvider`, `FraudProvider`, `PromotionCondition`, and
+`PromotionAction`.
+
+Phase 2 database-backed suites share the
+[`InteractsWithEcommerceCarts`](../src/Testing/Contracts/Concerns/InteractsWithEcommerceCarts.php)
+trait, which boots the engine against in-memory SQLite and exposes
+`makePersistedCart( $lines, $currency, $cartAttributes )` for building
+fixtures, plus `assertCartUntouched()`, which checks the cart and its lines
+are unchanged both in storage and in memory (so an implementation can't
+quietly edit `$cart->items` attributes without saving). Every suite that
+uses the trait also asserts the implementation's `key()` follows the
+registry-key format from engine spec §2.5 (`kebab-case`, optionally
+`publisher:`-prefixed).
+
+The trait boots only `EcommerceServiceProvider`. A satellite whose driver
+needs its own provider, config, or migrations overrides
+`getPackageProviders()` and merges the parent list:
+
+```php
+protected function getPackageProviders( $app ): array
+{
+    return [ ...parent::getPackageProviders( $app ), ShippoServiceProvider::class ];
+}
+```
 
 ## `ProductTypeContractTest`
 
@@ -112,6 +137,166 @@ Invariants verified (per plan §16.7):
 Reference implementation:
 [`ProportionalByLineTotalStrategy`](../src/Fulfillment/ProportionalByLineTotalStrategy.php)
 — see `tests/Feature/Contracts/ProportionalByLineTotalStrategyContractTest.php`.
+
+## `PaymentGatewayContractTest`
+
+Contract: [`PaymentGateway`](../src/Contracts/PaymentGateway.php) (engine spec §4.2).
+
+Extension points a satellite must provide:
+
+- `gateway(): PaymentGateway` — the gateway under test.
+- `makeOrder( string $currency, int $capturedAmount ): Order` — a captured order.
+- `signedWebhookRequest(): Request` / `unsignedWebhookRequest(): Request`.
+- `captureTerminalDeclineResult(): PaymentResult` / `captureRetryableResult(): PaymentResult`.
+- Optional: override `gatewaySupportsRefunds()` to `false` to skip refund cases.
+
+Invariants verified:
+
+- Multiple partial refunds each report their own amount and sum exactly to
+  the total refunded.
+- Signed webhooks verify and carry an event id; unsigned ones do not verify
+  and carry an error code.
+- Terminal capture failures are not retryable; provider brownouts are.
+- `capturePayment()` / `refund()` throw `PaymentCurrencyMismatchException`
+  for money outside the order's currency.
+
+Reference implementation: an in-memory gateway — see
+`tests/Feature/Contracts/InMemoryPaymentGatewayContractTest.php`.
+
+## `TaxProviderContractTest`
+
+Contract: [`TaxProvider`](../src/Contracts/TaxProvider.php) (engine spec §4.5).
+
+Extension points a satellite must provide:
+
+- `provider(): TaxProvider` — the provider under test.
+- Optional `seedTaxableJurisdiction(): void` — arrange (seed rates, stub the
+  HTTP client) for `destination()` to be taxable.
+- Optional `expectsTaxForFixture(): bool` — return `false` to skip the
+  "actually taxes" case when a taxable fixture can't be arranged.
+- Optional `destination(): Address` — defaults to Chicago, IL 60601.
+
+Invariants verified:
+
+- Every amount in the `TaxResult` is in the cart currency (checked for USD
+  and EUR carts).
+- `perLine` holds exactly one entry per cart item, keyed by cart-item id.
+- `total` = Σ `perLine` + `shipping`; when a breakdown is returned,
+  Σ breakdown amounts = `total`.
+- No negative tax, overall or per line.
+- The seeded jurisdiction levies positive tax, so a provider that always
+  returns zero fails.
+- An empty cart owes zero with an empty `perLine`.
+- Calculation is deterministic and leaves the cart and its lines untouched
+  (storage and memory).
+
+Reference implementation: [`ManualTaxProvider`](../src/Tax/ManualTaxProvider.php)
+— see `tests/Feature/Contracts/ManualTaxProviderContractTest.php`.
+
+## `ShippingRateProviderContractTest`
+
+Contract: [`ShippingRateProvider`](../src/Contracts/ShippingRateProvider.php)
+(engine spec §4.3).
+
+Extension points a satellite must provide:
+
+- `provider(): ShippingRateProvider` — the provider under test.
+- Optional `seedServiceableDestination(): void` — stub the carrier API /
+  seed zones so `destination()` gets rates.
+- Optional `destination(): Address`.
+
+Invariants verified:
+
+- A serviceable destination yields at least one rate.
+- Every rate has a non-empty method key and label, and a non-negative amount
+  in the cart currency (USD and EUR carts).
+- Rate `id()`s are unique so a client can select one.
+- An empty cart yields no rates.
+- Quoting leaves the cart and its lines untouched (storage and memory).
+
+Reference implementation:
+[`ZoneShippingRateProvider`](../src/Shipping/ZoneShippingRateProvider.php) — see
+`tests/Feature/Contracts/ZoneShippingRateProviderContractTest.php`.
+
+## `FraudProviderContractTest`
+
+Contract: [`FraudProvider`](../src/Contracts/FraudProvider.php) (engine spec §4.17).
+
+Extension points a satellite must provide:
+
+- `provider(): FraudProvider` — the provider under test (typically wired to a
+  stubbed API client keyed off the session reference).
+- Optional `lowRiskSession( Cart ): PaymentSession` — defaults to reference
+  `pi_low_risk`.
+- Optional `highRiskSession( Cart ): ?PaymentSession` — return a session the
+  provider must escalate; the default `null` skips that case.
+- Helper `paymentSessionFor( Cart, string $reference )` builds a session.
+
+Invariants verified:
+
+- Decisions are well-formed: verdict in `approve|challenge|block`, score
+  0–100, string reasons.
+- The low-risk fixture is approved.
+- The high-risk fixture (when supplied) is challenged or blocked.
+- Assessment leaves the cart and its lines untouched.
+
+Reference implementations:
+[`AlwaysApproveFraudProvider`](../src/Services/Fraud/AlwaysApproveFraudProvider.php)
+and [`StripeRadarFraudProvider`](../src/Services/Fraud/StripeRadarFraudProvider.php)
+— see `tests/Feature/Contracts/AlwaysApproveFraudProviderContractTest.php` and
+`tests/Feature/Contracts/StripeRadarFraudProviderContractTest.php`.
+
+## `PromotionConditionContractTest`
+
+Contract: [`PromotionCondition`](../src/Contracts/PromotionCondition.php)
+(engine spec §4.10).
+
+Extension points a satellite must provide:
+
+- `condition(): PromotionCondition` — the condition under test.
+- `satisfiedCase(): array{Cart, array}` — a cart + config that must pass.
+- `unsatisfiedCase(): array{Cart, array}` — a cart + config that must fail.
+
+Invariants verified:
+
+- The satisfying fixture passes and the unsatisfying fixture fails.
+- Evaluation never throws — on an empty cart, empty config, or malformed
+  config (wrong types, garbage values) it returns a `bool`.
+- Evaluation leaves the cart and its lines untouched.
+
+Reference implementations: `min-subtotal`, `cart-contains-product`,
+`customer-in-group`, `day-of-week`, `customer-first-order` under
+[`src/Promotions/Conditions/`](../src/Promotions/Conditions/) — see
+`tests/Feature/Contracts/*ConditionContractTest.php`.
+
+## `PromotionActionContractTest`
+
+Contract: [`PromotionAction`](../src/Contracts/PromotionAction.php)
+(engine spec §4.11).
+
+Extension points a satellite must provide:
+
+- `action(): PromotionAction` — the action under test.
+- `applicableCase(): array{Cart, array}` — a cart + config the action must
+  affect.
+
+Invariants verified:
+
+- The applicable fixture produces an effect: a positive discount, free
+  shipping, or a free item.
+- An empty cart is never discounted; empty or malformed config never throws
+  and grants no discount.
+- Applying leaves the cart and its lines untouched in storage and memory
+  (actions write only to the `DiscountLedger`).
+- Applied five times to one ledger, the total stays within the subtotal and
+  in the cart currency. `DiscountLedger` enforces this itself (it clamps
+  every write and rejects other currencies), so this documents the
+  contract rather than policing the action.
+
+Reference implementations: `percent-off-cart`, `fixed-off-cart`,
+`percent-off-product`, `free-shipping`, `buy-x-get-y`, `add-free-item`,
+`tiered-discount` under [`src/Promotions/Actions/`](../src/Promotions/Actions/) —
+see `tests/Feature/Contracts/*ActionContractTest.php`.
 
 ## Adding a new contract test suite
 

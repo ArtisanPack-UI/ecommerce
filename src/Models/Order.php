@@ -77,6 +77,8 @@ use Illuminate\Support\Carbon;
  * @property \Illuminate\Database\Eloquent\Collection<int, OrderTimelineEntry>      $timelineEntries
  * @property \Illuminate\Database\Eloquent\Collection<int, OrderEdit>               $edits
  * @property \Illuminate\Database\Eloquent\Collection<int, Refund>                  $refunds
+ * @property \Illuminate\Database\Eloquent\Collection<int, Shipment>                $shipments
+ * @property \Illuminate\Database\Eloquent\Collection<int, PromotionUsage>          $promotionUsages
  */
 class Order extends Model
 {
@@ -226,6 +228,30 @@ class Order extends Model
     public function refunds(): HasMany
     {
         return $this->hasMany( Refund::class );
+    }
+
+    /**
+     * Shipments fulfilling this order.
+     *
+     * @since 1.0.0
+     *
+     * @return HasMany<Shipment, $this>
+     */
+    public function shipments(): HasMany
+    {
+        return $this->hasMany( Shipment::class );
+    }
+
+    /**
+     * Promotion usage rows written when this order was placed.
+     *
+     * @since 1.0.0
+     *
+     * @return HasMany<PromotionUsage, $this>
+     */
+    public function promotionUsages(): HasMany
+    {
+        return $this->hasMany( PromotionUsage::class );
     }
 
     /**

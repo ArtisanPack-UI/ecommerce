@@ -334,4 +334,67 @@ return [
         'provider' => env( 'ECOMMERCE_FRAUD_PROVIDER', 'always-approve' ),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Tax
+    |--------------------------------------------------------------------------
+    |
+    | `provider`            — Registry key of the single active TaxProvider
+    |                         (engine spec §4.5). Core ships `manual`, which
+    |                         reads the `tax_rates` table; satellites add
+    |                         `stripe-tax`, `taxjar`, `avalara`, …
+    |
+    | `prices_include_tax`  — `true` for tax-inclusive (EU-style) pricing:
+    |                         tax is back-calculated out of line prices.
+    |                         `false` (default) adds tax on top (US-style).
+    |
+    | `default_class`       — Tax class used for products with a null
+    |                         `tax_class_key`.
+    |
+    | `shipping_tax_class`  — Tax class whose `is_shipping_taxable` rates
+    |                         are levied on the shipping charge.
+    |
+    */
+
+    'tax' => [
+        'provider'           => env( 'ECOMMERCE_TAX_PROVIDER', 'manual' ),
+        'prices_include_tax' => (bool) env( 'ECOMMERCE_PRICES_INCLUDE_TAX', false ),
+        'default_class'      => env( 'ECOMMERCE_DEFAULT_TAX_CLASS', 'standard' ),
+        'shipping_tax_class' => env( 'ECOMMERCE_SHIPPING_TAX_CLASS', 'standard' ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | REST API
+    |--------------------------------------------------------------------------
+    |
+    | `version`          — Path segment appended to `api_prefix`
+    |                      (`/api/ecommerce/v1`). Bumped only on breaking
+    |                      changes (parent plan §12.1).
+    |
+    | `default_per_page` — Page size for cursor-paginated listings.
+    |
+    | `max_per_page`     — Upper bound a client may request via `per_page`.
+    |
+    | `middleware`       — Middleware applied to every REST route before the
+    |                      route-specific auth / rate-limit / idempotency
+    |                      stack.
+    |
+    | `auth_middleware`  — Authentication middleware for non-public routes.
+    |                      Admin routes then require the Gate ability
+    |                      `ecommerce.{resource}.{action}` (or the umbrella
+    |                      `ecommerce.admin`), filterable via
+    |                      `ap.ecommerce.abilities.{resource}.{action}`.
+    |                      With neither defined, admin routes deny.
+    |
+    */
+
+    'api' => [
+        'version'          => env( 'ECOMMERCE_API_VERSION', 'v1' ),
+        'default_per_page' => (int) env( 'ECOMMERCE_API_DEFAULT_PER_PAGE', 25 ),
+        'max_per_page'     => (int) env( 'ECOMMERCE_API_MAX_PER_PAGE', 100 ),
+        'middleware'       => [ 'api', 'ecommerce.request-id' ],
+        'auth_middleware'  => [ 'auth:sanctum' ],
+    ],
+
 ];

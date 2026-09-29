@@ -1,0 +1,70 @@
+<?php
+
+/**
+ * RefundResource.
+ *
+ * REST representation of {@see \ArtisanPackUI\Ecommerce\Models\Refund}
+ * (engine spec §9.13). Filterable via `ap.ecommerce.api.resource.refund`.
+ *
+ * @package    ArtisanPack_UI
+ * @subpackage Ecommerce
+ *
+ * @author     Jacob Martella <me@jacobmartella.com>
+ *
+ * @since      1.0.0
+ */
+
+declare( strict_types=1 );
+
+namespace ArtisanPackUI\Ecommerce\Http\Resources;
+
+use Illuminate\Http\Request;
+
+/**
+ * @package    ArtisanPack_UI
+ * @subpackage Ecommerce
+ *
+ * @since      1.0.0
+ *
+ * @property \ArtisanPackUI\Ecommerce\Models\Refund $resource
+ */
+class RefundResource extends EcommerceResource
+{
+    /**
+     * @since 1.0.0
+     *
+     * @var string
+     */
+    public const NAME = 'refund';
+
+    /**
+     * @since 1.0.0
+     *
+     * @param  Request  $request  Request.
+     *
+     * @return array<string, mixed>
+     */
+    protected function fields( Request $request ): array
+    {
+        return [
+            'order_id'          => $this->resource->order_id,
+            'amount'            => $this->money( 'amount', 'currency' ),
+            'reason'            => $this->resource->reason,
+            'gateway_reference' => $this->resource->gateway_reference,
+            'issued_by_user_id' => $this->resource->issued_by_user_id,
+            'created_at'        => $this->resource->created_at,
+        ];
+    }
+
+    /**
+     * @since 1.0.0
+     *
+     * @return array<string, array{0: string, 1: class-string<EcommerceResource>}>
+     */
+    protected function relations(): array
+    {
+        return [
+            'items' => [ 'items', RefundItemResource::class ],
+        ];
+    }
+}
