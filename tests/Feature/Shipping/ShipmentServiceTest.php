@@ -142,3 +142,28 @@ it( 'buys a label through a registered label provider', function (): void {
     expect( $shipment->fresh()->only( [ 'label_id', 'tracking_number', 'carrier', 'service' ] ) )
         ->toBe( [ 'label_id' => 77, 'tracking_number' => '9400TEST', 'carrier' => 'usps', 'service' => 'priority' ] );
 } );
+
+it( 'refuses a second label for the same shipment', function (): void {
+    $provider = Mockery::mock( ShippingLabelProvider::class );
+    $provider->shouldReceive( 'key' )->andReturn( 'once-labels' );
+    $provider->shouldReceive( 'buyLabel' )->once()->andReturn( new ShippingLabel( 88, 'once-labels', 'T1' ) );
+
+    app( ShippingLabelProviderRegistry::class )->register( 'once-labels', $provider );
+
+    $shipment = $this->service->create( $this->order, 'flat-rate' );
+    $stale    = $shipment->replicate()->setRawAttributes( $shipment->getAttributes() );
+
+    $this->service->buyLabel( $shipment, 'once-labels' );
+
+    expect( $shipment->label_id )->toBe( 88 )
+        ->and( fn () => $this->service->buyLabel( $stale, 'once-labels' ) )->toThrow( InvalidArgumentException::class, 'already has a label' );
+} );
+
+it( 'clears a tracking field on an empty string and keeps it on null', function (): void {
+    $shipment = $this->service->create( $this->order, 'flat-rate', [], [ 'tracking_number' => '1Z1', 'tracking_url' => 'https://track.test/1Z1' ] );
+
+    $this->service->updateTracking( $shipment, new TrackingStatus( Shipment::STATUS_IN_TRANSIT, trackingNumber: null, trackingUrl: '' ) );
+
+    expect( $shipment->fresh()->tracking_number )->toBe( '1Z1' )
+        ->and( $shipment->fresh()->tracking_url )->toBeNull();
+} );

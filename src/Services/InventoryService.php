@@ -79,13 +79,15 @@ class InventoryService
             return $item->fresh() ?? $item;
         }
 
-        return DB::transaction( function () use ( $item, $delta ): InventoryItem {
+        return DB::transaction( function () use ( $item, $delta, $reason ): InventoryItem {
             $fresh = InventoryItem::query()->lockForUpdate()->findOrFail( $item->id );
 
             $previousOnHand          = $fresh->quantity_on_hand;
             $newOnHand               = $previousOnHand + $delta;
             $fresh->quantity_on_hand = $newOnHand;
             $fresh->save();
+
+            app( ActivityLogService::class )->recordInventoryAdjustment( $fresh, $delta, $previousOnHand, $newOnHand, $reason );
 
             doAction( 'ap.ecommerce.inventory.adjusted', $fresh, $delta, $newOnHand );
 
@@ -178,29 +180,84 @@ class InventoryService
             ->orderBy( 'id' )
             ->chunkById( 100, function ( $reservations ) use ( &$released ): void {
                 foreach ( $reservations as $reservation ) {
-                    DB::transaction( function () use ( $reservation, &$released ): void {
-                        $item = InventoryItem::query()
-                            ->lockForUpdate()
-                            ->find( $reservation->inventory_item_id );
-
-                        if ( null !== $item ) {
-                            $item->quantity_reserved = max(
-                                0,
-                                $item->quantity_reserved - $reservation->quantity,
-                            );
-                            $item->save();
-                        }
-
-                        $snapshot = clone $reservation;
-                        $reservation->delete();
-
-                        doAction( 'ap.ecommerce.inventory.reservationReleased', $snapshot );
+                    if ( $this->releaseReservation( $reservation ) ) {
                         ++$released;
-                    } );
+                    }
                 }
             } );
 
         return $released;
+    }
+
+    /**
+     * Releases every reservation held for `$reservable` (a Cart or Order),
+     * whether or not it has expired. Used when an order is cancelled.
+     *
+     * Each release decrements the owning item's `quantity_reserved` (never
+     * below zero), deletes the reservation, and fires
+     * `ap.ecommerce.inventory.reservationReleased`, the same as
+     * {@see self::releaseExpired()}. Runs inside the caller's transaction
+     * when there is one.
+     *
+     * @since 1.0.0
+     *
+     * @param  Model  $reservable  Cart or Order whose reservations to release.
+     *
+     * @return array<int, array{inventory_item_id: int, quantity: int}> What was released.
+     */
+    public function releaseFor( Model $reservable ): array
+    {
+        return DB::transaction( function () use ( $reservable ): array {
+            $released     = [];
+            $reservations = InventoryReservation::query()
+                ->where( 'reservable_type', $reservable->getMorphClass() )
+                ->where( 'reservable_id', $reservable->getKey() )
+                ->orderBy( 'id' )
+                ->get();
+
+            foreach ( $reservations as $reservation ) {
+                if ( $this->releaseReservation( $reservation ) ) {
+                    $released[] = [
+                        'inventory_item_id' => (int) $reservation->inventory_item_id,
+                        'quantity'          => (int) $reservation->quantity,
+                    ];
+                }
+            }
+
+            return $released;
+        } );
+    }
+
+    /**
+     * Releases one reservation. Locks the inventory row first, then deletes
+     * the reservation, and only gives the units back when this call deleted
+     * it — so the expiry sweep and an order cancel racing on the same
+     * reservation release it once, and both take locks in the same order.
+     *
+     * @since 1.0.0
+     *
+     * @param  InventoryReservation  $reservation  The reservation.
+     *
+     * @return bool Whether this call released it.
+     */
+    protected function releaseReservation( InventoryReservation $reservation ): bool
+    {
+        return DB::transaction( function () use ( $reservation ): bool {
+            $item = InventoryItem::query()->lockForUpdate()->find( $reservation->inventory_item_id );
+
+            if ( 1 !== InventoryReservation::query()->whereKey( $reservation->getKey() )->delete() ) {
+                return false;
+            }
+
+            if ( null !== $item ) {
+                $item->quantity_reserved = max( 0, $item->quantity_reserved - $reservation->quantity );
+                $item->save();
+            }
+
+            doAction( 'ap.ecommerce.inventory.reservationReleased', $reservation );
+
+            return true;
+        } );
     }
 
     /**

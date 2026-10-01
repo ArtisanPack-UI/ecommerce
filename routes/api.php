@@ -28,9 +28,11 @@
 
 declare( strict_types=1 );
 
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ActivityLogController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CartController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CouponController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CustomerController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CustomerNoteController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\DigitalDownloadController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\DigitalFileController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\InventoryController;
@@ -43,9 +45,12 @@ use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanColumnController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\LicenseKeyController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\NotificationPreferenceController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\NotificationTemplateController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderCancelController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderNoteController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderRefundController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderShipmentController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderTimelineController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductReviewController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\PromotionController;
@@ -124,7 +129,10 @@ Route::where( [ 'cart' => '[A-Za-z0-9]{40}', 'item' => '[0-9]+' ] )->group( func
 Route::get( 'orders', [ OrderController::class, 'index' ] )->middleware( $admin( 'order', 'viewAny' ) )->name( 'orders.index' );
 Route::get( 'orders/{order}', [ OrderController::class, 'show' ] )->middleware( $admin( 'order', 'view' ) )->name( 'orders.show' );
 Route::patch( 'orders/{order}', [ OrderController::class, 'update' ] )->middleware( $admin( 'order', 'update', true ) )->name( 'orders.update' );
+Route::post( 'orders/{order}/cancel', [ OrderCancelController::class, 'store' ] )->middleware( $admin( 'order', 'cancel', true ) )->name( 'orders.cancel' );
 Route::post( 'orders/{order}/refunds', [ OrderRefundController::class, 'store' ] )->middleware( $admin( 'order', 'refund', true ) )->name( 'orders.refunds.store' );
+Route::get( 'orders/{order}/timeline', [ OrderTimelineController::class, 'index' ] )->middleware( $admin( 'order', 'view' ) )->name( 'orders.timeline.index' );
+Route::post( 'orders/{order}/notes', [ OrderNoteController::class, 'store' ] )->middleware( $admin( 'order', 'update', true ) )->name( 'orders.notes.store' );
 Route::post( 'orders/{order}/shipments', [ OrderShipmentController::class, 'store' ] )->middleware( $admin( 'order', 'update', true ) )->name( 'orders.shipments.store' );
 Route::patch( 'orders/{order}/shipments/{shipment}', [ OrderShipmentController::class, 'update' ] )
     ->scopeBindings()
@@ -135,6 +143,12 @@ Route::patch( 'orders/{order}/shipments/{shipment}', [ OrderShipmentController::
 Route::get( 'customers', [ CustomerController::class, 'index' ] )->middleware( $admin( 'customer', 'viewAny' ) )->name( 'customers.index' );
 Route::get( 'customers/{customer}', [ CustomerController::class, 'show' ] )->middleware( $admin( 'customer', 'view' ) )->name( 'customers.show' );
 Route::patch( 'customers/{customer}', [ CustomerController::class, 'update' ] )->middleware( $admin( 'customer', 'update', true ) )->name( 'customers.update' );
+Route::get( 'customers/{customer}/notes', [ CustomerNoteController::class, 'index' ] )->middleware( $admin( 'customer', 'view' ) )->name( 'customers.notes.index' );
+Route::post( 'customers/{customer}/notes', [ CustomerNoteController::class, 'store' ] )->middleware( $admin( 'customer', 'update', true ) )->name( 'customers.notes.store' );
+Route::delete( 'customers/{customer}/notes/{note}', [ CustomerNoteController::class, 'destroy' ] )
+    ->scopeBindings()
+    ->middleware( $admin( 'customer', 'update', true ) )
+    ->name( 'customers.notes.destroy' );
 
 // The signed-in shopper (engine spec §9.4).
 Route::get( 'me/notification-preferences', [ NotificationPreferenceController::class, 'show' ] )
@@ -175,6 +189,13 @@ Route::prefix( 'kanban' )
 Route::prefix( 'admin' )->name( 'admin.' )->group( function () use ( $admin ): void {
     // Inventory.
     Route::get( 'inventory', [ InventoryController::class, 'index' ] )->middleware( $admin( 'product', 'viewAny' ) )->name( 'inventory.index' );
+
+    // Activity log (products, customers, promotions; orders use their timeline).
+    Route::where( [ 'product' => '[0-9]+', 'customer' => '[0-9]+', 'promotion' => '[0-9]+' ] )->group( function () use ( $admin ): void {
+        Route::get( 'activity/products/{product}', [ ActivityLogController::class, 'product' ] )->middleware( $admin( 'product', 'view' ) )->name( 'activity.products' );
+        Route::get( 'activity/customers/{customer}', [ ActivityLogController::class, 'customer' ] )->middleware( $admin( 'customer', 'view' ) )->name( 'activity.customers' );
+        Route::get( 'activity/promotions/{promotion}', [ ActivityLogController::class, 'promotion' ] )->middleware( $admin( 'promotion', 'view' ) )->name( 'activity.promotions' );
+    } );
 
     // Tax.
     Route::get( 'tax-classes', [ TaxClassController::class, 'index' ] )->middleware( $admin( 'taxRate', 'viewAny' ) )->name( 'tax-classes.index' );

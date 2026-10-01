@@ -54,6 +54,7 @@ delivered, named after their class (`OrderRefunded` → `order.refunded`):
 | `OrderStatusChanged` | `order.status.changed` |
 | `OrderSubstatusChanged` | `order.substatus.changed` |
 | `OrderEdited` | `order.edited` |
+| `OrderCancelled` | `order.cancelled` |
 | `OrderRefunded` | `order.refunded` |
 | `PaymentSucceeded` | `payment.succeeded` |
 | `PaymentFailed` | `payment.failed` |

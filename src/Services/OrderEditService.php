@@ -126,30 +126,52 @@ class OrderEditService
         ?string $reason = null,
     ): OrderEditResult {
         return DB::transaction( function () use ( $order, $edit, $actorUserId, $reason ): OrderEditResult {
-            $locked = Order::query()->lockForUpdate()->findOrFail( $order->id );
-            $locked->load( 'items' );
-
-            /** @var array<string, mixed> $filtered */
-            $filtered = (array) applyFilters( 'ap.ecommerce.order.editing', $edit, $locked );
-
-            $this->guardEditability( $locked, $filtered );
-
-            $snapshot = $this->snapshotOrder( $locked );
-
-            $this->applyScalarFields( $locked, $filtered );
-            $this->applyItemChanges( $locked, $filtered );
-
-            $this->applyTotalOverrides( $locked, $filtered );
-            $this->recomputeItemTotals( $locked );
-            $this->recomputeOrderTotals( $locked );
-
-            $locked->save();
-            $refreshed = $locked->fresh( 'items' ) ?? $locked;
-
-            $diff = $this->buildDiff( $snapshot, $this->snapshotOrder( $refreshed ) );
+            [ $refreshed, $snapshot, $diff ] = $this->applyToLockedOrder( $order, $edit );
 
             return $this->finalize( $refreshed, $snapshot, $diff, $actorUserId, $reason );
         } );
+    }
+
+    /**
+     * Works out what {@see self::apply()} would do to `$order`, without
+     * keeping any of it.
+     *
+     * The edit runs exactly as `apply()` runs it — the
+     * `ap.ecommerce.order.editing` and `ap.ecommerce.order.recomputingTotals`
+     * filters included, so a tax provider recalculates as it would for real
+     * — inside a transaction that is always rolled back. No audit row or
+     * timeline entry is written, and no `ap.ecommerce.order.edited` action
+     * or {@see OrderEdited} event fires. Ids of added lines in the returned
+     * diff belonged to rows that were rolled back and do not exist.
+     *
+     * @since 1.0.0
+     *
+     * @param  Order                 $order  The order to edit.
+     * @param  array<string, mixed>  $edit   The edit payload, as for `apply()`.
+     *
+     * @throws OrderNotEditableException When the order state does not permit the requested changes.
+     * @throws InvalidArgumentException  When the edit payload is malformed.
+     *
+     * @return array{diff: array<string, mixed>, paymentActionRequired: array{delta_amount:int,currency:string}|null, refundDelta: array{delta_amount:int,currency:string}|null}
+     */
+    public function preview( Order $order, array $edit ): array
+    {
+        $connection = ( new Order() )->getConnection();
+        $connection->beginTransaction();
+
+        try {
+            [ $refreshed, $snapshot, $diff ] = $this->applyToLockedOrder( $order, $edit );
+        } finally {
+            $connection->rollBack();
+        }
+
+        [ $paymentActionRequired, $refundDelta ] = $this->totalDelta( $snapshot, $refreshed );
+
+        return [
+            'diff'                  => $diff,
+            'paymentActionRequired' => $paymentActionRequired,
+            'refundDelta'           => $refundDelta,
+        ];
     }
 
     /**
@@ -194,6 +216,68 @@ class OrderEditService
 
             return $this->finalize( $refreshed, $snapshot, $diff, $actorUserId, $reason );
         } );
+    }
+
+    /**
+     * Locks the order, applies the filtered edit, recomputes totals, and
+     * saves. Shared by {@see self::apply()} and {@see self::preview()}; the
+     * caller owns the transaction.
+     *
+     * @since 1.0.0
+     *
+     * @param  Order                 $order  The order to edit.
+     * @param  array<string, mixed>  $edit   The edit payload.
+     *
+     * @throws OrderNotEditableException
+     * @throws InvalidArgumentException
+     *
+     * @return array{0: Order, 1: array<string, mixed>, 2: array<string, mixed>} The refreshed order, the pre-edit snapshot, and the diff.
+     */
+    protected function applyToLockedOrder( Order $order, array $edit ): array
+    {
+        $locked = Order::query()->lockForUpdate()->findOrFail( $order->id );
+        $locked->load( 'items' );
+
+        /** @var array<string, mixed> $filtered */
+        $filtered = (array) applyFilters( 'ap.ecommerce.order.editing', $edit, $locked );
+
+        $this->guardEditability( $locked, $filtered );
+
+        $snapshot = $this->snapshotOrder( $locked );
+
+        $this->applyScalarFields( $locked, $filtered );
+        $this->applyItemChanges( $locked, $filtered );
+
+        $this->applyTotalOverrides( $locked, $filtered );
+        $this->recomputeItemTotals( $locked );
+        $this->recomputeOrderTotals( $locked );
+
+        $locked->save();
+        $refreshed = $locked->fresh( 'items' ) ?? $locked;
+
+        return [ $refreshed, $snapshot, $this->buildDiff( $snapshot, $this->snapshotOrder( $refreshed ) ) ];
+    }
+
+    /**
+     * The payment action or refund an edit's total change calls for.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<string, mixed>  $preEditSnapshot  Snapshot before the edit.
+     * @param  Order                 $order            The order after it.
+     *
+     * @return array{0: array{delta_amount:int,currency:string}|null, 1: array{delta_amount:int,currency:string}|null}
+     */
+    protected function totalDelta( array $preEditSnapshot, Order $order ): array
+    {
+        $delta    = (int) $order->total_amount - (int) ( $preEditSnapshot['totals']['total_amount'] ?? 0 );
+        $currency = (string) $order->currency;
+
+        return match ( true ) {
+            $delta > 0 => [ [ 'delta_amount' => $delta, 'currency' => $currency ], null ],
+            $delta < 0 => [ null, [ 'delta_amount' => -$delta, 'currency' => $currency ] ],
+            default    => [ null, null ],
+        };
     }
 
     /**
@@ -721,19 +805,7 @@ class OrderEditService
             ],
         ] );
 
-        $beforeTotal = (int) ( $preEditSnapshot['totals']['total_amount'] ?? 0 );
-        $afterTotal  = (int) $order->total_amount;
-        $delta       = $afterTotal - $beforeTotal;
-        $currency    = (string) $order->currency;
-
-        $paymentActionRequired = null;
-        $refundDelta           = null;
-
-        if ( $delta > 0 ) {
-            $paymentActionRequired = [ 'delta_amount' => $delta, 'currency' => $currency ];
-        } elseif ( $delta < 0 ) {
-            $refundDelta = [ 'delta_amount' => -$delta, 'currency' => $currency ];
-        }
+        [ $paymentActionRequired, $refundDelta ] = $this->totalDelta( $preEditSnapshot, $order );
 
         doAction( 'ap.ecommerce.order.edited', $order, $diff, $editRow );
         Event::dispatch( new OrderEdited( $order, $diff, $editRow ) );

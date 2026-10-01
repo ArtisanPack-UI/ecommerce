@@ -238,6 +238,22 @@ final class ResourceSchemas
                 'addresses' => [ 'CustomerAddress', true, 'addresses' ],
             ] ),
 
+            'CustomerNote' => self::schema( Resources\CustomerNoteResource::class, Models\CustomerNote::class, 'An internal staff note on a customer.', [
+                'customer_id'    => 'Int!',
+                'author_user_id' => 'Int',
+                'body'           => 'String!',
+                'created_at'     => 'DateTime',
+            ] ),
+
+            'ActivityLogEntry' => self::schema( Resources\ActivityLogEntryResource::class, Models\ActivityLogEntry::class, 'An append-only activity event on a product, customer, or promotion.', [
+                'subject_type'  => 'String!',
+                'subject_id'    => 'Int!',
+                'actor_user_id' => 'Int',
+                'event_type'    => 'String!',
+                'payload'       => 'JSON',
+                'created_at'    => 'DateTime',
+            ] ),
+
             'CustomerAddress' => self::schema( Resources\CustomerAddressResource::class, Models\CustomerAddress::class, 'A saved customer address.', [
                 'customer_id'         => 'Int!',
                 'label'               => 'String',

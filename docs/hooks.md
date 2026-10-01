@@ -128,6 +128,10 @@ All hooks below are available since **1.0.0**.
 | `ap.ecommerce.order.fulfilled` | action | `Order $order` (every line fulfilled) | | `Services/ShipmentService` |
 | `ap.ecommerce.order.delivered` | action | `Order $order`, `Shipment $shipment` | | `Services/ShipmentService`, `Shipping/LocalPickupHandoff` |
 | `ap.ecommerce.order.refunded` | action | `Order $order`, `Refund $refund` | | `Services/RefundService` |
+| `ap.ecommerce.order.cancelling` | action | `Order $order`, `string $reason` (before the void, the reservation release, and the status change) | | `Services/OrderCancellationService` |
+| `ap.ecommerce.order.cancelled` | action | `Order $order` (cancelled) | | `Services/OrderCancellationService` |
+| `ap.ecommerce.order.noteAdded` | action | `Order $order`, `OrderNote $note` | | `Services/OrderNoteService` |
+| `ap.ecommerce.order.noteDeleted` | action | `OrderNote $note` (already deleted) | | `Services/OrderNoteService` |
 
 > **`ap.ecommerce.order.placed`.** The engine *listens* for this action to
 > send the order-confirmation notification, route the order onto kanban
@@ -145,6 +149,17 @@ All hooks below are available since **1.0.0**.
 | `ap.ecommerce.customer.userLinked` | action | `Customer $customer`, `Authenticatable $user` | | `Services/CustomerService` |
 | `ap.ecommerce.customer.orderClaimed` | action | `Customer $customer`, `Order $order` (a guest order was claimed) | | `Services/CustomerClaimService` |
 | `ap.ecommerce.customer.groups` | filter | `array<string> $groups` (defaults to `customers.meta.groups`), `Customer $customer` | `array<string>` | `Promotions/Conditions/CustomerInGroupCondition` |
+| `ap.ecommerce.customer.noteAdded` | action | `Customer $customer`, `CustomerNote $note` | | `Services/CustomerNoteService` |
+| `ap.ecommerce.customer.noteDeleted` | action | `CustomerNote $note` (already deleted) | | `Services/CustomerNoteService` |
+
+## Activity log
+
+Event types and payloads are listed in [activity-log.md](activity-log.md#event-types).
+
+| Hook | Type | Arguments | Returns | Fired in |
+|---|---|---|---|---|
+| `ap.ecommerce.activity.recording` | filter | `array $attributes` (`subject_type`, `subject_id`, `actor_user_id`, `event_type`, `payload`), `Model $subject` | `array`; a falsy value skips the entry | `Services/ActivityLogService::record()` |
+| `ap.ecommerce.activity.recorded` | action | `ActivityLogEntry $entry`, `Model $subject` | | `Services/ActivityLogService::record()` |
 
 ## Inventory
 

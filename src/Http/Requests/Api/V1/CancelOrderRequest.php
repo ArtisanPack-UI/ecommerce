@@ -1,11 +1,10 @@
 <?php
 
 /**
- * IssueRefundRequest.
+ * CancelOrderRequest.
  *
- * Payload for `POST orders/{order}/refunds` (engine spec §9.3). Amounts are
- * minor units in the order's currency; see
- * {@see \ArtisanPackUI\Ecommerce\Services\RefundService::issue()}.
+ * Payload for `POST orders/{order}/cancel` (engine spec §9.3); see
+ * {@see \ArtisanPackUI\Ecommerce\Services\OrderCancellationService::cancel()}.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -25,7 +24,7 @@ namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
  *
  * @since      1.0.0
  */
-class IssueRefundRequest extends ApiFormRequest
+class CancelOrderRequest extends ApiFormRequest
 {
     /**
      * Rules shared with the matching GraphQL mutation.
@@ -37,12 +36,7 @@ class IssueRefundRequest extends ApiFormRequest
     public static function baseRules(): array
     {
         return [
-            'lines'                 => [ 'required', 'array', 'min:1' ],
-            'lines.*.order_item_id' => [ 'required', 'integer', 'min:1' ],
-            'lines.*.quantity'      => [ 'required', 'integer', 'min:0' ],
-            'lines.*.amount'        => [ 'required', 'integer', 'min:1' ],
-            'lines.*.restock'       => [ 'boolean' ],
-            'reason'                => [ 'nullable', 'string', 'max:500' ],
+            'reason' => [ 'required', 'string', 'max:500' ],
         ];
     }
 

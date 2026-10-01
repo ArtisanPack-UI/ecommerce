@@ -261,12 +261,18 @@ Prices are always resolved on the server. The client never sends a unit price.
 | `GET` | `orders` | `order.viewAny` | |
 | `GET` | `orders/{order}` | `order.view` | |
 | `PATCH` | `orders/{order}` | `order.update` | yes |
+| `POST` | `orders/{order}/cancel` | `order.cancel` | yes |
 | `POST` | `orders/{order}/refunds` | `order.refund` | yes |
+| `GET` | `orders/{order}/timeline` | `order.view` | |
+| `POST` | `orders/{order}/notes` | `order.update` | yes |
 | `POST` | `orders/{order}/shipments` | `order.update` | yes |
 | `PATCH` | `orders/{order}/shipments/{shipment}` | `order.update` | yes |
 | `GET` | `customers` | `customer.viewAny` | |
 | `GET` | `customers/{customer}` | `customer.view` | |
 | `PATCH` | `customers/{customer}` | `customer.update` | yes |
+| `GET` | `customers/{customer}/notes` | `customer.view` | |
+| `POST` | `customers/{customer}/notes` | `customer.update` | yes |
+| `DELETE` | `customers/{customer}/notes/{note}` | `customer.update` | yes |
 | `GET` | `me/notification-preferences` | the signed-in user | |
 | `PATCH` | `me/notification-preferences` | the signed-in user | yes |
 
@@ -292,6 +298,9 @@ All of these use the `admin.mutate` rate policy.
 | Method | Path | Ability | Idem. |
 |---|---|---|---|
 | `GET` | `admin/inventory` | `product.viewAny` | |
+| `GET` | `admin/activity/products/{product}` | `product.view` | |
+| `GET` | `admin/activity/customers/{customer}` | `customer.view` | |
+| `GET` | `admin/activity/promotions/{promotion}` | `promotion.view` | |
 | `GET` / `POST` | `admin/tax-classes` | `taxRate.viewAny` / `taxRate.create` | POST |
 | `GET` / `POST` | `admin/tax-rates` | `taxRate.viewAny` / `taxRate.create` | POST |
 | `PATCH` / `DELETE` | `admin/tax-rates/{rate}` | `taxRate.update` / `taxRate.delete` | yes |
@@ -319,7 +328,8 @@ All of these use the `admin.mutate` rate policy.
 
 Topic guides: [kanban.md](kanban.md), [reviews.md](reviews.md),
 [digital-delivery.md](digital-delivery.md), [notifications.md](notifications.md),
-[webhooks.md](webhooks.md), [search.md](search.md).
+[webhooks.md](webhooks.md), [search.md](search.md),
+[activity-log.md](activity-log.md).
 
 > **Not in 1.0.0:** the parent plan's checkout endpoints (engine spec §9.2,
 > e.g. `POST /checkout/finalize`) and admin product/inventory writes (§9.5–9.6).

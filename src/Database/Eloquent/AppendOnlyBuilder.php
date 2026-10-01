@@ -67,9 +67,77 @@ class AppendOnlyBuilder extends Builder
     {
         throw new LogicException(
             sprintf(
-                '%s rows are append-only and cannot be deleted directly; delete the owning order to cascade.',
+                '%s rows are append-only and cannot be deleted directly.',
                 $this->getModel()->getTable(),
             ),
         );
+    }
+
+    /**
+     * Rejects increments: they would modify an append-only row.
+     *
+     * @since 1.0.0
+     *
+     * @param  mixed  $column  Column.
+     * @param  mixed  $amount  Amount.
+     * @param  array<string, mixed>  $extra  Extra columns.
+     *
+     * @throws LogicException Always.
+     *
+     * @return int
+     */
+    public function increment( $column, $amount = 1, array $extra = [] )
+    {
+        return $this->update( $extra );
+    }
+
+    /**
+     * Rejects decrements: they would modify an append-only row.
+     *
+     * @since 1.0.0
+     *
+     * @param  mixed  $column  Column.
+     * @param  mixed  $amount  Amount.
+     * @param  array<string, mixed>  $extra  Extra columns.
+     *
+     * @throws LogicException Always.
+     *
+     * @return int
+     */
+    public function decrement( $column, $amount = 1, array $extra = [] )
+    {
+        return $this->update( $extra );
+    }
+
+    /**
+     * Rejects upserts: they can overwrite an append-only row.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<int|string, mixed>  $values    Rows.
+     * @param  mixed                     $uniqueBy  Unique columns.
+     * @param  mixed                     $update    Columns to update.
+     *
+     * @throws LogicException Always.
+     *
+     * @return int
+     */
+    public function upsert( array $values, $uniqueBy, $update = null )
+    {
+        return $this->update( [] );
+    }
+
+    /**
+     * Rejects force deletes.
+     *
+     * @since 1.0.0
+     *
+     * @throws LogicException Always.
+     *
+     * @return mixed
+     */
+    public function forceDelete()
+    {
+        return $this->delete();
     }
 }

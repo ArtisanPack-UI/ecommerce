@@ -140,6 +140,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Activity log
+    |--------------------------------------------------------------------------
+    |
+    | Append-only history for products, customers, and promotions (orders
+    | keep their own timeline). See docs/activity-log.md.
+    |
+    | `enabled` — Record activity entries (default: true). When false, the
+    |             model observers and services write nothing.
+    |
+    */
+
+    'activity_log' => [
+        'enabled' => (bool) env( 'ECOMMERCE_ACTIVITY_LOG_ENABLED', true ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Idempotency
     |--------------------------------------------------------------------------
     |
@@ -462,6 +479,7 @@ return [
         'events' => [
             \ArtisanPackUI\Ecommerce\Events\OrderStatusChanged::class,
             \ArtisanPackUI\Ecommerce\Events\OrderSubstatusChanged::class,
+            \ArtisanPackUI\Ecommerce\Events\OrderCancelled::class,
             \ArtisanPackUI\Ecommerce\Events\OrderEdited::class,
             \ArtisanPackUI\Ecommerce\Events\OrderRefunded::class,
             \ArtisanPackUI\Ecommerce\Events\PaymentSucceeded::class,
