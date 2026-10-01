@@ -204,6 +204,16 @@ it( 'cancels an order and adds a note through the order mutations', function ():
     gql( $this, $note, [ 'input' => [ 'order_id' => $order->id, 'body' => str_repeat( 'a', 5_001 ) ] ] )
         ->assertJsonPath( 'data.addOrderNote.errors.0.field', 'body' );
 
+    // Hosts whose GraphQL route skips TrimStrings still get a UserError for a
+    // whitespace-only body, never an internal error.
+    $this->withoutMiddleware( [ Illuminate\Foundation\Http\Middleware\TrimStrings::class, Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull::class ] );
+
+    gql( $this, $note, [ 'input' => [ 'order_id' => $order->id, 'body' => " \t " ] ] )
+        ->assertJsonMissingPath( 'errors' )
+        ->assertJsonPath( 'data.addOrderNote.errors.0.field', 'body' );
+
+    $this->withMiddleware();
+
     gql( $this, $cancel, [ 'input' => [ 'order_id' => $order->id, 'reason' => 'Customer asked' ] ] )
         ->assertJsonMissingPath( 'errors' )
         ->assertJsonPath( 'data.cancelOrder.order.system_status', 'cancelled' );
