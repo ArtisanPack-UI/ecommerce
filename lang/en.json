@@ -354,5 +354,9 @@
     "meta.fraud_decision is managed by the engine and cannot be changed.": "meta.fraud_decision is managed by the engine and cannot be changed.",
     "no": "no",
     "unknown error": "unknown error",
-    "yes": "yes"
+    "yes": "yes",
+    "This product is in shoppers' carts. Archive it instead, or wait for those carts to expire.": "This product is in shoppers' carts. Archive it instead, or wait for those carts to expire.",
+    "This variant is in shoppers' carts, so it can't be deleted yet.": "This variant is in shoppers' carts, so it can't be deleted yet.",
+    "Remove the products it contains before changing the type.": "Remove the products it contains before changing the type.",
+    "Delete its variants before changing the type.": "Delete its variants before changing the type."
 }

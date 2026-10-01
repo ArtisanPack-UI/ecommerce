@@ -139,14 +139,33 @@ and GraphQL returns the rows as `UserError`s.
 | `no-variation-attributes`, `too-many-variants` | Can't generate variants |
 | `not-a-parent`, `child-self`, `child-missing`, `child-variant`, `duplicate-child`, `child-cycle`, `invalid-quantity` | Children rules |
 | `reason-required`, `invalid-threshold` | Stock rules |
+| `in-carts` | A product or variant in a shopper's cart can't be deleted (archive it instead) |
+| `type-has-variants`, `type-has-children` | A type change would strand variants or grouped/bundled members |
 | `unknown-id`, `category-cycle`, `merge-self` | Links, reorders, categories, tags |
+
+## Meta
+
+`meta` is merged one level deep: each top-level key you send replaces that
+key whole (so `{ "digital": { "download_limit": 3 } }` replaces the whole
+`digital` object), and keys you don't send are kept. Image URLs stored in
+`meta.featured_image_url` (and a variant's `meta.image_url`) must be http(s).
+
+## Rich text
+
+`description`, `short_description`, and category descriptions are cleaned with
+the security package's `kses()` in htmLawed's safe mode
+(`ProductService::KSES_CONFIG`): scripts, styles, stylesheet links, forms,
+embeds, event-handler and `style` attributes, and non-http(s) URLs are removed.
 
 ## Hooks
 
 The lifecycle hooks fire from the models, so every write path fires them:
 `ap.ecommerce.product.saving`, `.saved`, `.published` (status becomes
 `active`), `.unpublished` (status becomes `archived`), `.deleted`, and
-`ap.ecommerce.variant.saved`. See [hooks.md](hooks.md).
+`ap.ecommerce.variant.saved`. Every hook except `.saving` waits for the
+surrounding transaction to commit, so listeners see the product with its
+prices and links and never see a write that rolled back. See
+[hooks.md](hooks.md).
 
 ## REST and GraphQL
 

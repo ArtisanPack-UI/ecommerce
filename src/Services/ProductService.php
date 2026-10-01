@@ -33,6 +33,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Services;
 
 use ArtisanPackUI\Ecommerce\Exceptions\ProductWriteException;
+use ArtisanPackUI\Ecommerce\Models\CartItem;
 use ArtisanPackUI\Ecommerce\Models\InventoryItem;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\Models\ProductAttribute;
@@ -47,6 +48,7 @@ use ArtisanPackUI\Ecommerce\Models\ProductVariantOptionValue;
 use ArtisanPackUI\Ecommerce\Models\TaxClass;
 use ArtisanPackUI\Ecommerce\ProductTypes\BundledProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\GroupedProductType;
+use ArtisanPackUI\Ecommerce\ProductTypes\VariableProductType;
 use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
 use ArtisanPackUI\Ecommerce\ValueObjects\Currency as CurrencyVO;
 use DateTimeInterface;
@@ -137,6 +139,22 @@ class ProductService
      * @var array<int, string>
      */
     public const STATUSES = [ 'draft', 'active', 'archived' ];
+
+    /**
+     * htmLawed config for product rich text: safe mode drops `<script>`,
+     * embeds, event-handler attributes, and `javascript:` URLs, which
+     * `kses()`'s default config keeps.
+     *
+     * @since 1.0.0
+     *
+     * @var array<string, mixed>
+     */
+    public const KSES_CONFIG = [
+        'safe'           => 1,
+        'elements'       => '* -style -link -meta -base -form -input -button -select -textarea -option -iframe -object -embed -applet -frame -frameset',
+        'deny_attribute' => 'on*, style',
+        'schemes'        => 'href: http, https, mailto, tel; src: http, https; *: http, https',
+    ];
 
     /**
      * Most variants one "generate" call may create.
@@ -234,6 +252,10 @@ class ProductService
             throw ProductWriteException::field( 'name', 'required', __( 'A product needs a name.' ) );
         }
 
+        if ( array_key_exists( 'type', $data ) && (string) $data['type'] !== $product->type ) {
+            $this->assertTypeChangeable( $product, (string) $data['type'] );
+        }
+
         return DB::transaction( function () use ( $product, $data ): Product {
             $this->fillProduct( $product, $data );
             $product->save();
@@ -272,6 +294,10 @@ class ProductService
      */
     public function delete( Product $product ): void
     {
+        if ( CartItem::query()->where( 'product_id', $product->id )->exists() ) {
+            throw ProductWriteException::field( 'id', 'in-carts', __( 'This product is in shoppers\' carts. Archive it instead, or wait for those carts to expire.' ) );
+        }
+
         DB::transaction( function () use ( $product ): void {
             $variantIds = $product->variants()->pluck( 'id' )->all();
 
@@ -370,6 +396,10 @@ class ProductService
     {
         $this->assertEditable( $variant->product );
 
+        if ( CartItem::query()->where( 'product_variant_id', $variant->id )->exists() ) {
+            throw ProductWriteException::field( 'id', 'in-carts', __( 'This variant is in shoppers\' carts, so it can\'t be deleted yet.' ) );
+        }
+
         DB::transaction( function () use ( $variant ): void {
             $this->deletePolymorphicRows( ProductVariant::class, [ $variant->id ] );
             $variant->delete();
@@ -415,7 +445,19 @@ class ProductService
             return 0;
         }
 
-        return (int) $attributes->reduce( static fn ( int $carry, ProductAttribute $attribute ): int => $carry * $attribute->values->count(), 1 );
+        $size = 1;
+
+        foreach ( $attributes as $attribute ) {
+            $size *= $attribute->values->count();
+
+            // Past the generation cap the exact size doesn't matter; stopping
+            // here also keeps a huge matrix from overflowing an int.
+            if ( $size > self::MAX_GENERATED_VARIANTS ) {
+                return self::MAX_GENERATED_VARIANTS + 1;
+            }
+        }
+
+        return $size;
     }
 
     /**
@@ -484,10 +526,13 @@ class ProductService
 
                 $variant             = new ProductVariant();
                 $variant->product_id = $product->id;
+                $variant->setRelation( 'product', $product );
                 $this->fillVariant( $variant, $data );
                 $variant->save();
 
-                $this->writeVariantRelations( $product, $variant, $data, true );
+                // The combinations come from the product's own values and were
+                // checked against the existing variants above.
+                $this->writeVariantRelations( $product, $variant, $data, true, true );
 
                 $created->push( $variant );
             }
@@ -511,6 +556,8 @@ class ProductService
      */
     public function syncPrices( Product|ProductVariant $priceable, array $rows, string $field = 'prices' ): Collection
     {
+        $this->assertOwnerEditable( $priceable );
+
         $normalized = [];
         $seen       = [];
 
@@ -551,6 +598,8 @@ class ProductService
      */
     public function upsertPrice( Product|ProductVariant $priceable, array $row ): ProductPrice
     {
+        $this->assertOwnerEditable( $priceable );
+
         $clean = $this->normalizePrice( $row, null );
 
         $query = $priceable->prices()->where( 'currency', $clean['currency'] );
@@ -581,6 +630,12 @@ class ProductService
      */
     public function updatePrice( ProductPrice $price, array $row ): ProductPrice
     {
+        $owner = $price->priceable;
+
+        if ( $owner instanceof Product || $owner instanceof ProductVariant ) {
+            $this->assertOwnerEditable( $owner );
+        }
+
         $clean = $this->normalizePrice( array_merge( [
             'currency'          => $price->currency,
             'price_amount'      => $price->price_amount,
@@ -871,6 +926,8 @@ class ProductService
      */
     public function setCategories( Product $product, array $ids, string $mode = 'sync' ): Collection
     {
+        $this->assertEditable( $product );
+
         $ids = $this->existingIds( ProductCategory::class, $ids, 'category_ids' );
 
         $this->applyPivot( $product->categories(), $ids, $mode );
@@ -893,6 +950,8 @@ class ProductService
      */
     public function setTags( Product $product, array $ids, string $mode = 'sync' ): Collection
     {
+        $this->assertEditable( $product );
+
         $ids = $this->existingIds( ProductTag::class, $ids, 'tag_ids' );
 
         $this->applyPivot( $product->tags(), $ids, $mode );
@@ -919,6 +978,8 @@ class ProductService
      */
     public function syncChildren( Product $parent, array $rows ): Collection
     {
+        $this->assertEditable( $parent );
+
         if ( ! $this->acceptsChildren( $parent->type ) ) {
             throw ProductWriteException::field( 'children', 'not-a-parent', __( 'Only grouped and bundled products contain other products.' ) );
         }
@@ -1015,6 +1076,8 @@ class ProductService
      */
     public function adjustStock( Product|ProductVariant $stockable, int $delta, string $reason, string $field = 'stock_adjustment' ): InventoryItem
     {
+        $this->assertOwnerEditable( $stockable );
+
         $item = $this->inventoryItemFor( $stockable );
 
         if ( 0 === $delta ) {
@@ -1090,6 +1153,71 @@ class ProductService
     }
 
     /**
+     * Like {@see self::assertEditable()} for a product or one of its variants.
+     *
+     * @since 1.0.0
+     *
+     * @param  Product|ProductVariant  $owner  Product or variant.
+     *
+     * @throws ProductWriteException When the product's type is missing.
+     *
+     * @return void
+     */
+    protected function assertOwnerEditable( Product|ProductVariant $owner ): void
+    {
+        $product = $owner instanceof Product ? $owner : $owner->product;
+
+        if ( null !== $product ) {
+            $this->assertEditable( $product );
+        }
+    }
+
+    /**
+     * Refuses a type change that would strand the product's variants or
+     * grouped/bundled members.
+     *
+     * @since 1.0.0
+     *
+     * @param  Product  $product  Product.
+     * @param  string   $type     New type key.
+     *
+     * @throws ProductWriteException When variants or members would be left behind.
+     *
+     * @return void
+     */
+    protected function assertTypeChangeable( Product $product, string $type ): void
+    {
+        if ( ! $this->acceptsChildren( $type ) && ProductChild::query()->where( 'parent_product_id', $product->id )->exists() ) {
+            throw ProductWriteException::field( 'type', 'type-has-children', __( 'Remove the products it contains before changing the type.' ) );
+        }
+
+        if ( VariableProductType::KEY === $product->type && VariableProductType::KEY !== $type && $product->variants()->exists() ) {
+            throw ProductWriteException::field( 'type', 'type-has-variants', __( 'Delete its variants before changing the type.' ) );
+        }
+    }
+
+    /**
+     * Refuses a non-http(s) image URL stored in meta.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<string, mixed>  $meta  Meta.
+     * @param  string                $key   Meta key holding a URL.
+     *
+     * @throws ProductWriteException When the URL isn't http(s).
+     *
+     * @return void
+     */
+    protected function assertMetaUrl( array $meta, string $key ): void
+    {
+        $url = $meta[ $key ] ?? null;
+
+        if ( null !== $url && '' !== $url && ( ! is_string( $url ) || ! $this->isHttpUrl( $url ) ) ) {
+            throw ProductWriteException::field( "meta.{$key}", 'invalid-url', __( 'Use an http or https image URL.' ) );
+        }
+    }
+
+    /**
      * Fills and validates the product columns present in `$data`.
      *
      * @since 1.0.0
@@ -1153,7 +1281,9 @@ class ProductService
         }
 
         if ( array_key_exists( 'meta', $values ) ) {
+            // Each top-level meta key is replaced as a whole (not merged deeply).
             $values['meta'] = array_replace( (array) ( $product->meta ?? [] ), (array) $values['meta'] );
+            $this->assertMetaUrl( $values['meta'], 'featured_image_url' );
         }
 
         if ( array_key_exists( 'featured_image_url', $data ) ) {
@@ -1295,6 +1425,7 @@ class ProductService
 
         if ( array_key_exists( 'meta', $values ) ) {
             $values['meta'] = array_replace( (array) ( $variant->meta ?? [] ), (array) $values['meta'] );
+            $this->assertMetaUrl( $values['meta'], 'image_url' );
         } elseif ( ! $variant->exists ) {
             $values['meta'] = [];
         }
@@ -1311,13 +1442,26 @@ class ProductService
      * @param  ProductVariant        $variant  Saved variant.
      * @param  array<string, mixed>  $data     Data.
      * @param  bool                  $opening  Whether this is a new variant.
+     * @param  bool                  $trusted  Option values are known-valid and unique (skip the checks).
      *
      * @throws ProductWriteException When an option value is invalid or duplicates another variant.
      *
      * @return void
      */
-    protected function writeVariantRelations( Product $product, ProductVariant $variant, array $data, bool $opening ): void
+    protected function writeVariantRelations( Product $product, ProductVariant $variant, array $data, bool $opening, bool $trusted = false ): void
     {
+        if ( $trusted && array_key_exists( 'option_values', $data ) ) {
+            foreach ( (array) $data['option_values'] as $attributeId => $valueId ) {
+                ProductVariantOptionValue::query()->create( [
+                    'product_variant_id'         => $variant->id,
+                    'product_attribute_id'       => (int) $attributeId,
+                    'product_attribute_value_id' => (int) $valueId,
+                ] );
+            }
+
+            unset( $data['option_values'] );
+        }
+
         if ( array_key_exists( 'option_values', $data ) ) {
             $map = [];
 
@@ -1816,7 +1960,8 @@ class ProductService
     }
 
     /**
-     * Cleans rich text with `kses()` when the security package is loaded.
+     * Cleans rich text with the security package's `kses()` in htmLawed's
+     * safe mode ({@see self::KSES_CONFIG}), or strips tags without it.
      *
      * @since 1.0.0
      *
@@ -1832,7 +1977,7 @@ class ProductService
             return null;
         }
 
-        return function_exists( 'kses' ) && app()->bound( 'security' ) ? kses( $value ) : strip_tags( $value );
+        return app()->bound( 'security' ) ? trim( app( 'security' )->kses( $value, self::KSES_CONFIG ) ) : strip_tags( $value );
     }
 
     /**
@@ -1854,7 +1999,7 @@ class ProductService
         }
 
         try {
-            return Carbon::parse( $value );
+            return Carbon::parse( $value )->setTimezone( (string) config( 'app.timezone', 'UTC' ) );
         } catch ( Throwable ) {
             throw ProductWriteException::field( $field, 'invalid-date', __( 'Enter a valid date and time.' ) );
         }

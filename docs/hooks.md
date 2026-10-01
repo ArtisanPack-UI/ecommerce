@@ -175,7 +175,9 @@ Event types and payloads are listed in [activity-log.md](activity-log.md#event-t
 ## Products and search
 
 The lifecycle hooks fire from the models, so they run for every write path
-(`ProductService`, imports, raw Eloquent). See [products.md](products.md).
+(`ProductService`, imports, raw Eloquent). All but `.saving` run once the
+surrounding database transaction commits (immediately when there is none).
+See [products.md](products.md).
 
 | Hook | Type | Arguments | Returns | Fired in |
 |---|---|---|---|---|

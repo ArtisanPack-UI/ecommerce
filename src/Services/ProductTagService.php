@@ -166,10 +166,8 @@ class ProductTagService
         }
 
         if ( ! $tag->exists && empty( $values['slug'] ) ) {
-            $values['slug'] = Str::slug( $values['name'] );
-        }
-
-        if ( array_key_exists( 'slug', $values ) ) {
+            $values['slug'] = $this->uniqueSlug( (string) $values['name'] );
+        } elseif ( array_key_exists( 'slug', $values ) ) {
             $values['slug'] = Str::limit( Str::slug( (string) $values['slug'] ), 120, '' );
 
             if ( '' === $values['slug'] ) {
@@ -187,5 +185,28 @@ class ProductTagService
         }
 
         $tag->fill( $values );
+    }
+
+    /**
+     * A slug for `$name` no tag uses.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $name  Tag name.
+     *
+     * @return string
+     */
+    protected function uniqueSlug( string $name ): string
+    {
+        $base = Str::limit( Str::slug( $name ), 110, '' );
+        $base = '' === $base ? 'tag' : $base;
+        $slug = $base;
+        $n    = 2;
+
+        while ( ProductTag::query()->where( 'slug', $slug )->exists() ) {
+            $slug = $base . '-' . $n++;
+        }
+
+        return $slug;
     }
 }

@@ -290,3 +290,96 @@ it( 'adds, updates, and removes single gallery images', function (): void {
 
     expect( ProductImage::query()->count() )->toBe( 0 );
 } );
+
+it( 'cleans rich text with kses in safe mode when the security package is loaded', function (): void {
+    $this->app->register( ArtisanPackUI\Security\SecurityServiceProvider::class );
+
+    $product = $this->products->create( [
+        'type'        => 'simple',
+        'name'        => 'Lamp',
+        'description' => '<p>Warm <strong>light</strong>.</p><script>alert(1)</script><img src="https://e.test/a.jpg" onerror="alert(1)"><a href="javascript:alert(1)">x</a>',
+    ] );
+
+    expect( $product->description )
+        ->toContain( '<p>Warm <strong>light</strong>.</p>' )
+        ->not->toContain( '<script' )
+        ->not->toContain( 'onerror' )
+        ->not->toContain( 'href="javascript:' );
+} );
+
+it( 'refuses to delete a product or variant that is in a cart', function (): void {
+    $product = $this->products->create( [ 'type' => 'variable', 'name' => 'Tee' ] );
+    $variant = $this->products->createVariant( $product, [ 'sku' => 'TEE-1' ] );
+    ArtisanPackUI\Ecommerce\Models\CartItem::factory()->create( [ 'product_id' => $product->id, 'product_variant_id' => $variant->id ] );
+
+    expect( productWriteError( fn () => $this->products->delete( $product ) ) )->toBe( [ 'id' => 'in-carts' ] )
+        ->and( productWriteError( fn () => $this->products->deleteVariant( $variant ) ) )->toBe( [ 'id' => 'in-carts' ] )
+        ->and( Product::query()->whereKey( $product->id )->exists() )->toBeTrue();
+} );
+
+it( 'fires the post-write hooks only after the write commits', function (): void {
+    $fired = [];
+
+    addAction( 'ap.ecommerce.product.saved', function () use ( &$fired ): void {
+        $fired[] = 'saved';
+    } );
+
+    productWriteError( fn () => $this->products->create( [
+        'type'   => 'simple',
+        'name'   => 'Rolled back',
+        'status' => 'active',
+        'prices' => [ [ 'currency' => 'USD', 'price_amount' => 1 ], [ 'currency' => 'USD', 'price_amount' => 2 ] ],
+    ] ) );
+
+    expect( $fired )->toBe( [] );
+
+    $this->products->create( [ 'type' => 'simple', 'name' => 'Kept' ] );
+
+    expect( $fired )->toBe( [ 'saved' ] );
+} );
+
+it( 'refuses a type change that would strand variants or members', function (): void {
+    $tee    = $this->products->create( [ 'type' => 'variable', 'name' => 'Tee' ] );
+    $bundle = $this->products->create( [ 'type' => 'bundled', 'name' => 'Kit', 'children' => [ [ 'product_id' => Product::factory()->create()->id ] ] ] );
+    $this->products->createVariant( $tee, [] );
+
+    expect( productWriteError( fn () => $this->products->update( $tee, [ 'type' => 'simple' ] ) ) )->toBe( [ 'type' => 'type-has-variants' ] )
+        ->and( productWriteError( fn () => $this->products->update( $bundle, [ 'type' => 'simple' ] ) ) )->toBe( [ 'type' => 'type-has-children' ] )
+        ->and( $this->products->update( $bundle, [ 'type' => 'grouped' ] )->type )->toBe( 'grouped' );
+} );
+
+it( 'refuses writes to a missing-type product from every entry point', function (): void {
+    $product = Product::factory()->create( [ 'type' => 'subscription' ] );
+
+    expect( productWriteError( fn () => $this->products->upsertPrice( $product, [ 'currency' => 'USD', 'price_amount' => 1 ] ) ) )->toBe( [ 'type' => 'type-missing' ] )
+        ->and( productWriteError( fn () => $this->products->setTags( $product, [] ) ) )->toBe( [ 'type' => 'type-missing' ] )
+        ->and( productWriteError( fn () => $this->products->adjustStock( $product, 1, 'x' ) ) )->toBe( [ 'type' => 'type-missing' ] );
+} );
+
+it( 'refuses non-http image URLs hidden in meta', function (): void {
+    expect( productWriteError( fn () => $this->products->create( [ 'type' => 'simple', 'name' => 'X', 'meta' => [ 'featured_image_url' => 'javascript:alert(1)' ] ] ) ) )
+        ->toBe( [ 'meta.featured_image_url' => 'invalid-url' ] );
+} );
+
+it( 'caps the matrix size instead of overflowing', function (): void {
+    $product = $this->products->create( [
+        'type'       => 'variable',
+        'name'       => 'Huge',
+        'attributes' => array_map( static fn ( int $a ): array => [ 'label' => "A{$a}", 'values' => array_map( static fn ( int $v ): array => [ 'label' => "V{$v}" ], range( 1, 30 ) ) ], range( 1, 6 ) ),
+    ] );
+
+    expect( $this->products->variantMatrixSize( $product ) )->toBe( ProductService::MAX_GENERATED_VARIANTS + 1 )
+        ->and( productWriteError( fn () => $this->products->generateVariants( $product ) ) )->toBe( [ 'attributes' => 'too-many-variants' ] );
+} );
+
+it( 'strips stylesheets and forms from rich text', function (): void {
+    $this->app->register( ArtisanPackUI\Security\SecurityServiceProvider::class );
+
+    $product = $this->products->create( [
+        'type'        => 'simple',
+        'name'        => 'Lamp',
+        'description' => '<p>Ok</p><style>body{display:none}</style><link rel="stylesheet" href="https://e.test/x.css"><form action="https://e.test"><input type="password"></form>',
+    ] );
+
+    expect( $product->description )->toContain( '<p>Ok</p>' )->not->toContain( '<style' )->not->toContain( '<link' )->not->toContain( '<form' )->not->toContain( '<input' );
+} );

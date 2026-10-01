@@ -175,7 +175,8 @@ final class ResourceSchemas
                 'categories' => [ 'ProductCategory', true, 'categories' ],
                 'tags'       => [ 'ProductTag', true, 'tags' ],
                 'images'     => [ 'ProductImage', true, 'images' ],
-                'children'   => [ 'ProductChild', true, 'children' ],
+                // Admin-only: members may be drafts the storefront must not see.
+                'children'   => [ 'ProductChild', true, 'children', true ],
             ] ),
 
             'ProductVariant' => self::schema( Resources\ProductVariantResource::class, Models\ProductVariant::class, 'A purchasable variant of a product.', [

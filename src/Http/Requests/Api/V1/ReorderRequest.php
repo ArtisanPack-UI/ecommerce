@@ -36,7 +36,7 @@ class ReorderRequest extends ApiFormRequest
     public static function baseRules(): array
     {
         return [
-            'ids'       => [ 'required', 'array', 'min:1' ],
+            'ids'       => [ 'required', 'array', 'min:1', 'max:1000' ],
             'ids.*'     => [ 'integer' ],
             'parent_id' => [ 'nullable', 'integer' ],
         ];

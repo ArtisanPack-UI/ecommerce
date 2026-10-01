@@ -23,6 +23,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Support\Facades\DB;
 
 /**
  * ProductVariant Eloquent model.
@@ -124,7 +125,8 @@ class ProductVariant extends Model
     }
 
     /**
-     * Fires `ap.ecommerce.variant.saved` (engine spec §6.9) on every save.
+     * Fires `ap.ecommerce.variant.saved` (engine spec §6.9) on every save,
+     * once the surrounding transaction commits.
      *
      * @since 1.0.0
      *
@@ -136,7 +138,7 @@ class ProductVariant extends Model
             $product = $variant->relationLoaded( 'product' ) ? $variant->product : $variant->product()->first();
 
             if ( null !== $product ) {
-                doAction( 'ap.ecommerce.variant.saved', $variant, $product );
+                DB::afterCommit( static fn () => doAction( 'ap.ecommerce.variant.saved', $variant, $product ) );
             }
         } );
     }

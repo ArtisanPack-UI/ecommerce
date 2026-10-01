@@ -187,3 +187,13 @@ it( 'rate-limits fields with their REST policy', function (): void {
     gql( $this, '{ products { nodes { id } } }' )->assertJsonMissingPath( 'errors' );
     gql( $this, '{ products { nodes { id } } }' )->assertJsonPath( 'errors.0.extensions.code', 'RATE_LIMITED' );
 } );
+
+it( 'does not expose grouped or bundled members to the storefront', function (): void {
+    $bundle = Product::factory()->bundled()->create();
+    $draft  = Product::factory()->draft()->create( [ 'name' => 'Unreleased lamp' ] );
+    ArtisanPackUI\Ecommerce\Models\ProductChild::factory()->create( [ 'parent_product_id' => $bundle->id, 'child_product_id' => $draft->id ] );
+
+    $response = gql( $this, 'query ($id: ID!) { product(id: $id) { id children { product { name } } } }', [ 'id' => $bundle->id ] );
+
+    expect( $response->getContent() )->not->toContain( 'Unreleased lamp' );
+} );

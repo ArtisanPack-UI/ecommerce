@@ -55,7 +55,7 @@ class ProductAttributeRequest extends ApiFormRequest
     public static function valueRules( string $prefix ): array
     {
         return [
-            "{$prefix}values"          => [ 'array' ],
+            "{$prefix}values"          => [ 'array', 'max:100' ],
             "{$prefix}values.*"        => [ 'array' ],
             "{$prefix}values.*.id"     => [ 'nullable', 'integer' ],
             "{$prefix}values.*.value"  => [ 'nullable', 'string', 'max:120' ],

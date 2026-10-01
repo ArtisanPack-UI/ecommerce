@@ -36,7 +36,7 @@ class ProductLinksRequest extends ApiFormRequest
     public static function baseRules(): array
     {
         return [
-            'ids'   => [ 'present', 'array' ],
+            'ids'   => [ 'present', 'array', 'max:200' ],
             'ids.*' => [ 'integer' ],
             'mode'  => [ 'nullable', 'string', 'in:sync,attach,detach' ],
         ];

@@ -37,7 +37,7 @@ class AdjustStockRequest extends ApiFormRequest
     {
         return [
             'product_variant_id' => [ 'nullable', 'integer' ],
-            'delta'              => [ 'required', 'integer', 'not_in:0' ],
+            'delta'              => [ 'required', 'integer', 'not_in:0', 'min:-1000000', 'max:1000000' ],
             'reason'             => [ 'required', 'string', 'max:255' ],
         ];
     }

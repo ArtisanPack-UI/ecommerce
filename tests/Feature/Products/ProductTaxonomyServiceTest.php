@@ -90,3 +90,10 @@ it( 'links products to categories and tags through the product service', functio
     expect( $product->categories()->pluck( 'product_categories.id' )->all() )->toBe( [ $b->id ] )
         ->and( fn () => $products->setTags( $product, [ 999 ] ) )->toThrow( ProductWriteException::class );
 } );
+
+it( 'gives a new tag a unique slug when its name\'s slug is taken', function (): void {
+    $service = app( ProductTagService::class );
+    $service->create( [ 'name' => 'Red' ] );
+
+    expect( $service->create( [ 'name' => 'Red!' ] )->slug )->toBe( 'red-2' );
+} );

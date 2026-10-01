@@ -36,11 +36,11 @@ class ProductChildrenRequest extends ApiFormRequest
     public static function baseRules(): array
     {
         return [
-            'children'              => [ 'present', 'array' ],
+            'children'              => [ 'present', 'array', 'max:100' ],
             'children.*'            => [ 'array' ],
             'children.*.product_id' => [ 'required', 'integer' ],
             'children.*.variant_id' => [ 'nullable', 'integer' ],
-            'children.*.quantity'   => [ 'integer', 'min:1' ],
+            'children.*.quantity'   => [ 'integer', 'min:1', 'max:1000' ],
         ];
     }
 

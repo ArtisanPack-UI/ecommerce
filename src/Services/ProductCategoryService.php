@@ -192,7 +192,7 @@ class ProductCategoryService
 
         if ( array_key_exists( 'description', $values ) ) {
             $description           = trim( (string) $values['description'] );
-            $values['description'] = '' === $description ? null : ( function_exists( 'kses' ) && app()->bound( 'security' ) ? kses( $description ) : strip_tags( $description ) );
+            $values['description'] = '' === $description ? null : ( app()->bound( 'security' ) ? trim( app( 'security' )->kses( $description, ProductService::KSES_CONFIG ) ) : strip_tags( $description ) );
         }
 
         if ( array_key_exists( 'icon', $values ) ) {

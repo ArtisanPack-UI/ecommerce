@@ -35,6 +35,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Laravel\Scout\EngineManager;
 use Laravel\Scout\Engines\DatabaseEngine;
 use Laravel\Scout\Engines\Engine;
@@ -456,9 +457,12 @@ class Product extends Model
             doAction( 'ap.ecommerce.product.saving', $product );
         } );
 
+        // The post-write hooks wait for the surrounding transaction to commit
+        // (they run at once outside one), so listeners see the product with
+        // its prices and links, and never see a write that rolled back.
         static::created( static function ( Product $product ): void {
             if ( 'active' === $product->status ) {
-                doAction( 'ap.ecommerce.product.published', $product );
+                DB::afterCommit( static fn () => doAction( 'ap.ecommerce.product.published', $product ) );
             }
         } );
 
@@ -468,18 +472,18 @@ class Product extends Model
             }
 
             if ( 'active' === $product->status ) {
-                doAction( 'ap.ecommerce.product.published', $product );
+                DB::afterCommit( static fn () => doAction( 'ap.ecommerce.product.published', $product ) );
             } elseif ( 'archived' === $product->status ) {
-                doAction( 'ap.ecommerce.product.unpublished', $product );
+                DB::afterCommit( static fn () => doAction( 'ap.ecommerce.product.unpublished', $product ) );
             }
         } );
 
         static::saved( static function ( Product $product ): void {
-            doAction( 'ap.ecommerce.product.saved', $product );
+            DB::afterCommit( static fn () => doAction( 'ap.ecommerce.product.saved', $product ) );
         } );
 
         static::deleted( static function ( Product $product ): void {
-            doAction( 'ap.ecommerce.product.deleted', $product );
+            DB::afterCommit( static fn () => doAction( 'ap.ecommerce.product.deleted', $product ) );
         } );
     }
 
