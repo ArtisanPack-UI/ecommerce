@@ -184,7 +184,7 @@ See [products.md](products.md).
 | `ap.ecommerce.product.saving` | action | `Product $product` | | `Models/Product` (Eloquent `saving`) |
 | `ap.ecommerce.product.saved` | action | `Product $product` | | `Models/Product` (Eloquent `saved`) |
 | `ap.ecommerce.product.published` | action | `Product $product`. Fires when a product is created as, or changes to, `active`. | | `Models/Product` |
-| `ap.ecommerce.product.unpublished` | action | `Product $product`. Fires when status changes to `archived`. | | `Models/Product` |
+| `ap.ecommerce.product.unpublished` | action | `Product $product`. Fires when status changes from `active` to anything else (`draft` or `archived`), i.e. the product leaves the storefront. | | `Models/Product` |
 | `ap.ecommerce.product.deleted` | action | `Product $product` | | `Models/Product` (Eloquent `deleted`) |
 | `ap.ecommerce.variant.saved` | action | `ProductVariant $variant`, `Product $product` | | `Models/ProductVariant` (Eloquent `saved`) |
 | `ap.ecommerce.product.listQuery` | filter | `Builder $query`, `array $filters` | `Builder` | Not fired by the engine; admin list screens apply it to their product query so satellites can add filters. |

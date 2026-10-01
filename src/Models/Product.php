@@ -471,9 +471,10 @@ class Product extends Model
                 return;
             }
 
+            // The original isn't synced until after `saved`, so it still holds the old status here.
             if ( 'active' === $product->status ) {
                 DB::afterCommit( static fn () => doAction( 'ap.ecommerce.product.published', $product ) );
-            } elseif ( 'archived' === $product->status ) {
+            } elseif ( 'active' === $product->getOriginal( 'status' ) ) {
                 DB::afterCommit( static fn () => doAction( 'ap.ecommerce.product.unpublished', $product ) );
             }
         } );

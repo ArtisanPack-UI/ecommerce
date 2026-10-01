@@ -194,9 +194,9 @@ Route::prefix( 'kanban' )
         Route::get( 'triggers', [ KanbanCatalogController::class, 'triggers' ] )->middleware( $admin( 'kanbanBoard', 'viewAny' ) )->name( 'triggers.index' );
     } );
 
-Route::prefix( 'admin' )->name( 'admin.' )->group( function () use ( $admin ): void {
+Route::prefix( 'admin' )->name( 'admin.' )->group( function () use ( $admin, $auth ): void {
     // Catalog (engine spec §9.5): products and everything hanging off them.
-    Route::where( [ 'product' => '[0-9]+', 'variant' => '[0-9]+', 'price' => '[0-9]+', 'image' => '[0-9]+', 'attribute' => '[0-9]+', 'category' => '[0-9]+', 'tag' => '[0-9]+' ] )->group( function () use ( $admin ): void {
+    Route::where( [ 'product' => '[0-9]+', 'variant' => '[0-9]+', 'price' => '[0-9]+', 'image' => '[0-9]+', 'attribute' => '[0-9]+', 'category' => '[0-9]+', 'tag' => '[0-9]+' ] )->group( function () use ( $admin, $auth ): void {
         Route::get( 'products', [ ProductAdminController::class, 'index' ] )->middleware( $admin( 'product', 'viewAny' ) )->name( 'products.index' );
         Route::post( 'products', [ ProductAdminController::class, 'store' ] )->middleware( $admin( 'product', 'create', true ) )->name( 'products.store' );
         Route::get( 'products/{product}', [ ProductAdminController::class, 'show' ] )->middleware( $admin( 'product', 'view' ) )->name( 'products.show' );
@@ -249,7 +249,10 @@ Route::prefix( 'admin' )->name( 'admin.' )->group( function () use ( $admin ): v
         Route::post( 'product-tags', [ ProductTagController::class, 'store' ] )->middleware( $admin( 'product', 'create', true ) )->name( 'product-tags.store' );
         Route::patch( 'product-tags/{tag}', [ ProductTagController::class, 'update' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'product-tags.update' );
         Route::delete( 'product-tags/{tag}', [ ProductTagController::class, 'destroy' ] )->middleware( $admin( 'product', 'delete', true ) )->name( 'product-tags.destroy' );
-        Route::post( 'product-tags/{tag}/merge', [ ProductTagController::class, 'merge' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'product-tags.merge' );
+        // Merging deletes the source tag, so it needs product.delete as well as product.update.
+        Route::post( 'product-tags/{tag}/merge', [ ProductTagController::class, 'merge' ] )
+            ->middleware( array_merge( $auth, [ 'ecommerce.can:product,update', 'ecommerce.can:product,delete', 'ecommerce.rate-limit:ecommerce.admin.mutate', 'ecommerce.idempotency' ] ) )
+            ->name( 'product-tags.merge' );
     } );
 
     // Inventory.

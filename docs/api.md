@@ -317,7 +317,7 @@ All of these use the `admin.mutate` rate policy.
 | `POST` | `admin/product-categories/reorder` (`{ parent_id, ids }`) | `product.update` | yes |
 | `GET` / `POST` | `admin/product-tags` | `product.viewAny` / `product.create` | POST |
 | `PATCH` / `DELETE` | `admin/product-tags/{tag}` | `product.update` / `product.delete` | yes |
-| `POST` | `admin/product-tags/{tag}/merge` (`{ target_id }`) | `product.update` | yes |
+| `POST` | `admin/product-tags/{tag}/merge` (`{ target_id }`) | `product.update` and `product.delete` | yes |
 | `GET` | `admin/inventory` | `product.viewAny` | |
 | `GET` | `admin/activity/products/{product}` | `product.view` | |
 | `GET` | `admin/activity/customers/{customer}` | `customer.view` | |

@@ -383,3 +383,17 @@ it( 'strips stylesheets and forms from rich text', function (): void {
 
     expect( $product->description )->toContain( '<p>Ok</p>' )->not->toContain( '<style' )->not->toContain( '<link' )->not->toContain( '<form' )->not->toContain( '<input' );
 } );
+
+it( 'fires unpublished whenever an active product leaves the storefront', function (): void {
+    $fired = [];
+
+    addAction( 'ap.ecommerce.product.unpublished', function () use ( &$fired ): void {
+        $fired[] = 'unpublished';
+    } );
+
+    $product = $this->products->create( [ 'type' => 'simple', 'name' => 'Lamp', 'status' => 'active' ] );
+    $this->products->update( $product, [ 'status' => 'draft' ] );
+    $this->products->update( $product, [ 'status' => 'archived' ] );
+
+    expect( $fired )->toBe( [ 'unpublished' ] );
+} );

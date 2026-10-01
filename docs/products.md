@@ -161,7 +161,7 @@ embeds, event-handler and `style` attributes, and non-http(s) URLs are removed.
 
 The lifecycle hooks fire from the models, so every write path fires them:
 `ap.ecommerce.product.saving`, `.saved`, `.published` (status becomes
-`active`), `.unpublished` (status becomes `archived`), `.deleted`, and
+`active`), `.unpublished` (status leaves `active`, to `draft` or `archived`), `.deleted`, and
 `ap.ecommerce.variant.saved`. Every hook except `.saving` waits for the
 surrounding transaction to commit, so listeners see the product with its
 prices and links and never see a write that rolled back. See

@@ -238,3 +238,23 @@ it( 'manages and merges tags', function (): void {
 
     expect( ProductTag::query()->count() )->toBe( 0 );
 } );
+
+it( 'requires product.delete as well as product.update to merge tags', function (): void {
+    $source = ProductTag::factory()->create();
+    $target = ProductTag::factory()->create();
+    $editor = new Illuminate\Auth\GenericUser( [ 'id' => 7, 'name' => 'Editor' ] );
+
+    Illuminate\Support\Facades\Gate::define( 'ecommerce.product.update', static fn (): bool => true );
+
+    $this->actingAs( $editor, 'sanctum' )
+        ->postJson( "/api/ecommerce/v1/admin/product-tags/{$source->id}/merge", [ 'target_id' => $target->id ], idem() )
+        ->assertForbidden();
+
+    expect( ProductTag::query()->whereKey( $source->id )->exists() )->toBeTrue();
+
+    Illuminate\Support\Facades\Gate::define( 'ecommerce.product.delete', static fn (): bool => true );
+
+    $this->actingAs( $editor, 'sanctum' )
+        ->postJson( "/api/ecommerce/v1/admin/product-tags/{$source->id}/merge", [ 'target_id' => $target->id ], idem() )
+        ->assertOk();
+} );
