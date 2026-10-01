@@ -51,6 +51,7 @@ use Illuminate\Support\Carbon;
  * @property \Illuminate\Database\Eloquent\Collection<int, CustomerAddress>          $addresses
  * @property \Illuminate\Database\Eloquent\Collection<int, CustomerClaimAttempt>     $claimAttempts
  * @property \Illuminate\Database\Eloquent\Collection<int, CustomerNotificationPreference>  $notificationPreferences
+ * @property \Illuminate\Database\Eloquent\Collection<int, CustomerNote>             $notes
  */
 class Customer extends Model
 {
@@ -145,6 +146,18 @@ class Customer extends Model
     public function notificationPreferences(): HasMany
     {
         return $this->hasMany( CustomerNotificationPreference::class );
+    }
+
+    /**
+     * Internal staff notes on this customer.
+     *
+     * @since 1.0.0
+     *
+     * @return HasMany<CustomerNote, $this>
+     */
+    public function notes(): HasMany
+    {
+        return $this->hasMany( CustomerNote::class );
     }
 
     /**

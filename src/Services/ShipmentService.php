@@ -189,8 +189,8 @@ class ShipmentService
         $wasDelivered = Shipment::STATUS_DELIVERED === $shipment->status;
 
         $shipment->status          = $status->status;
-        $shipment->tracking_number = $status->trackingNumber ?? $shipment->tracking_number;
-        $shipment->tracking_url    = $status->trackingUrl ?? $shipment->tracking_url;
+        $shipment->tracking_number = $this->trackingValue( $status->trackingNumber, $shipment->tracking_number );
+        $shipment->tracking_url    = $this->trackingValue( $status->trackingUrl, $shipment->tracking_url );
 
         if ( Shipment::STATUS_IN_TRANSIT === $status->status && null === $shipment->shipped_at ) {
             $shipment->shipped_at = $status->occurredAt ?? Carbon::now();
@@ -215,25 +215,43 @@ class ShipmentService
      * Purchases a label for `$shipment` through the provider registered
      * under `$providerKey` and copies its tracking details onto the row.
      *
+     * The shipment row is locked while the label is bought, so two
+     * concurrent requests cannot both buy (and pay for) a label; a shipment
+     * that already has one is refused.
+     *
      * @since 1.0.0
      *
      * @param  Shipment  $shipment     Shipment to label.
      * @param  string    $providerKey  Label provider registry key.
      *
+     * @throws InvalidArgumentException When the shipment already has a label.
+     *
      * @return ShippingLabel
      */
     public function buyLabel( Shipment $shipment, string $providerKey ): ShippingLabel
     {
-        $label = $this->labelProviders->get( $providerKey )->buyLabel( $shipment );
+        $provider = $this->labelProviders->get( $providerKey );
 
-        $shipment->label_id        = $label->id;
-        $shipment->tracking_number = $label->trackingNumber ?? $shipment->tracking_number;
-        $shipment->tracking_url    = $label->trackingUrl ?? $shipment->tracking_url;
-        $shipment->carrier         = $label->carrier ?? $shipment->carrier;
-        $shipment->service         = $label->service ?? $shipment->service;
-        $shipment->save();
+        return DB::transaction( function () use ( $shipment, $provider ): ShippingLabel {
+            $locked = Shipment::query()->whereKey( $shipment->id )->lockForUpdate()->firstOrFail();
 
-        return $label;
+            if ( null !== $locked->label_id ) {
+                throw new InvalidArgumentException( __( 'Shipment :id already has a label.', [ 'id' => $locked->id ] ) );
+            }
+
+            $label = $provider->buyLabel( $locked );
+
+            $locked->label_id        = $label->id;
+            $locked->tracking_number = $label->trackingNumber ?? $locked->tracking_number;
+            $locked->tracking_url    = $label->trackingUrl ?? $locked->tracking_url;
+            $locked->carrier         = $label->carrier ?? $locked->carrier;
+            $locked->service         = $label->service ?? $locked->service;
+            $locked->save();
+
+            $shipment->setRawAttributes( $locked->getAttributes(), true );
+
+            return $label;
+        } );
     }
 
     /**
@@ -262,6 +280,26 @@ class ShipmentService
         }
 
         return $remaining;
+    }
+
+    /**
+     * A tracking column's new value: `null` keeps the current one, an empty
+     * string clears it, anything else replaces it.
+     *
+     * @since 1.0.0
+     *
+     * @param  string|null  $incoming  The value from the tracking update.
+     * @param  string|null  $current   The stored value.
+     *
+     * @return string|null
+     */
+    protected function trackingValue( ?string $incoming, ?string $current ): ?string
+    {
+        return match ( true ) {
+            null === $incoming        => $current,
+            '' === trim( $incoming )  => null,
+            default                   => $incoming,
+        };
     }
 
     /**

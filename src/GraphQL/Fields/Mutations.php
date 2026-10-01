@@ -16,6 +16,8 @@
  * | `applyCoupon`               | `POST carts/{token}/coupons`                           |
  * | `removeCoupon`              | `DELETE carts/{token}/coupons/{code}`                  |
  * | `issueRefund`               | `POST orders/{order}/refunds`                          |
+ * | `cancelOrder`               | `POST orders/{order}/cancel`                           |
+ * | `addOrderNote`              | `POST orders/{order}/notes`                            |
  * | `createWebhookSubscription` | `POST admin/webhook-subscriptions`                     |
  * | `updateWebhookSubscription` | `PATCH admin/webhook-subscriptions/{sub}`              |
  * | `deleteWebhookSubscription` | `DELETE admin/webhook-subscriptions/{sub}`             |
@@ -43,12 +45,15 @@ namespace ArtisanPackUI\Ecommerce\GraphQL\Fields;
 
 use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
 use ArtisanPackUI\Ecommerce\Exceptions\NotificationTemplateException;
+use ArtisanPackUI\Ecommerce\Exceptions\OrderNotCancellableException;
 use ArtisanPackUI\Ecommerce\Exceptions\RefundNotAllowedException;
 use ArtisanPackUI\Ecommerce\GraphQL\GraphQLError;
 use ArtisanPackUI\Ecommerce\GraphQL\Support\Resolvers;
 use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\AddCartItemRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\AddOrderNoteRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ApplyCouponRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CancelOrderRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CreateCartRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\IssueRefundRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\PreviewNotificationTemplateRequest;
@@ -63,6 +68,8 @@ use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
 use ArtisanPackUI\Ecommerce\Services\NotificationTemplateService;
+use ArtisanPackUI\Ecommerce\Services\OrderCancellationService;
+use ArtisanPackUI\Ecommerce\Services\OrderNoteService;
 use ArtisanPackUI\Ecommerce\Services\RefundService;
 use ArtisanPackUI\Ecommerce\Services\StorefrontCartService;
 use ArtisanPackUI\Ecommerce\Services\WebhookSubscriptionService;
@@ -128,6 +135,10 @@ class Mutations
             ],
             'IssueRefundInput'      => $input( [ 'order_id' => 'ID!', 'lines' => '[RefundLineInput!]!', 'reason' => 'String' ] ),
             'IssueRefundPayload'    => $output( [ 'order' => 'Order', 'refund' => 'Refund' ] ),
+            'CancelOrderInput'      => $input( [ 'order_id' => 'ID!', 'reason' => 'String!' ] ),
+            'CancelOrderPayload'    => $output( [ 'order' => 'Order' ] ),
+            'AddOrderNoteInput'     => $input( [ 'order_id' => 'ID!', 'body' => 'String!', 'is_customer_visible' => 'Boolean' ] ),
+            'AddOrderNotePayload'   => $output( [ 'note' => 'OrderNote' ] ),
 
             'CreateWebhookSubscriptionInput'   => $input( [
                 'name'      => 'String!',
@@ -276,6 +287,50 @@ class Mutations
                 ];
             } ),
 
+            'cancelOrder' => $this->mutation( 'CancelOrder', function ( array $input, ResolveInfo $info ): array {
+                $order = Order::query()->find( $input['order_id'] );
+                $user  = $this->r->authorize( 'order', 'cancel', $order );
+                $this->r->throttle( 'ecommerce.admin.mutate' );
+
+                if ( null === $order ) {
+                    throw GraphQLError::notFound();
+                }
+
+                $this->validate( $input, CancelOrderRequest::baseRules() );
+
+                $actor = $user->getAuthIdentifier();
+
+                try {
+                    $summary = app( OrderCancellationService::class )->cancel( $order, (string) $input['reason'], is_numeric( $actor ) ? (int) $actor : null );
+                } catch ( InvalidArgumentException $exception ) {
+                    throw new OrderNotCancellableException( $exception->getMessage(), [], 0, $exception );
+                }
+
+                return [ 'order' => $this->r->present( $summary->order, 'Order', $this->r->selection( $info, 'order' ), true ) ];
+            } ),
+
+            'addOrderNote' => $this->mutation( 'AddOrderNote', function ( array $input, ResolveInfo $info ): array {
+                $order = Order::query()->find( $input['order_id'] );
+                $user  = $this->r->authorize( 'order', 'update', $order );
+                $this->r->throttle( 'ecommerce.admin.mutate' );
+
+                if ( null === $order ) {
+                    throw GraphQLError::notFound();
+                }
+
+                $this->validate( $input, AddOrderNoteRequest::baseRules() );
+
+                $actor = $user->getAuthIdentifier();
+                $note  = app( OrderNoteService::class )->add(
+                    $order,
+                    (string) $input['body'],
+                    is_numeric( $actor ) ? (int) $actor : null,
+                    (bool) ( $input['is_customer_visible'] ?? false ),
+                );
+
+                return [ 'note' => $this->r->present( $note, 'OrderNote', $this->r->selection( $info, 'note' ), true ) ];
+            } ),
+
             'createWebhookSubscription' => $this->mutation( 'CreateWebhookSubscription', function ( array $input ): array {
                 $this->admin( 'create' );
 
@@ -375,6 +430,8 @@ class Mutations
                     $payload = [ 'errors' => [ [ 'field' => $exception->field, 'code' => $exception->errorCode, 'message' => $exception->getMessage() ] ] ];
                 } catch ( RefundNotAllowedException $exception ) {
                     $payload = [ 'errors' => [ [ 'field' => null, 'code' => 'refund-not-allowed', 'message' => $exception->getMessage() ] ] ];
+                } catch ( OrderNotCancellableException $exception ) {
+                    $payload = [ 'errors' => [ [ 'field' => null, 'code' => 'order-not-cancellable', 'message' => $exception->getMessage() ] ] ];
                 } catch ( NotificationTemplateException $exception ) {
                     $payload = [ 'errors' => $exception->errors ];
                 }

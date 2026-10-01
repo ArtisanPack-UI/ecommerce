@@ -72,6 +72,7 @@ use ArtisanPackUI\Ecommerce\Listeners\BroadcastKanbanCardMoved;
 use ArtisanPackUI\Ecommerce\Listeners\DispatchWebhooksForEvent;
 use ArtisanPackUI\Ecommerce\Listeners\IssueDigitalDeliverables;
 use ArtisanPackUI\Ecommerce\Listeners\LinkCustomerOnUserVerified;
+use ArtisanPackUI\Ecommerce\Listeners\RecordModelActivity;
 use ArtisanPackUI\Ecommerce\Listeners\RevokeDigitalDeliverables;
 use ArtisanPackUI\Ecommerce\Listeners\SendCatalogNotifications;
 use ArtisanPackUI\Ecommerce\Logging\EcommerceLogFormatter;
@@ -292,6 +293,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->registerReviewListeners();
         $this->registerDigitalDeliveryListeners();
         $this->registerNotificationListeners();
+        $this->registerActivityLogObservers();
 
         if ( $this->app->runningInConsole() ) {
             $this->publishes( [
@@ -1186,5 +1188,22 @@ class EcommerceServiceProvider extends ServiceProvider
         $events = $this->app->make( Dispatcher::class );
 
         $events->listen( Verified::class, LinkCustomerOnUserVerified::class );
+    }
+
+    /**
+     * Observes product, variant, price, customer, promotion, and coupon
+     * writes for the activity log (engine issue #147). The observer checks
+     * `artisanpack.ecommerce.activity_log.enabled` on every write, so the
+     * switch also works when flipped at runtime.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerActivityLogObservers(): void
+    {
+        foreach ( RecordModelActivity::MODELS as $model ) {
+            $model::observe( RecordModelActivity::class );
+        }
     }
 }

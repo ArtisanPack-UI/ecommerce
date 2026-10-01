@@ -50,6 +50,7 @@ All events are available since **1.0.0** and live in the
 | `OrderStatusChanged` | `OrderStatusMachine::transition()` | yes | `order.status.changed` | `orderStatusChanged` |
 | `OrderSubstatusChanged` | `OrderStatusMachine::setSubstatus()` | yes | `order.substatus.changed` | |
 | `OrderEdited` | `OrderEditService` | yes | `order.edited` | |
+| `OrderCancelled` | `OrderCancellationService::cancel()` | yes | `order.cancelled` | |
 | `OrderRefunded` | `RefundService` | yes | `order.refunded` | |
 | `PaymentSucceeded` | `PaymentOrchestrator` (capture) | yes | `payment.succeeded` | `paymentSucceeded` |
 | `PaymentFailed` | `PaymentOrchestrator` (gateway threw, capture declined, or fraud block) | yes | `payment.failed` | |
@@ -137,6 +138,20 @@ public function __construct( public readonly Order $order, public readonly array
 
 A post-placement edit was applied. `$diff` is the structured before/after
 change set and `$edit` is the persisted `order_edits` row.
+
+### `OrderCancelled`
+
+```php
+public function __construct( public readonly Order $order, public readonly string $reason )
+```
+
+The order moved to `cancelled`. Its inventory reservations were released and a
+payment that was still `pending` at the gateway was voided (`payment_status`
+is now `voided`). Cancelling never refunds: when the order was paid, issue the
+refund through `RefundService`.
+
+`$reason` is the staff-entered text and is delivered to `order.cancelled`
+webhook subscribers as-is. Don't put customer personal data in it.
 
 ### `OrderRefunded`
 

@@ -1,11 +1,10 @@
 <?php
 
 /**
- * IssueRefundRequest.
+ * AddOrderNoteRequest.
  *
- * Payload for `POST orders/{order}/refunds` (engine spec §9.3). Amounts are
- * minor units in the order's currency; see
- * {@see \ArtisanPackUI\Ecommerce\Services\RefundService::issue()}.
+ * Payload for `POST orders/{order}/notes` (engine spec §9.3); see
+ * {@see \ArtisanPackUI\Ecommerce\Services\OrderNoteService::add()}.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -19,13 +18,15 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Services\OrderNoteService;
+
 /**
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
  *
  * @since      1.0.0
  */
-class IssueRefundRequest extends ApiFormRequest
+class AddOrderNoteRequest extends ApiFormRequest
 {
     /**
      * Rules shared with the matching GraphQL mutation.
@@ -37,12 +38,8 @@ class IssueRefundRequest extends ApiFormRequest
     public static function baseRules(): array
     {
         return [
-            'lines'                 => [ 'required', 'array', 'min:1' ],
-            'lines.*.order_item_id' => [ 'required', 'integer', 'min:1' ],
-            'lines.*.quantity'      => [ 'required', 'integer', 'min:0' ],
-            'lines.*.amount'        => [ 'required', 'integer', 'min:1' ],
-            'lines.*.restock'       => [ 'boolean' ],
-            'reason'                => [ 'nullable', 'string', 'max:500' ],
+            'body'                => [ 'required', 'string', 'max:' . OrderNoteService::MAX_BODY_LENGTH ],
+            'is_customer_visible' => [ 'boolean' ],
         ];
     }
 

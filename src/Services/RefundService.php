@@ -86,6 +86,9 @@ class RefundService
      *
      * - `order_item_id` (int, required)   — the line being refunded.
      * - `quantity`      (int, required)   — units being refunded on that line.
+     *                                        `0` makes an amount-only line (a
+     *                                        goodwill or shipping refund) that
+     *                                        returns no units and cannot restock.
      * - `amount`        (int, required)   — money value allocated to that line,
      *                                        in the order's payment currency.
      * - `restock`       (bool, optional)  — restore `quantity` units to the
@@ -343,9 +346,15 @@ class RefundService
             $quantity    = (int) $line['quantity'];
             $amount      = (int) $line['amount'];
 
-            if ( $quantity < 1 ) {
+            if ( $quantity < 0 ) {
                 throw new InvalidArgumentException(
-                    'RefundService refund line quantity must be a positive integer.',
+                    'RefundService refund line quantity must be zero or a positive integer.',
+                );
+            }
+
+            if ( 0 === $quantity && (bool) ( $line['restock'] ?? false ) ) {
+                throw new InvalidArgumentException(
+                    'RefundService amount-only refund lines (quantity 0) cannot restock.',
                 );
             }
 

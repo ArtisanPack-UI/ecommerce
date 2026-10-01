@@ -185,3 +185,29 @@ it( 'honours an optional Idempotency-Key', function (): void {
 
     expect( Cart::query()->count() )->toBe( 2 );
 } );
+
+it( 'cancels an order and adds a note through the order mutations', function (): void {
+    $order  = Order::factory()->create( [ 'payment_status' => 'paid', 'total_amount' => 1_000 ] );
+    $cancel = 'mutation ($input: CancelOrderInput!) { cancelOrder(input: $input) { order { system_status } errors { code message } } }';
+    $note   = 'mutation ($input: AddOrderNoteInput!) { addOrderNote(input: $input) { note { body is_customer_visible } errors { field code } } }';
+
+    $this->actingAs( ecommerceShopperUser(), 'sanctum' );
+    gql( $this, $cancel, [ 'input' => [ 'order_id' => $order->id, 'reason' => 'x' ] ] )->assertJsonPath( 'errors.0.extensions.code', 'FORBIDDEN' );
+
+    $this->actingAs( new Illuminate\Auth\GenericUser( [ 'id' => 1 ] ), 'sanctum' );
+
+    gql( $this, $note, [ 'input' => [ 'order_id' => $order->id, 'body' => 'Fragile', 'is_customer_visible' => true ] ] )
+        ->assertJsonMissingPath( 'errors' )
+        ->assertJsonPath( 'data.addOrderNote.note.body', 'Fragile' )
+        ->assertJsonPath( 'data.addOrderNote.note.is_customer_visible', true );
+
+    gql( $this, $note, [ 'input' => [ 'order_id' => $order->id, 'body' => str_repeat( 'a', 5_001 ) ] ] )
+        ->assertJsonPath( 'data.addOrderNote.errors.0.field', 'body' );
+
+    gql( $this, $cancel, [ 'input' => [ 'order_id' => $order->id, 'reason' => 'Customer asked' ] ] )
+        ->assertJsonMissingPath( 'errors' )
+        ->assertJsonPath( 'data.cancelOrder.order.system_status', 'cancelled' );
+
+    gql( $this, $cancel, [ 'input' => [ 'order_id' => $order->id, 'reason' => 'Again' ] ] )
+        ->assertJsonPath( 'data.cancelOrder.errors.0.code', 'order-not-cancellable' );
+} );

@@ -63,6 +63,8 @@ snake_case keys. Each mutation takes one `input` argument and returns
 | `updateCartItem` / `removeCartItem` | `PATCH` / `DELETE carts/{token}/items/{item}` |
 | `applyCoupon` / `removeCoupon` | `POST carts/{token}/coupons` / `DELETE carts/{token}/coupons/{code}` |
 | `issueRefund` | `POST orders/{order}/refunds` |
+| `cancelOrder` | `POST orders/{order}/cancel` |
+| `addOrderNote` | `POST orders/{order}/notes` |
 | `createWebhookSubscription` / `updateWebhookSubscription` / `deleteWebhookSubscription` / `replayWebhookDelivery` | `admin/webhook-subscriptions…` |
 | `updateNotificationTemplate` | `PATCH admin/notification-templates/{template}` |
 | `previewNotificationTemplate` (returns `rendered { subject body }`) | `POST admin/notification-templates/{template}/preview` |

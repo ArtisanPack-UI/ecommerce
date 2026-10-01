@@ -469,3 +469,33 @@ it( 'rejects direct updates and deletes on Refund and RefundItem rows', function
     expect( fn () => RefundItem::query()->where( 'refund_id', $refund->id )->delete() )
         ->toThrow( LogicException::class );
 } );
+
+it( 'records an amount-only line (quantity 0) without using up refundable units', function (): void {
+    $order = makeRefundableOrder( [ [ 'qty' => 1, 'unit' => 2_000 ] ] );
+    $order->update( [ 'shipping_amount' => 500, 'total_amount' => 2_500 ] );
+    $item = $order->items->first();
+
+    $refund = $this->service->issue( $order->fresh(), [
+        [ 'order_item_id' => $item->id, 'quantity' => 0, 'amount' => 500 ],
+    ], reason: 'Shipping refund' );
+
+    expect( $refund->amount )->toBe( 500 )
+        ->and( $refund->items->first()->quantity )->toBe( 0 )
+        ->and( $order->fresh()->payment_status )->toBe( 'partially_refunded' );
+
+    // The unit is still refundable afterwards.
+    $this->service->issue( $order->fresh(), [
+        [ 'order_item_id' => $item->id, 'quantity' => 1, 'amount' => 2_000 ],
+    ] );
+
+    expect( $order->fresh()->payment_status )->toBe( 'refunded' );
+} );
+
+it( 'refuses to restock an amount-only line', function (): void {
+    $order = makeRefundableOrder();
+    $item  = $order->items->first();
+
+    $this->service->issue( $order, [
+        [ 'order_item_id' => $item->id, 'quantity' => 0, 'amount' => 100, 'restock' => true ],
+    ] );
+} )->throws( InvalidArgumentException::class, 'cannot restock' );

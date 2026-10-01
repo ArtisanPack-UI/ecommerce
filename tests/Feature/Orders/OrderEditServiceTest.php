@@ -338,3 +338,51 @@ it( 'restores removed items during rollback', function (): void {
     expect( $restored->quantity )->toBe( 2 );
     expect( $rollback->order->subtotal_amount )->toBe( 1_000 + 1_000 );
 } );
+
+it( 'previews an edit without keeping it', function (): void {
+    Event::fake( [ OrderEdited::class ] );
+
+    $order = Order::factory()->create( [ 'subtotal_amount' => 2_000, 'total_amount' => 2_000 ] );
+    $item  = OrderItem::factory()->create( [ 'order_id' => $order->id, 'quantity' => 2, 'unit_price_amount' => 1_000, 'total_amount' => 2_000 ] );
+
+    $edited = 0;
+    addAction( 'ap.ecommerce.order.edited', function () use ( &$edited ): void {
+        $edited++;
+    } );
+
+    $preview = app( OrderEditService::class )->preview( $order, [
+        'items' => [ 'change' => [ $item->id => [ 'quantity' => 3 ] ] ],
+    ] );
+
+    expect( $preview['diff']['totals']['before']['total_amount'] )->toBe( 2_000 )
+        ->and( $preview['diff']['totals']['after']['total_amount'] )->toBe( 3_000 )
+        ->and( $preview['diff']['items']['changed'][ $item->id ]['quantity'] )->toBe( [ 'before' => 2, 'after' => 3 ] )
+        ->and( $preview['paymentActionRequired'] )->toBe( [ 'delta_amount' => 1_000, 'currency' => $order->currency ] )
+        ->and( $preview['refundDelta'] )->toBeNull();
+
+    expect( $item->fresh()->quantity )->toBe( 2 )
+        ->and( $order->fresh()->total_amount )->toBe( 2_000 )
+        ->and( OrderEdit::query()->count() )->toBe( 0 )
+        ->and( OrderTimelineEntry::query()->count() )->toBe( 0 )
+        ->and( $edited )->toBe( 0 );
+
+    Event::assertNotDispatched( OrderEdited::class );
+} );
+
+it( 'reports a refund delta when a preview lowers the total and rolls back added lines', function (): void {
+    $order = Order::factory()->create( [ 'subtotal_amount' => 2_000, 'total_amount' => 2_000 ] );
+    $item  = OrderItem::factory()->create( [ 'order_id' => $order->id, 'quantity' => 2, 'unit_price_amount' => 1_000, 'total_amount' => 2_000 ] );
+
+    $preview = app( OrderEditService::class )->preview( $order, [
+        'items' => [ 'remove' => [ $item->id ] ],
+    ] );
+
+    expect( $preview['refundDelta'] )->toBe( [ 'delta_amount' => 2_000, 'currency' => $order->currency ] )
+        ->and( OrderItem::query()->whereKey( $item->id )->exists() )->toBeTrue();
+} );
+
+it( 'refuses a preview the order state does not allow', function (): void {
+    $order = Order::factory()->create( [ 'fulfillment_status' => 'partial' ] );
+
+    app( OrderEditService::class )->preview( $order, [ 'email' => 'new@example.test' ] );
+} )->throws( OrderNotEditableException::class );
