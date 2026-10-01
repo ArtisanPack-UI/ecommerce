@@ -172,6 +172,11 @@ final class ResourceSchemas
                 'variants'   => [ 'ProductVariant', true, 'variants' ],
                 'prices'     => [ 'ProductPrice', true, 'prices' ],
                 'attributes' => [ 'ProductAttribute', true, 'productAttributes' ],
+                'categories' => [ 'ProductCategory', true, 'categories' ],
+                'tags'       => [ 'ProductTag', true, 'tags' ],
+                'images'     => [ 'ProductImage', true, 'images' ],
+                // Admin-only: members may be drafts the storefront must not see.
+                'children'   => [ 'ProductChild', true, 'children', true ],
             ] ),
 
             'ProductVariant' => self::schema( Resources\ProductVariantResource::class, Models\ProductVariant::class, 'A purchasable variant of a product.', [
@@ -220,6 +225,43 @@ final class ResourceSchemas
                 'label'                => 'String',
                 'swatch'               => 'String',
                 'position'             => 'Int',
+            ] ),
+
+            'ProductCategory' => self::schema( Resources\ProductCategoryResource::class, Models\ProductCategory::class, 'A node in the product category tree.', [
+                'parent_id'      => 'Int',
+                'name'           => 'String!',
+                'slug'           => 'String!',
+                'description'    => 'String',
+                'image_media_id' => 'Int',
+                'icon'           => 'String',
+                'position'       => 'Int',
+            ] + $timestamps, [
+                'parent'   => [ 'ProductCategory', false, 'parent' ],
+                'children' => [ 'ProductCategory', true, 'children' ],
+            ] ),
+
+            'ProductTag' => self::schema( Resources\ProductTagResource::class, Models\ProductTag::class, 'A flat product tag.', [
+                'name' => 'String!',
+                'slug' => 'String!',
+            ] + $timestamps ),
+
+            'ProductImage' => self::schema( Resources\ProductImageResource::class, Models\ProductImage::class, 'One image in a product gallery (media-library item or plain URL).', [
+                'product_id' => 'Int!',
+                'media_id'   => 'Int',
+                'image_url'  => 'String',
+                'alt_text'   => 'String',
+                'position'   => 'Int',
+            ] + $timestamps ),
+
+            'ProductChild' => self::schema( Resources\ProductChildResource::class, Models\ProductChild::class, 'A member of a grouped or bundled product.', [
+                'parent_product_id' => 'Int!',
+                'child_product_id'  => 'Int!',
+                'child_variant_id'  => 'Int',
+                'quantity'          => 'Int!',
+                'position'          => 'Int',
+            ] + $timestamps, [
+                'product' => [ 'Product', false, 'product' ],
+                'variant' => [ 'ProductVariant', false, 'variant' ],
             ] ),
 
             'Customer' => self::schema( Resources\CustomerResource::class, Models\Customer::class, 'A shopper record (guest or linked to a user).', [

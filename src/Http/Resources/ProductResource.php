@@ -86,6 +86,10 @@ class ProductResource extends EcommerceResource
             'variants'   => [ 'variants', ProductVariantResource::class ],
             'prices'     => [ 'prices', ProductPriceResource::class ],
             'attributes' => [ 'productAttributes', ProductAttributeResource::class ],
+            'categories' => [ 'categories', ProductCategoryResource::class ],
+            'tags'       => [ 'tags', ProductTagResource::class ],
+            'images'     => [ 'images', ProductImageResource::class ],
+            'children'   => [ 'children', ProductChildResource::class ],
         ];
     }
 }

@@ -24,6 +24,11 @@
  * | `replayWebhookDelivery`     | `POST admin/webhook-subscriptions/{sub}/replay/{id}`   |
  * | `updateNotificationTemplate`  | `PATCH admin/notification-templates/{template}`      |
  * | `previewNotificationTemplate` | `POST admin/notification-templates/{template}/preview` |
+ * | `createProduct` / `updateProduct` / `deleteProduct` | `POST` / `PATCH` / `DELETE admin/products[/{product}]` |
+ * | `createProductVariant` / `updateProductVariant` / `deleteProductVariant` | `admin/products/{product}/variants[/{variant}]` |
+ * | `createProductPrice` / `updateProductPrice` / `deleteProductPrice` | `admin/products/{product}/prices[/{price}]` |
+ * | `createCategory` / `updateCategory` / `deleteCategory` | `admin/product-categories[/{category}]` |
+ * | `createTag` / `updateTag` / `deleteTag` | `admin/product-tags[/{tag}]` |
  *
  * Inputs use the REST payload's snake_case keys. Expected failures
  * (validation, unknown product, bad coupon, refused refund) come back in
@@ -46,6 +51,7 @@ namespace ArtisanPackUI\Ecommerce\GraphQL\Fields;
 use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
 use ArtisanPackUI\Ecommerce\Exceptions\NotificationTemplateException;
 use ArtisanPackUI\Ecommerce\Exceptions\OrderNotCancellableException;
+use ArtisanPackUI\Ecommerce\Exceptions\ProductWriteException;
 use ArtisanPackUI\Ecommerce\Exceptions\RefundNotAllowedException;
 use ArtisanPackUI\Ecommerce\GraphQL\GraphQLError;
 use ArtisanPackUI\Ecommerce\GraphQL\Support\Resolvers;
@@ -57,6 +63,11 @@ use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CancelOrderRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CreateCartRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\IssueRefundRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\PreviewNotificationTemplateRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductCategoryRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductPriceRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductTagRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductVariantRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateCartItemRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateNotificationTemplateRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\WebhookSubscriptionRequest;
@@ -65,11 +76,19 @@ use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
 use ArtisanPackUI\Ecommerce\Models\NotificationTemplate;
 use ArtisanPackUI\Ecommerce\Models\Order;
+use ArtisanPackUI\Ecommerce\Models\Product;
+use ArtisanPackUI\Ecommerce\Models\ProductCategory;
+use ArtisanPackUI\Ecommerce\Models\ProductPrice;
+use ArtisanPackUI\Ecommerce\Models\ProductTag;
+use ArtisanPackUI\Ecommerce\Models\ProductVariant;
 use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
 use ArtisanPackUI\Ecommerce\Services\NotificationTemplateService;
 use ArtisanPackUI\Ecommerce\Services\OrderCancellationService;
 use ArtisanPackUI\Ecommerce\Services\OrderNoteService;
+use ArtisanPackUI\Ecommerce\Services\ProductCategoryService;
+use ArtisanPackUI\Ecommerce\Services\ProductService;
+use ArtisanPackUI\Ecommerce\Services\ProductTagService;
 use ArtisanPackUI\Ecommerce\Services\RefundService;
 use ArtisanPackUI\Ecommerce\Services\StorefrontCartService;
 use ArtisanPackUI\Ecommerce\Services\WebhookSubscriptionService;
@@ -181,6 +200,73 @@ class Mutations
                 'preview_data' => 'JSON',
             ] ),
             'PreviewNotificationTemplatePayload' => $output( [ 'rendered' => 'RenderedNotification' ] ),
+
+            'ProductPriceRowInput'         => [
+                'kind'   => 'input',
+                'fields' => [
+                    'currency'          => 'String!',
+                    'price_amount'      => 'BigInt!',
+                    'compare_at_amount' => 'BigInt',
+                    'cost_amount'       => 'BigInt',
+                    'starts_at'         => 'String',
+                    'ends_at'           => 'String',
+                ],
+            ],
+            'ProductImageRowInput'         => [
+                'kind'   => 'input',
+                'fields' => [ 'id' => 'ID', 'media_id' => 'Int', 'image_url' => 'String', 'alt_text' => 'String' ],
+            ],
+            'ProductChildRowInput'         => [
+                'kind'   => 'input',
+                'fields' => [ 'product_id' => 'ID!', 'variant_id' => 'ID', 'quantity' => 'Int' ],
+            ],
+            'CreateProductInput'           => $input( [ 'type' => 'String!', 'name' => 'String!' ] + $this->productFields() ),
+            'CreateProductPayload'         => $output( [ 'product' => 'Product' ] ),
+            'UpdateProductInput'           => $input( [ 'id' => 'ID!', 'type' => 'String', 'name' => 'String', 'stock_adjustment' => 'JSON' ] + $this->productFields() ),
+            'UpdateProductPayload'         => $output( [ 'product' => 'Product' ] ),
+            'DeleteProductInput'           => $input( [ 'id' => 'ID!' ] ),
+            'DeleteProductPayload'         => $output( [ 'deleted_id' => 'ID' ] ),
+            'CreateProductVariantInput'    => $input( [ 'product_id' => 'ID!' ] + $this->variantFields() ),
+            'CreateProductVariantPayload'  => $output( [ 'variant' => 'ProductVariant' ] ),
+            'UpdateProductVariantInput'    => $input( [ 'id' => 'ID!', 'stock_adjustment' => 'JSON' ] + $this->variantFields() ),
+            'UpdateProductVariantPayload'  => $output( [ 'variant' => 'ProductVariant' ] ),
+            'DeleteProductVariantInput'    => $input( [ 'id' => 'ID!' ] ),
+            'DeleteProductVariantPayload'  => $output( [ 'deleted_id' => 'ID' ] ),
+            'CreateProductPriceInput'      => $input( [
+                'product_id'         => 'ID!',
+                'product_variant_id' => 'ID',
+                'currency'           => 'String!',
+                'price_amount'       => 'BigInt!',
+                'compare_at_amount'  => 'BigInt',
+                'cost_amount'        => 'BigInt',
+                'starts_at'          => 'String',
+                'ends_at'            => 'String',
+            ] ),
+            'CreateProductPricePayload'    => $output( [ 'price' => 'ProductPrice' ] ),
+            'UpdateProductPriceInput'      => $input( [
+                'id'                => 'ID!',
+                'currency'          => 'String',
+                'price_amount'      => 'BigInt',
+                'compare_at_amount' => 'BigInt',
+                'cost_amount'       => 'BigInt',
+                'starts_at'         => 'String',
+                'ends_at'           => 'String',
+            ] ),
+            'UpdateProductPricePayload'    => $output( [ 'price' => 'ProductPrice' ] ),
+            'DeleteProductPriceInput'      => $input( [ 'id' => 'ID!' ] ),
+            'DeleteProductPricePayload'    => $output( [ 'deleted_id' => 'ID' ] ),
+            'CreateCategoryInput'          => $input( [ 'name' => 'String!' ] + $this->categoryFields() ),
+            'CreateCategoryPayload'        => $output( [ 'category' => 'ProductCategory' ] ),
+            'UpdateCategoryInput'          => $input( [ 'id' => 'ID!', 'name' => 'String' ] + $this->categoryFields() ),
+            'UpdateCategoryPayload'        => $output( [ 'category' => 'ProductCategory' ] ),
+            'DeleteCategoryInput'          => $input( [ 'id' => 'ID!' ] ),
+            'DeleteCategoryPayload'        => $output( [ 'deleted_id' => 'ID' ] ),
+            'CreateTagInput'               => $input( [ 'name' => 'String!', 'slug' => 'String' ] ),
+            'CreateTagPayload'             => $output( [ 'tag' => 'ProductTag' ] ),
+            'UpdateTagInput'               => $input( [ 'id' => 'ID!', 'name' => 'String', 'slug' => 'String' ] ),
+            'UpdateTagPayload'             => $output( [ 'tag' => 'ProductTag' ] ),
+            'DeleteTagInput'               => $input( [ 'id' => 'ID!' ] ),
+            'DeleteTagPayload'             => $output( [ 'deleted_id' => 'ID' ] ),
         ];
     }
 
@@ -405,6 +491,155 @@ class Mutations
                     ),
                 ];
             } ),
+
+            'createProduct' => $this->mutation( 'CreateProduct', function ( array $input, ResolveInfo $info ): array {
+                $this->catalog( 'create' );
+                $this->validate( $input, $this->required( ProductRequest::baseRules(), [ 'type', 'name' ] ) );
+
+                $product = $this->products()->create( $this->without( $input, [ 'clientMutationId', 'stock_adjustment' ] ) );
+
+                return [ 'product' => $this->r->present( $product, 'Product', $this->r->selection( $info, 'product' ), true ) ];
+            } ),
+
+            'updateProduct' => $this->mutation( 'UpdateProduct', function ( array $input, ResolveInfo $info ): array {
+                $this->catalog( 'update' );
+                $product = Product::query()->find( $input['id'] ) ?? throw GraphQLError::notFound();
+                $this->validate( $input, $this->sometimes( ProductRequest::baseRules() ) );
+
+                $this->products()->update( $product, $this->without( $input, [ 'clientMutationId', 'id' ] ) );
+
+                return [ 'product' => $this->r->present( $product->refresh(), 'Product', $this->r->selection( $info, 'product' ), true ) ];
+            } ),
+
+            'deleteProduct' => $this->mutation( 'DeleteProduct', function ( array $input ): array {
+                $this->catalog( 'delete' );
+                $product = Product::query()->find( $input['id'] ) ?? throw GraphQLError::notFound();
+
+                $this->products()->delete( $product );
+
+                return [ 'deleted_id' => $product->id ];
+            } ),
+
+            'createProductVariant' => $this->mutation( 'CreateProductVariant', function ( array $input, ResolveInfo $info ): array {
+                $this->catalog( 'update' );
+                $product = Product::query()->find( $input['product_id'] ) ?? throw GraphQLError::notFound();
+                $this->validate( $input, ProductVariantRequest::baseRules() );
+
+                $variant = $this->products()->createVariant( $product, $this->without( $input, [ 'clientMutationId', 'product_id', 'stock_adjustment' ] ) );
+
+                return [ 'variant' => $this->r->present( $variant, 'ProductVariant', $this->r->selection( $info, 'variant' ), true ) ];
+            } ),
+
+            'updateProductVariant' => $this->mutation( 'UpdateProductVariant', function ( array $input, ResolveInfo $info ): array {
+                $this->catalog( 'update' );
+                $variant = ProductVariant::query()->find( $input['id'] ) ?? throw GraphQLError::notFound();
+                $this->validate( $input, $this->sometimes( ProductVariantRequest::baseRules() ) );
+
+                $this->products()->updateVariant( $variant, $this->without( $input, [ 'clientMutationId', 'id' ] ) );
+
+                return [ 'variant' => $this->r->present( $variant->refresh(), 'ProductVariant', $this->r->selection( $info, 'variant' ), true ) ];
+            } ),
+
+            'deleteProductVariant' => $this->mutation( 'DeleteProductVariant', function ( array $input ): array {
+                $this->catalog( 'update' );
+                $variant = ProductVariant::query()->find( $input['id'] ) ?? throw GraphQLError::notFound();
+
+                $this->products()->deleteVariant( $variant );
+
+                return [ 'deleted_id' => $variant->id ];
+            } ),
+
+            'createProductPrice' => $this->mutation( 'CreateProductPrice', function ( array $input, ResolveInfo $info ): array {
+                $this->catalog( 'update' );
+                $product = Product::query()->find( $input['product_id'] ) ?? throw GraphQLError::notFound();
+                $this->validate( $input, $this->required( ProductPriceRequest::baseRules(), [ 'currency', 'price_amount' ] ) );
+                $this->products()->assertEditable( $product );
+
+                $priceable = empty( $input['product_variant_id'] )
+                    ? $product
+                    : ( ProductVariant::query()->where( 'product_id', $product->id )->find( $input['product_variant_id'] ) ?? throw GraphQLError::notFound() );
+
+                $price = $this->products()->upsertPrice( $priceable, $this->without( $input, [ 'clientMutationId', 'product_id', 'product_variant_id' ] ) );
+
+                return [ 'price' => $this->r->present( $price, 'ProductPrice', $this->r->selection( $info, 'price' ), true ) ];
+            } ),
+
+            'updateProductPrice' => $this->mutation( 'UpdateProductPrice', function ( array $input, ResolveInfo $info ): array {
+                $this->catalog( 'update' );
+                $price = ProductPrice::query()->find( $input['id'] ) ?? throw GraphQLError::notFound();
+                $this->validate( $input, $this->sometimes( ProductPriceRequest::baseRules() ) );
+                $this->assertPriceEditable( $price );
+
+                $this->products()->updatePrice( $price, $this->without( $input, [ 'clientMutationId', 'id' ] ) );
+
+                return [ 'price' => $this->r->present( $price->refresh(), 'ProductPrice', $this->r->selection( $info, 'price' ), true ) ];
+            } ),
+
+            'deleteProductPrice' => $this->mutation( 'DeleteProductPrice', function ( array $input ): array {
+                $this->catalog( 'update' );
+                $price = ProductPrice::query()->find( $input['id'] ) ?? throw GraphQLError::notFound();
+                $this->assertPriceEditable( $price );
+
+                $price->delete();
+
+                return [ 'deleted_id' => $price->id ];
+            } ),
+
+            'createCategory' => $this->mutation( 'CreateCategory', function ( array $input, ResolveInfo $info ): array {
+                $this->catalog( 'create' );
+                $this->validate( $input, $this->required( ProductCategoryRequest::baseRules(), [ 'name' ] ) );
+
+                $category = app( ProductCategoryService::class )->create( $this->without( $input, [ 'clientMutationId' ] ) );
+
+                return [ 'category' => $this->r->present( $category, 'ProductCategory', $this->r->selection( $info, 'category' ), true ) ];
+            } ),
+
+            'updateCategory' => $this->mutation( 'UpdateCategory', function ( array $input, ResolveInfo $info ): array {
+                $this->catalog( 'update' );
+                $category = ProductCategory::query()->find( $input['id'] ) ?? throw GraphQLError::notFound();
+                $this->validate( $input, $this->sometimes( ProductCategoryRequest::baseRules() ) );
+
+                app( ProductCategoryService::class )->update( $category, $this->without( $input, [ 'clientMutationId', 'id' ] ) );
+
+                return [ 'category' => $this->r->present( $category->refresh(), 'ProductCategory', $this->r->selection( $info, 'category' ), true ) ];
+            } ),
+
+            'deleteCategory' => $this->mutation( 'DeleteCategory', function ( array $input ): array {
+                $this->catalog( 'delete' );
+                $category = ProductCategory::query()->find( $input['id'] ) ?? throw GraphQLError::notFound();
+
+                app( ProductCategoryService::class )->delete( $category );
+
+                return [ 'deleted_id' => $category->id ];
+            } ),
+
+            'createTag' => $this->mutation( 'CreateTag', function ( array $input, ResolveInfo $info ): array {
+                $this->catalog( 'create' );
+                $this->validate( $input, $this->required( ProductTagRequest::baseRules(), [ 'name' ] ) );
+
+                $tag = app( ProductTagService::class )->create( $this->without( $input, [ 'clientMutationId' ] ) );
+
+                return [ 'tag' => $this->r->present( $tag, 'ProductTag', $this->r->selection( $info, 'tag' ), true ) ];
+            } ),
+
+            'updateTag' => $this->mutation( 'UpdateTag', function ( array $input, ResolveInfo $info ): array {
+                $this->catalog( 'update' );
+                $tag = ProductTag::query()->find( $input['id'] ) ?? throw GraphQLError::notFound();
+                $this->validate( $input, $this->sometimes( ProductTagRequest::baseRules() ) );
+
+                app( ProductTagService::class )->update( $tag, $this->without( $input, [ 'clientMutationId', 'id' ] ) );
+
+                return [ 'tag' => $this->r->present( $tag->refresh(), 'ProductTag', $this->r->selection( $info, 'tag' ), true ) ];
+            } ),
+
+            'deleteTag' => $this->mutation( 'DeleteTag', function ( array $input ): array {
+                $this->catalog( 'delete' );
+                $tag = ProductTag::query()->find( $input['id'] ) ?? throw GraphQLError::notFound();
+
+                app( ProductTagService::class )->delete( $tag );
+
+                return [ 'deleted_id' => $tag->id ];
+            } ),
         ];
     }
 
@@ -438,6 +673,8 @@ class Mutations
                 } catch ( OrderNotCancellableException $exception ) {
                     $payload = [ 'errors' => [ [ 'field' => null, 'code' => 'order-not-cancellable', 'message' => $exception->getMessage() ] ] ];
                 } catch ( NotificationTemplateException $exception ) {
+                    $payload = [ 'errors' => $exception->errors ];
+                } catch ( ProductWriteException $exception ) {
                     $payload = [ 'errors' => $exception->errors ];
                 }
 
@@ -624,6 +861,155 @@ class Mutations
     protected function sometimes( array $rules ): array
     {
         return array_map( static fn ( array $set ): array => [ 'sometimes', ...$set ], $rules );
+    }
+
+    /**
+     * Authorizes a catalog admin action (products, categories, and tags all
+     * use the `product` abilities) and applies the admin rate policy.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $action  Action name.
+     *
+     * @throws GraphQLError When not allowed.
+     *
+     * @return void
+     */
+    protected function catalog( string $action ): void
+    {
+        $this->r->authorize( 'product', $action );
+        $this->r->throttle( 'ecommerce.admin.mutate' );
+    }
+
+    /**
+     * Refuses a price write when its product's type is missing.
+     *
+     * @since 1.0.0
+     *
+     * @param  ProductPrice  $price  Price row.
+     *
+     * @throws ProductWriteException When the owning product is read-only.
+     *
+     * @return void
+     */
+    protected function assertPriceEditable( ProductPrice $price ): void
+    {
+        $owner   = $price->priceable;
+        $product = $owner instanceof ProductVariant ? $owner->product : $owner;
+
+        if ( $product instanceof Product ) {
+            $this->products()->assertEditable( $product );
+        }
+    }
+
+    /**
+     * Shared optional fields of the product inputs.
+     *
+     * @since 1.0.0
+     *
+     * @return array<string, string>
+     */
+    protected function productFields(): array
+    {
+        return [
+            'slug'                    => 'String',
+            'sku'                     => 'String',
+            'barcode'                 => 'String',
+            'description'             => 'String',
+            'short_description'       => 'String',
+            'status'                  => 'String',
+            'featured_image_media_id' => 'Int',
+            'featured_image_url'      => 'String',
+            'is_taxable'              => 'Boolean',
+            'tax_class_key'           => 'String',
+            'weight'                  => 'Float',
+            'weight_unit'             => 'String',
+            'length'                  => 'Float',
+            'width'                   => 'Float',
+            'height'                  => 'Float',
+            'dim_unit'                => 'String',
+            'meta'                    => 'JSON',
+            'published_at'            => 'String',
+            'prices'                  => '[ProductPriceRowInput!]',
+            'category_ids'            => '[ID!]',
+            'tag_ids'                 => '[ID!]',
+            'images'                  => '[ProductImageRowInput!]',
+            'attributes'              => 'JSON',
+            'children'                => '[ProductChildRowInput!]',
+            'inventory'               => 'JSON',
+        ];
+    }
+
+    /**
+     * Shared optional fields of the variant inputs.
+     *
+     * @since 1.0.0
+     *
+     * @return array<string, string>
+     */
+    protected function variantFields(): array
+    {
+        return [
+            'sku'            => 'String',
+            'barcode'        => 'String',
+            'name'           => 'String',
+            'image_media_id' => 'Int',
+            'weight'         => 'Float',
+            'weight_unit'    => 'String',
+            'length'         => 'Float',
+            'width'          => 'Float',
+            'height'         => 'Float',
+            'dim_unit'       => 'String',
+            'position'       => 'Int',
+            'meta'           => 'JSON',
+            'option_values'  => 'JSON',
+            'prices'         => '[ProductPriceRowInput!]',
+            'inventory'      => 'JSON',
+        ];
+    }
+
+    /**
+     * Shared optional fields of the category inputs.
+     *
+     * @since 1.0.0
+     *
+     * @return array<string, string>
+     */
+    protected function categoryFields(): array
+    {
+        return [
+            'parent_id'      => 'ID',
+            'slug'           => 'String',
+            'description'    => 'String',
+            'image_media_id' => 'Int',
+            'icon'           => 'String',
+            'position'       => 'Int',
+        ];
+    }
+
+    /**
+     * `$input` without the listed keys.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<string, mixed>  $input  Input.
+     * @param  array<int, string>    $keys   Keys to drop.
+     *
+     * @return array<string, mixed>
+     */
+    protected function without( array $input, array $keys ): array
+    {
+        return array_diff_key( $input, array_flip( $keys ) );
+    }
+
+    /**
+     * @since 1.0.0
+     *
+     * @return ProductService
+     */
+    protected function products(): ProductService
+    {
+        return app( ProductService::class );
     }
 
     /**

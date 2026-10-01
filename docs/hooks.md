@@ -174,8 +174,20 @@ Event types and payloads are listed in [activity-log.md](activity-log.md#event-t
 
 ## Products and search
 
+The lifecycle hooks fire from the models, so they run for every write path
+(`ProductService`, imports, raw Eloquent). All but `.saving` run once the
+surrounding database transaction commits (immediately when there is none).
+See [products.md](products.md).
+
 | Hook | Type | Arguments | Returns | Fired in |
 |---|---|---|---|---|
+| `ap.ecommerce.product.saving` | action | `Product $product` | | `Models/Product` (Eloquent `saving`) |
+| `ap.ecommerce.product.saved` | action | `Product $product` | | `Models/Product` (Eloquent `saved`) |
+| `ap.ecommerce.product.published` | action | `Product $product`. Fires when a product is created as, or changes to, `active`. | | `Models/Product` |
+| `ap.ecommerce.product.unpublished` | action | `Product $product`. Fires when status changes from `active` to anything else (`draft` or `archived`), i.e. the product leaves the storefront. | | `Models/Product` |
+| `ap.ecommerce.product.deleted` | action | `Product $product` | | `Models/Product` (Eloquent `deleted`) |
+| `ap.ecommerce.variant.saved` | action | `ProductVariant $variant`, `Product $product` | | `Models/ProductVariant` (Eloquent `saved`) |
+| `ap.ecommerce.product.listQuery` | filter | `Builder $query`, `array $filters` | `Builder` | Not fired by the engine; admin list screens apply it to their product query so satellites can add filters. |
 | `ap.ecommerce.product.searchableData` | filter | `array $data` (Scout document: `id`, `name`, `slug`, `sku`, …), `Product $product` | `array` | `Models/Product::toSearchableArray()` |
 
 ## Reviews

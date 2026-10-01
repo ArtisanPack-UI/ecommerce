@@ -51,8 +51,16 @@ use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderNoteController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderRefundController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderShipmentController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderTimelineController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductAdminController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductAttributeController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductCategoryController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductImageController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductLinkController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductPriceController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductReviewController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductTagController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductVariantController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\PromotionController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ReviewController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\SearchController;
@@ -186,7 +194,67 @@ Route::prefix( 'kanban' )
         Route::get( 'triggers', [ KanbanCatalogController::class, 'triggers' ] )->middleware( $admin( 'kanbanBoard', 'viewAny' ) )->name( 'triggers.index' );
     } );
 
-Route::prefix( 'admin' )->name( 'admin.' )->group( function () use ( $admin ): void {
+Route::prefix( 'admin' )->name( 'admin.' )->group( function () use ( $admin, $auth ): void {
+    // Catalog (engine spec §9.5): products and everything hanging off them.
+    Route::where( [ 'product' => '[0-9]+', 'variant' => '[0-9]+', 'price' => '[0-9]+', 'image' => '[0-9]+', 'attribute' => '[0-9]+', 'category' => '[0-9]+', 'tag' => '[0-9]+' ] )->group( function () use ( $admin, $auth ): void {
+        Route::get( 'products', [ ProductAdminController::class, 'index' ] )->middleware( $admin( 'product', 'viewAny' ) )->name( 'products.index' );
+        Route::post( 'products', [ ProductAdminController::class, 'store' ] )->middleware( $admin( 'product', 'create', true ) )->name( 'products.store' );
+        Route::get( 'products/{product}', [ ProductAdminController::class, 'show' ] )->middleware( $admin( 'product', 'view' ) )->name( 'products.show' );
+        Route::patch( 'products/{product}', [ ProductAdminController::class, 'update' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.update' );
+        Route::delete( 'products/{product}', [ ProductAdminController::class, 'destroy' ] )->middleware( $admin( 'product', 'delete', true ) )->name( 'products.destroy' );
+
+        Route::post( 'products/{product}/variants', [ ProductVariantController::class, 'store' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.variants.store' );
+        Route::post( 'products/{product}/variants/generate', [ ProductVariantController::class, 'generate' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.variants.generate' );
+        Route::post( 'products/{product}/variants/reorder', [ ProductVariantController::class, 'reorder' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.variants.reorder' );
+        Route::patch( 'products/{product}/variants/{variant}', [ ProductVariantController::class, 'update' ] )
+            ->scopeBindings()
+            ->middleware( $admin( 'product', 'update', true ) )
+            ->name( 'products.variants.update' );
+        Route::delete( 'products/{product}/variants/{variant}', [ ProductVariantController::class, 'destroy' ] )
+            ->scopeBindings()
+            ->middleware( $admin( 'product', 'update', true ) )
+            ->name( 'products.variants.destroy' );
+
+        Route::post( 'products/{product}/prices', [ ProductPriceController::class, 'store' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.prices.store' );
+        Route::patch( 'products/{product}/prices/{price}', [ ProductPriceController::class, 'update' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.prices.update' );
+        Route::delete( 'products/{product}/prices/{price}', [ ProductPriceController::class, 'destroy' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.prices.destroy' );
+
+        Route::post( 'products/{product}/images', [ ProductImageController::class, 'store' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.images.store' );
+        Route::post( 'products/{product}/images/reorder', [ ProductImageController::class, 'reorder' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.images.reorder' );
+        Route::patch( 'products/{product}/images/{image}', [ ProductImageController::class, 'update' ] )
+            ->scopeBindings()
+            ->middleware( $admin( 'product', 'update', true ) )
+            ->name( 'products.images.update' );
+        Route::delete( 'products/{product}/images/{image}', [ ProductImageController::class, 'destroy' ] )
+            ->scopeBindings()
+            ->middleware( $admin( 'product', 'update', true ) )
+            ->name( 'products.images.destroy' );
+
+        Route::post( 'products/{product}/attributes', [ ProductAttributeController::class, 'store' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.attributes.store' );
+        Route::patch( 'products/{product}/attributes/{attribute}', [ ProductAttributeController::class, 'update' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.attributes.update' );
+        Route::delete( 'products/{product}/attributes/{attribute}', [ ProductAttributeController::class, 'destroy' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.attributes.destroy' );
+
+        Route::post( 'products/{product}/categories', [ ProductLinkController::class, 'categories' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.categories' );
+        Route::post( 'products/{product}/tags', [ ProductLinkController::class, 'tags' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.tags' );
+        Route::post( 'products/{product}/children', [ ProductLinkController::class, 'children' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.children' );
+        Route::post( 'products/{product}/stock', [ ProductLinkController::class, 'stock' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.stock' );
+
+        Route::get( 'product-categories', [ ProductCategoryController::class, 'index' ] )->middleware( $admin( 'product', 'viewAny' ) )->name( 'product-categories.index' );
+        Route::post( 'product-categories', [ ProductCategoryController::class, 'store' ] )->middleware( $admin( 'product', 'create', true ) )->name( 'product-categories.store' );
+        Route::post( 'product-categories/reorder', [ ProductCategoryController::class, 'reorder' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'product-categories.reorder' );
+        Route::patch( 'product-categories/{category}', [ ProductCategoryController::class, 'update' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'product-categories.update' );
+        Route::delete( 'product-categories/{category}', [ ProductCategoryController::class, 'destroy' ] )->middleware( $admin( 'product', 'delete', true ) )->name( 'product-categories.destroy' );
+
+        Route::get( 'product-tags', [ ProductTagController::class, 'index' ] )->middleware( $admin( 'product', 'viewAny' ) )->name( 'product-tags.index' );
+        Route::post( 'product-tags', [ ProductTagController::class, 'store' ] )->middleware( $admin( 'product', 'create', true ) )->name( 'product-tags.store' );
+        Route::patch( 'product-tags/{tag}', [ ProductTagController::class, 'update' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'product-tags.update' );
+        Route::delete( 'product-tags/{tag}', [ ProductTagController::class, 'destroy' ] )->middleware( $admin( 'product', 'delete', true ) )->name( 'product-tags.destroy' );
+        // Merging deletes the source tag, so it needs product.delete as well as product.update.
+        Route::post( 'product-tags/{tag}/merge', [ ProductTagController::class, 'merge' ] )
+            ->middleware( array_merge( $auth, [ 'ecommerce.can:product,update', 'ecommerce.can:product,delete', 'ecommerce.rate-limit:ecommerce.admin.mutate', 'ecommerce.idempotency' ] ) )
+            ->name( 'product-tags.merge' );
+    } );
+
     // Inventory.
     Route::get( 'inventory', [ InventoryController::class, 'index' ] )->middleware( $admin( 'product', 'viewAny' ) )->name( 'inventory.index' );
 

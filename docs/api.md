@@ -297,6 +297,27 @@ All of these use the `admin.mutate` rate policy.
 
 | Method | Path | Ability | Idem. |
 |---|---|---|---|
+| `GET` | `admin/products`, `admin/products/{product}` (any status) | `product.viewAny` / `product.view` | |
+| `POST` | `admin/products` | `product.create` | yes |
+| `PATCH` / `DELETE` | `admin/products/{product}` | `product.update` / `product.delete` | yes |
+| `POST` | `admin/products/{product}/variants` | `product.update` | yes |
+| `PATCH` / `DELETE` | `admin/products/{product}/variants/{variant}` | `product.update` | yes |
+| `POST` | `admin/products/{product}/variants/generate`, `…/variants/reorder` | `product.update` | yes |
+| `POST` | `admin/products/{product}/prices` (upsert; `product_variant_id` targets a variant) | `product.update` | yes |
+| `PATCH` / `DELETE` | `admin/products/{product}/prices/{price}` | `product.update` | yes |
+| `POST` | `admin/products/{product}/images`, `…/images/reorder` | `product.update` | yes |
+| `PATCH` / `DELETE` | `admin/products/{product}/images/{image}` | `product.update` | yes |
+| `POST` | `admin/products/{product}/attributes` | `product.update` | yes |
+| `PATCH` / `DELETE` | `admin/products/{product}/attributes/{attribute}` | `product.update` | yes |
+| `POST` | `admin/products/{product}/categories`, `…/tags` (`{ ids, mode: sync\|attach\|detach }`) | `product.update` | yes |
+| `POST` | `admin/products/{product}/children` (`{ children: [...] }`) | `product.update` | yes |
+| `POST` | `admin/products/{product}/stock` (`{ delta, reason, product_variant_id? }`) | `product.update` | yes |
+| `GET` / `POST` | `admin/product-categories` | `product.viewAny` / `product.create` | POST |
+| `PATCH` / `DELETE` | `admin/product-categories/{category}` | `product.update` / `product.delete` | yes |
+| `POST` | `admin/product-categories/reorder` (`{ parent_id, ids }`) | `product.update` | yes |
+| `GET` / `POST` | `admin/product-tags` | `product.viewAny` / `product.create` | POST |
+| `PATCH` / `DELETE` | `admin/product-tags/{tag}` | `product.update` / `product.delete` | yes |
+| `POST` | `admin/product-tags/{tag}/merge` (`{ target_id }`) | `product.update` and `product.delete` | yes |
 | `GET` | `admin/inventory` | `product.viewAny` | |
 | `GET` | `admin/activity/products/{product}` | `product.view` | |
 | `GET` | `admin/activity/customers/{customer}` | `customer.view` | |
@@ -326,15 +347,20 @@ All of these use the `admin.mutate` rate policy.
 | `PATCH` / `DELETE` | `admin/webhook-subscriptions/{subscription}` | `webhookSubscription.update` / `.delete` | yes |
 | `POST` | `admin/webhook-subscriptions/{subscription}/replay/{delivery}` | `webhookSubscription.update` | yes |
 
-Topic guides: [kanban.md](kanban.md), [reviews.md](reviews.md),
+Catalog writes refused by `ProductService` (a taken slug or SKU, an unknown
+type, a bundle that would loop, …) come back as a 422 `product-write-failed`
+problem whose `errors` name the field and a code; see [products.md](products.md).
+
+Topic guides: [products.md](products.md), [kanban.md](kanban.md), [reviews.md](reviews.md),
 [digital-delivery.md](digital-delivery.md), [notifications.md](notifications.md),
 [webhooks.md](webhooks.md), [search.md](search.md),
 [activity-log.md](activity-log.md).
 
 > **Not in 1.0.0:** the parent plan's checkout endpoints (engine spec §9.2,
-> e.g. `POST /checkout/finalize`) and admin product/inventory writes (§9.5–9.6).
-> Products are managed through the Eloquent models, or by an admin satellite,
-> for now. See the [README quick-start](../README.md#quick-start-from-composer-require-to-a-first-order).
+> e.g. `POST /checkout/finalize`) and the admin inventory writes (§9.6). Stock
+> changes go through `ProductService::adjustStock()` or
+> `POST admin/products/{product}/stock`. See the
+> [README quick-start](../README.md#quick-start-from-composer-require-to-a-first-order).
 
 ### Inbound payment webhooks
 

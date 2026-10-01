@@ -19,7 +19,13 @@ With `artisanpack.ecommerce.digital.auto_issue` on (the default), the engine
 issues entitlements when `ap.ecommerce.payment.succeeded` fires. Each one
 gets `digital.download_limit` downloads (default 5) and lasts
 `digital.download_expiry_days` days (default 30). Set either to 0 to remove
-that cap. The customer then gets the `digital.download-ready.customer` email
+that cap. A product can override both in its meta, where 0 also means no cap:
+
+```json
+{ "digital": { "download_limit": 3, "download_expiry_days": 30 } }
+```
+
+The customer then gets the `digital.download-ready.customer` email
 with their links and license keys. Issuing is idempotent per order line and
 file, and runs under a lock on the order, so a replayed or concurrent payment
 webhook doesn't issue anything twice.

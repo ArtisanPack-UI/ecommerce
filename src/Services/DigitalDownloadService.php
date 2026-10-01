@@ -96,22 +96,7 @@ class DigitalDownloadService
      */
     public function issue( OrderItem $item, DigitalFile $file, ?int $downloads = null, ?DateTimeInterface $expiresAt = null ): DigitalDownload
     {
-        $plainToken = Str::random( self::TOKEN_LENGTH );
-
-        $download = DigitalDownload::query()->create( [
-            'order_item_id'       => $item->id,
-            'digital_file_id'     => $file->id,
-            'token'               => DigitalDownload::hashToken( $plainToken ),
-            'downloads_remaining' => $downloads ?? $this->defaultLimit(),
-            'expires_at'          => $expiresAt ?? $this->defaultExpiry(),
-        ] );
-
-        $download->plainToken = $plainToken;
-
-        doAction( 'ap.ecommerce.digital.tokenIssued', $download, $item );
-        Event::dispatch( new DigitalDownloadTokenIssued( $download, $item ) );
-
-        return $download;
+        return $this->createDownload( $item, $file, $downloads ?? $this->defaultLimit(), $expiresAt ?? $this->defaultExpiry() );
     }
 
     /**
@@ -132,9 +117,11 @@ class DigitalDownloadService
         foreach ( $order->items()->get() as $item ) {
             $existing = $item->digitalDownloads()->pluck( 'digital_file_id' )->all();
 
+            [ $downloads, $expiresAt ] = $this->productLimits( $item );
+
             foreach ( $this->filesFor( $item ) as $file ) {
                 if ( ! in_array( $file->id, $existing, true ) ) {
-                    $issued[] = $this->issue( $item, $file );
+                    $issued[] = $this->createDownload( $item, $file, $downloads, $expiresAt );
                 }
             }
         }
@@ -245,6 +232,39 @@ class DigitalDownloadService
     }
 
     /**
+     * Stores an entitlement with exactly the given quota and expiry (null
+     * meaning unlimited / never) and fires the issued hooks.
+     *
+     * @since 1.0.0
+     *
+     * @param  OrderItem               $item       Order line.
+     * @param  DigitalFile             $file       File.
+     * @param  int|null                $downloads  Quota (null = unlimited).
+     * @param  DateTimeInterface|null  $expiresAt  Expiry (null = never).
+     *
+     * @return DigitalDownload
+     */
+    protected function createDownload( OrderItem $item, DigitalFile $file, ?int $downloads, ?DateTimeInterface $expiresAt ): DigitalDownload
+    {
+        $plainToken = Str::random( self::TOKEN_LENGTH );
+
+        $download = DigitalDownload::query()->create( [
+            'order_item_id'       => $item->id,
+            'digital_file_id'     => $file->id,
+            'token'               => DigitalDownload::hashToken( $plainToken ),
+            'downloads_remaining' => $downloads,
+            'expires_at'          => $expiresAt,
+        ] );
+
+        $download->plainToken = $plainToken;
+
+        doAction( 'ap.ecommerce.digital.tokenIssued', $download, $item );
+        Event::dispatch( new DigitalDownloadTokenIssued( $download, $item ) );
+
+        return $download;
+    }
+
+    /**
      * Why `$download` can't be redeemed right now, if it can't.
      *
      * @since 1.0.0
@@ -332,6 +352,29 @@ class DigitalDownloadService
             'user_agent'          => Str::limit( (string) $request->userAgent(), 1_000, '' ),
             'event_type'          => $type,
         ] );
+    }
+
+    /**
+     * The line's quota and expiry: the product's
+     * `meta.digital.download_limit` / `meta.digital.download_expiry_days`
+     * when set (`0` meaning no cap), else the configured defaults.
+     *
+     * @since 1.0.0
+     *
+     * @param  OrderItem  $item  Order line.
+     *
+     * @return array{0: int|null, 1: DateTimeInterface|null}
+     */
+    protected function productLimits( OrderItem $item ): array
+    {
+        $settings = (array) ( $item->product?->meta['digital'] ?? [] );
+        $limit    = $settings['download_limit'] ?? null;
+        $days     = $settings['download_expiry_days'] ?? null;
+
+        return [
+            is_numeric( $limit ) ? ( (int) $limit > 0 ? (int) $limit : null ) : $this->defaultLimit(),
+            is_numeric( $days ) ? ( (int) $days > 0 ? now()->addDays( (int) $days ) : null ) : $this->defaultExpiry(),
+        ];
     }
 
     /**

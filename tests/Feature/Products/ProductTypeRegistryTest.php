@@ -86,6 +86,6 @@ it( 'rejects a class that does not implement ProductType', function (): void {
 it( 'lists all registered types and their keys', function (): void {
     $registry = $this->app->make( ProductTypeRegistry::class );
 
-    expect( $registry->keys() )->toContain( 'simple', 'digital' );
-    expect( $registry->all() )->toHaveKeys( [ 'simple', 'digital' ] );
+    expect( $registry->keys() )->toContain( 'simple', 'digital', 'variable', 'grouped', 'bundled' );
+    expect( $registry->all() )->toHaveKeys( [ 'simple', 'digital', 'variable', 'grouped', 'bundled' ] );
 } );

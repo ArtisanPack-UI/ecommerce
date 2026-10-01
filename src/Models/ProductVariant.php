@@ -23,6 +23,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Support\Facades\DB;
 
 /**
  * ProductVariant Eloquent model.
@@ -109,6 +110,37 @@ class ProductVariant extends Model
     public function optionValues(): HasMany
     {
         return $this->hasMany( ProductVariantOptionValue::class );
+    }
+
+    /**
+     * Stock rows for this variant.
+     *
+     * @since 1.0.0
+     *
+     * @return MorphMany<InventoryItem, $this>
+     */
+    public function inventoryItems(): MorphMany
+    {
+        return $this->morphMany( InventoryItem::class, 'stockable' );
+    }
+
+    /**
+     * Fires `ap.ecommerce.variant.saved` (engine spec §6.9) on every save,
+     * once the surrounding transaction commits.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected static function booted(): void
+    {
+        static::saved( static function ( ProductVariant $variant ): void {
+            $product = $variant->relationLoaded( 'product' ) ? $variant->product : $variant->product()->first();
+
+            if ( null !== $product ) {
+                DB::afterCommit( static fn () => doAction( 'ap.ecommerce.variant.saved', $variant, $product ) );
+            }
+        } );
     }
 
     /**
