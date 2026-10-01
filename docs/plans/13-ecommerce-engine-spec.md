@@ -349,6 +349,30 @@ CREATE TABLE product_images (
 );
 ```
 
+### 3.10a `product_children`
+
+Members of a `grouped` or `bundled` product (engine issue #139). A grouped product is a storefront listing whose children are bought individually; a bundled product is sold as one line at its own price and copies its members into the order snapshot.
+
+```sql
+CREATE TABLE product_children (
+    id                 BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    parent_product_id  BIGINT UNSIGNED NOT NULL,                          -- the grouped / bundled product
+    child_product_id   BIGINT UNSIGNED NOT NULL,
+    child_variant_id   BIGINT UNSIGNED NULL,                              -- optional: pins one variant of the child
+    quantity           INT UNSIGNED NOT NULL DEFAULT 1,
+    position           INT UNSIGNED NOT NULL DEFAULT 0,
+    created_at         TIMESTAMP NULL,
+    updated_at         TIMESTAMP NULL,
+    KEY product_children_parent_idx (parent_product_id),
+    KEY product_children_child_idx  (child_product_id),
+    CONSTRAINT product_children_parent_fk  FOREIGN KEY (parent_product_id) REFERENCES products(id)         ON DELETE CASCADE,
+    CONSTRAINT product_children_child_fk   FOREIGN KEY (child_product_id)  REFERENCES products(id)         ON DELETE CASCADE,
+    CONSTRAINT product_children_variant_fk FOREIGN KEY (child_variant_id)  REFERENCES product_variants(id) ON DELETE CASCADE
+);
+```
+
+`ProductService::syncChildren()` enforces the rules the schema can't: only `grouped` / `bundled` types (or a satellite type registered with `has_children => true`) have children, a product can't contain itself, a (product, variant) pair appears once, and a product can't contain anything that already contains it (no cycles at any depth).
+
 ### 3.11 `inventory_items`
 
 ```sql
@@ -1186,7 +1210,7 @@ CREATE TABLE ecommerce_satellites (
 
 Migrations run in dependency order to satisfy FK constraints:
 
-1. `products` (and its sub-tables: `product_prices`, `product_variants`, `product_attributes`, `product_attribute_values`, `product_variant_option_values`, `product_categories`, `product_category_product`, `product_tags`, `product_tag_product`, `product_images`)
+1. `products` (and its sub-tables: `product_prices`, `product_variants`, `product_attributes`, `product_attribute_values`, `product_variant_option_values`, `product_categories`, `product_category_product`, `product_tags`, `product_tag_product`, `product_images`, `product_children`)
 2. `tax_classes`, `tax_rates`
 3. `shipping_zones`, `shipping_methods`
 4. `customers`, `customer_addresses`, `customer_claim_attempts`
@@ -1671,7 +1695,7 @@ All registries live under `ArtisanPackUI\Ecommerce\Registries\` and are bound as
 
 | # | Registry | Container binding | Registers implementations of | Notes / default entries |
 |---|---|---|---|---|
-| 1 | `ProductTypeRegistry` | `ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry` | `Contracts\ProductType` | Core registers: `simple`, `variable`, `digital`, `grouped`, `bundled`. |
+| 1 | `ProductTypeRegistry` | `ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry` | `Contracts\ProductType` | Core registers: `simple`, `variable`, `digital`, `grouped`, `bundled`. `variable` needs a `variant_id` per cart line; `grouped` is never a cart line; `bundled` children live in §3.10a. |
 | 2 | `PaymentGatewayRegistry` | `ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry` | `Contracts\PaymentGateway` | Core registers `stripe`. |
 | 3 | `ShippingRateProviderRegistry` | `ArtisanPackUI\Ecommerce\Registries\ShippingRateProviderRegistry` | `Contracts\ShippingRateProvider` | Core registers the built-in method drivers (`flat-rate`, `free-shipping`, `local-pickup`, `weight-based`, `price-based`) as internal rate providers. Carrier providers ship as satellites. |
 | 4 | `ShippingLabelProviderRegistry` | `ArtisanPackUI\Ecommerce\Registries\ShippingLabelProviderRegistry` | `Contracts\ShippingLabelProvider` | Empty by default; populated by `shipping-labels-*` satellites. |
@@ -2440,3 +2464,4 @@ Authorization: `EcommerceChannelPolicy` gates all three.
 
 - **2026-09-06** — Draft v0.1. Initial authoring against parent plan v2.
 - **2026-09-29** — Phase 5: `NotificationTemplate` gains `category()`, `defaultSubject()`, and `defaultBody()` (the catalog needs a preference category and shipped copy); `digitalFile` gains `viewAny` for `GET admin/digital-files`; `LicenseActivated` event added for new license activations. The §10 GraphQL fields for reviews, licenses, digital files, and notification preferences are deferred; the notification-template fields shipped.
+- **2026-10-01** — Catalog writes (#139): `ProductService` / `ProductCategoryService` / `ProductTagService` are the one write path for products, variants, prices, images, attributes, categories, tags, and stock; §9.5 admin REST endpoints and the §10.3 catalog mutations ship; `product_children` (§3.10a) stores grouped/bundled members; core now registers `variable`, `grouped`, and `bundled`; the §6.9 product lifecycle hooks fire from the models; digital products may override the download limit and expiry in `meta.digital`.

@@ -9,7 +9,7 @@ so all three admin families can render the same "who changed what, when".
 
 | Source | What it records |
 |---|---|
-| `Listeners\RecordModelActivity` (Eloquent observer) | Creates, updates, and deletes of `Product`, `ProductVariant`, `ProductPrice`, `Customer`, `Promotion`, and `Coupon`. These writes have no engine service yet, so the observer is the one place every write passes through. |
+| `Listeners\RecordModelActivity` (Eloquent observer) | Creates, updates, and deletes of `Product`, `ProductVariant`, `ProductPrice`, `Customer`, `Promotion`, and `Coupon`. Product writes go through `ProductService`, but the observer still records them, so raw Eloquent writes and imports are logged too. |
 | `Services\InventoryService::adjust()` | Every stock adjustment, with its delta and reason. |
 | `Services\CustomerNoteService` | Adding and deleting customer notes. |
 | `Services\ActivityLogService::record()` | Anything else — satellites can record their own event types against a product, customer, or promotion. |

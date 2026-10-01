@@ -38,6 +38,7 @@ use ArtisanPackUI\Ecommerce\CurrencyRates\FrankfurterRateProvider;
 use ArtisanPackUI\Ecommerce\Ecommerce;
 use ArtisanPackUI\Ecommerce\Events\KanbanCardMoved;
 use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
+use ArtisanPackUI\Ecommerce\Exceptions\ProductWriteException;
 use ArtisanPackUI\Ecommerce\Fulfillment\ProportionalByLineTotalStrategy;
 use ArtisanPackUI\Ecommerce\Gateways\Stripe\StripeGateway;
 use ArtisanPackUI\Ecommerce\GraphQL\EcommerceSchema;
@@ -111,8 +112,11 @@ use ArtisanPackUI\Ecommerce\Policies\ReviewPolicy;
 use ArtisanPackUI\Ecommerce\Policies\ShippingZonePolicy;
 use ArtisanPackUI\Ecommerce\Policies\TaxRatePolicy;
 use ArtisanPackUI\Ecommerce\Policies\WebhookSubscriptionPolicy;
+use ArtisanPackUI\Ecommerce\ProductTypes\BundledProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\DigitalProductType;
+use ArtisanPackUI\Ecommerce\ProductTypes\GroupedProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType;
+use ArtisanPackUI\Ecommerce\ProductTypes\VariableProductType;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\AddFreeItemAction;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\BuyXGetYAction;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\FixedOffCartAction;
@@ -574,6 +578,24 @@ class EcommerceServiceProvider extends ServiceProvider
             DigitalProductType::class,
             [ 'label' => __( 'Digital product' ), 'icon' => 'hero-arrow-down-tray' ],
         );
+
+        $registry->register(
+            VariableProductType::KEY,
+            VariableProductType::class,
+            [ 'label' => __( 'Variable product' ), 'icon' => 'hero-squares-2x2' ],
+        );
+
+        $registry->register(
+            GroupedProductType::KEY,
+            GroupedProductType::class,
+            [ 'label' => __( 'Grouped product' ), 'icon' => 'hero-rectangle-group' ],
+        );
+
+        $registry->register(
+            BundledProductType::KEY,
+            BundledProductType::class,
+            [ 'label' => __( 'Bundled product' ), 'icon' => 'hero-gift' ],
+        );
     }
 
     /**
@@ -1011,6 +1033,14 @@ class EcommerceServiceProvider extends ServiceProvider
             $handler->renderable( static function ( AuthenticationException $e, $request ) {
                 return $request->routeIs( 'ecommerce.api.*' )
                     ? Problem::make( 401, 'unauthenticated', __( 'Unauthenticated' ), __( 'Authentication is required.' ), $request )
+                    : null;
+            } );
+
+            // Catalog writes refused by ProductService and friends (taken
+            // slug or SKU, unknown type, bundle loops, …).
+            $handler->renderable( static function ( ProductWriteException $e, $request ) {
+                return $request->routeIs( 'ecommerce.api.*' )
+                    ? Problem::make( 422, 'product-write-failed', __( 'Catalog change refused' ), $e->getMessage(), $request, $e->errors )
                     : null;
             } );
 

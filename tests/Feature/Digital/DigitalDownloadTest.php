@@ -284,6 +284,24 @@ it( 'issues downloads for every digital file on a paid order, once', function ()
         ->and( DigitalDownload::query()->count() )->toBe( 2 );
 } );
 
+it( 'uses the product\'s own download limit and expiry, where 0 means no cap', function ( array $digital, ?int $remaining, bool $expires ): void {
+    config( [ 'artisanpack.ecommerce.digital.download_limit' => 5, 'artisanpack.ecommerce.digital.download_expiry_days' => 30 ] );
+
+    $product = Product::factory()->digital()->create( [ 'meta' => [ 'digital' => $digital ] ] );
+    DigitalFile::factory()->create( [ 'product_id' => $product->id ] );
+    $order = Order::factory()->create();
+    OrderItem::factory()->create( [ 'order_id' => $order->id, 'product_id' => $product->id ] );
+
+    $download = app( DigitalDownloadService::class )->issueForOrder( $order )[0];
+
+    expect( $download->downloads_remaining )->toBe( $remaining )
+        ->and( null !== $download->expires_at )->toBe( $expires );
+} )->with( [
+    'product limits'   => [ [ 'download_limit' => 3, 'download_expiry_days' => 7 ], 3, true ],
+    'no caps'          => [ [ 'download_limit' => 0, 'download_expiry_days' => 0 ], null, false ],
+    'config defaults'  => [ [], 5, true ],
+] );
+
 it( 'issues downloads and emails the links when payment succeeds', function (): void {
     Notification::fake();
     $customer = Customer::factory()->create();

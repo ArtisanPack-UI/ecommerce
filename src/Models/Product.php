@@ -31,6 +31,7 @@ use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Carbon;
@@ -80,6 +81,11 @@ use Laravel\Scout\Searchable;
  * @property \Illuminate\Database\Eloquent\Collection<int, ProductPrice>                $prices
  * @property \Illuminate\Database\Eloquent\Collection<int, ProductReview>               $reviews
  * @property \Illuminate\Database\Eloquent\Collection<int, DigitalFile>                 $digitalFiles
+ * @property \Illuminate\Database\Eloquent\Collection<int, ProductCategory>             $categories
+ * @property \Illuminate\Database\Eloquent\Collection<int, ProductTag>                  $tags
+ * @property \Illuminate\Database\Eloquent\Collection<int, ProductImage>                $images
+ * @property \Illuminate\Database\Eloquent\Collection<int, ProductChild>                $children
+ * @property \Illuminate\Database\Eloquent\Collection<int, InventoryItem>               $inventoryItems
  */
 class Product extends Model
 {
@@ -280,6 +286,67 @@ class Product extends Model
     }
 
     /**
+     * Categories the product is filed under.
+     *
+     * @since 1.0.0
+     *
+     * @return BelongsToMany<ProductCategory, $this>
+     */
+    public function categories(): BelongsToMany
+    {
+        return $this->belongsToMany( ProductCategory::class, 'product_category_product', 'product_id', 'product_category_id' );
+    }
+
+    /**
+     * Tags on the product.
+     *
+     * @since 1.0.0
+     *
+     * @return BelongsToMany<ProductTag, $this>
+     */
+    public function tags(): BelongsToMany
+    {
+        return $this->belongsToMany( ProductTag::class, 'product_tag_product', 'product_id', 'product_tag_id' );
+    }
+
+    /**
+     * The ordered gallery (the featured image lives on the product row).
+     *
+     * @since 1.0.0
+     *
+     * @return HasMany<ProductImage, $this>
+     */
+    public function images(): HasMany
+    {
+        return $this->hasMany( ProductImage::class )->orderBy( 'position' )->orderBy( 'id' );
+    }
+
+    /**
+     * Members of a `grouped` or `bundled` product, in order.
+     *
+     * @since 1.0.0
+     *
+     * @return HasMany<ProductChild, $this>
+     */
+    public function children(): HasMany
+    {
+        return $this->hasMany( ProductChild::class, 'parent_product_id' )->orderBy( 'position' )->orderBy( 'id' );
+    }
+
+    /**
+     * Stock rows for the product itself (variant stock lives on
+     * {@see ProductVariant::inventoryItems()}).
+     *
+     * @since 1.0.0
+     *
+     * @return MorphMany<InventoryItem, $this>
+     */
+    public function inventoryItems(): MorphMany
+    {
+        return $this->morphMany( InventoryItem::class, 'stockable' );
+    }
+
+    /**
      * Products a shopper may see: `active` and already published (or with
      * no publish date).
      *
@@ -373,6 +440,47 @@ class Product extends Model
     public function shouldBeSearchable(): bool
     {
         return (bool) config( 'artisanpack.ecommerce.features.scout', true ) && 'active' === $this->status;
+    }
+
+    /**
+     * Fires the product lifecycle hooks (engine spec §6.9) from the model,
+     * so every write path — services, imports, raw Eloquent — fires them.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected static function booted(): void
+    {
+        static::saving( static function ( Product $product ): void {
+            doAction( 'ap.ecommerce.product.saving', $product );
+        } );
+
+        static::created( static function ( Product $product ): void {
+            if ( 'active' === $product->status ) {
+                doAction( 'ap.ecommerce.product.published', $product );
+            }
+        } );
+
+        static::updated( static function ( Product $product ): void {
+            if ( ! $product->wasChanged( 'status' ) ) {
+                return;
+            }
+
+            if ( 'active' === $product->status ) {
+                doAction( 'ap.ecommerce.product.published', $product );
+            } elseif ( 'archived' === $product->status ) {
+                doAction( 'ap.ecommerce.product.unpublished', $product );
+            }
+        } );
+
+        static::saved( static function ( Product $product ): void {
+            doAction( 'ap.ecommerce.product.saved', $product );
+        } );
+
+        static::deleted( static function ( Product $product ): void {
+            doAction( 'ap.ecommerce.product.deleted', $product );
+        } );
     }
 
     /**

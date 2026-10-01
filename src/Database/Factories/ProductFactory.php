@@ -16,8 +16,11 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Database\Factories;
 
 use ArtisanPackUI\Ecommerce\Models\Product;
+use ArtisanPackUI\Ecommerce\ProductTypes\BundledProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\DigitalProductType;
+use ArtisanPackUI\Ecommerce\ProductTypes\GroupedProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType;
+use ArtisanPackUI\Ecommerce\ProductTypes\VariableProductType;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Str;
 
@@ -88,5 +91,41 @@ class ProductFactory extends Factory
     public function draft(): static
     {
         return $this->state( fn () => [ 'status' => 'draft' ] );
+    }
+
+    /**
+     * State: `variable` product type.
+     *
+     * @since 1.0.0
+     *
+     * @return static
+     */
+    public function variable(): static
+    {
+        return $this->state( fn () => [ 'type' => VariableProductType::KEY ] );
+    }
+
+    /**
+     * State: `grouped` product type.
+     *
+     * @since 1.0.0
+     *
+     * @return static
+     */
+    public function grouped(): static
+    {
+        return $this->state( fn () => [ 'type' => GroupedProductType::KEY ] );
+    }
+
+    /**
+     * State: `bundled` product type.
+     *
+     * @since 1.0.0
+     *
+     * @return static
+     */
+    public function bundled(): static
+    {
+        return $this->state( fn () => [ 'type' => BundledProductType::KEY ] );
     }
 }

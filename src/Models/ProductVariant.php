@@ -112,6 +112,36 @@ class ProductVariant extends Model
     }
 
     /**
+     * Stock rows for this variant.
+     *
+     * @since 1.0.0
+     *
+     * @return MorphMany<InventoryItem, $this>
+     */
+    public function inventoryItems(): MorphMany
+    {
+        return $this->morphMany( InventoryItem::class, 'stockable' );
+    }
+
+    /**
+     * Fires `ap.ecommerce.variant.saved` (engine spec §6.9) on every save.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected static function booted(): void
+    {
+        static::saved( static function ( ProductVariant $variant ): void {
+            $product = $variant->relationLoaded( 'product' ) ? $variant->product : $variant->product()->first();
+
+            if ( null !== $product ) {
+                doAction( 'ap.ecommerce.variant.saved', $variant, $product );
+            }
+        } );
+    }
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array

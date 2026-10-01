@@ -68,6 +68,17 @@ snake_case keys. Each mutation takes one `input` argument and returns
 | `createWebhookSubscription` / `updateWebhookSubscription` / `deleteWebhookSubscription` / `replayWebhookDelivery` | `admin/webhook-subscriptions…` |
 | `updateNotificationTemplate` | `PATCH admin/notification-templates/{template}` |
 | `previewNotificationTemplate` (returns `rendered { subject body }`) | `POST admin/notification-templates/{template}/preview` |
+| `createProduct` / `updateProduct` / `deleteProduct` | `POST admin/products` / `PATCH` / `DELETE admin/products/{product}` |
+| `createProductVariant` / `updateProductVariant` / `deleteProductVariant` | `admin/products/{product}/variants…` |
+| `createProductPrice` / `updateProductPrice` / `deleteProductPrice` | `admin/products/{product}/prices…` |
+| `createCategory` / `updateCategory` / `deleteCategory` | `admin/product-categories…` |
+| `createTag` / `updateTag` / `deleteTag` | `admin/product-tags…` |
+
+The catalog mutations take the same keys as the REST bodies. `prices`,
+`images`, and `children` are typed input lists; `attributes`, `inventory`,
+`option_values`, `stock_adjustment`, and `meta` are `JSON`. Catalog rules
+refused by `ProductService` come back as `UserError`s with the codes in
+[products.md](products.md#errors).
 
 ```graphql
 mutation Add($input: AddToCartInput!) {
