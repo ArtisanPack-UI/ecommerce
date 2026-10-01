@@ -37,6 +37,7 @@ use ArtisanPackUI\Ecommerce\Services\ActivityLogService;
 use BackedEnum;
 use DateTimeInterface;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 use Throwable;
 
 /**
@@ -161,8 +162,10 @@ class RecordModelActivity
         }
 
         // An audit entry must never block the business write it describes.
+        // The savepoint keeps a failed insert from poisoning an enclosing
+        // transaction (PostgreSQL aborts the whole transaction otherwise).
         try {
-            $this->activity->record( $subject, $prefix . '.' . $action, $payload );
+            DB::transaction( fn () => $this->activity->record( $subject, $prefix . '.' . $action, $payload ) );
         } catch ( Throwable $exception ) {
             report( $exception );
         }

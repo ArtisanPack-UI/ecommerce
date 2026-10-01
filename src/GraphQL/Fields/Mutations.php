@@ -321,12 +321,17 @@ class Mutations
                 $this->validate( $input, AddOrderNoteRequest::baseRules() );
 
                 $actor = $user->getAuthIdentifier();
-                $note  = app( OrderNoteService::class )->add(
-                    $order,
-                    (string) $input['body'],
-                    is_numeric( $actor ) ? (int) $actor : null,
-                    (bool) ( $input['is_customer_visible'] ?? false ),
-                );
+
+                try {
+                    $note = app( OrderNoteService::class )->add(
+                        $order,
+                        (string) $input['body'],
+                        is_numeric( $actor ) ? (int) $actor : null,
+                        (bool) ( $input['is_customer_visible'] ?? false ),
+                    );
+                } catch ( InvalidArgumentException $exception ) {
+                    return [ 'errors' => [ [ 'field' => 'body', 'code' => 'note-invalid', 'message' => $exception->getMessage() ] ] ];
+                }
 
                 return [ 'note' => $this->r->present( $note, 'OrderNote', $this->r->selection( $info, 'note' ), true ) ];
             } ),

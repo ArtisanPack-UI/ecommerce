@@ -34,6 +34,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
+use Throwable;
 
 /**
  * @package    ArtisanPack_UI
@@ -87,7 +88,14 @@ class InventoryService
             $fresh->quantity_on_hand = $newOnHand;
             $fresh->save();
 
-            app( ActivityLogService::class )->recordInventoryAdjustment( $fresh, $delta, $previousOnHand, $newOnHand, $reason );
+            // An audit entry must never roll back the stock change it
+            // describes; the savepoint keeps a failed insert from aborting
+            // this transaction on PostgreSQL.
+            try {
+                DB::transaction( static fn () => app( ActivityLogService::class )->recordInventoryAdjustment( $fresh, $delta, $previousOnHand, $newOnHand, $reason ) );
+            } catch ( Throwable $exception ) {
+                report( $exception );
+            }
 
             doAction( 'ap.ecommerce.inventory.adjusted', $fresh, $delta, $newOnHand );
 

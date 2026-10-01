@@ -177,3 +177,17 @@ it( 'does not fail the business write when recording throws', function (): void 
 
     removeAllFilters( 'ap.ecommerce.activity.recording' );
 } );
+
+it( 'keeps a stock adjustment when its activity entry fails', function (): void {
+    $item = InventoryItem::factory()->create( [ 'quantity_on_hand' => 5 ] );
+
+    addFilter( 'ap.ecommerce.activity.recording', function (): array {
+        throw new RuntimeException( 'log store down' );
+    } );
+
+    app( InventoryService::class )->adjust( $item, 3, 'intake' );
+
+    removeAllFilters( 'ap.ecommerce.activity.recording' );
+
+    expect( $item->fresh()->quantity_on_hand )->toBe( 8 );
+} );
