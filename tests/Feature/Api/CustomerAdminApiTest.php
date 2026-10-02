@@ -2,6 +2,7 @@
 
 declare( strict_types=1 );
 
+use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
 use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\CustomerAddress;
 use ArtisanPackUI\Ecommerce\Models\Order;
@@ -162,4 +163,24 @@ it( 'moves default shipping between addresses over PATCH', function (): void {
     expect( CustomerAddress::query()->find( $first )->is_default_shipping )->toBeFalse()
         ->and( CustomerAddress::query()->find( $first )->is_default_billing )->toBeTrue()
         ->and( CustomerAddress::query()->find( $second )->is_default_billing )->toBeFalse();
+} );
+
+it( 'replays a successful customer delete when it is retried with the same key', function (): void {
+    $customer = Customer::factory()->create();
+    $headers  = idem();
+
+    $this->actingAs( ecommerceAdmin(), 'sanctum' );
+
+    $first = $this->deleteJson( "/api/ecommerce/v1/customers/{$customer->id}", [], $headers )->assertOk();
+
+    $this->deleteJson( "/api/ecommerce/v1/customers/{$customer->id}", [], $headers )
+        ->assertOk()
+        ->assertHeader( IdempotencyMiddleware::REPLAY_HEADER )
+        ->assertExactJson( $first->json() );
+} );
+
+it( 'still 404s a delete of a missing customer under a fresh key', function (): void {
+    $this->actingAs( ecommerceAdmin(), 'sanctum' )
+        ->deleteJson( '/api/ecommerce/v1/customers/999999', [], idem() )
+        ->assertNotFound();
 } );

@@ -36,6 +36,8 @@ use Illuminate\Support\Carbon;
  * @property int                   $id
  * @property int                   $subscription_id
  * @property string                $event
+ * @property int|null              $order_id     Order the payload is about (see WebhookDispatcher::subjectIds()).
+ * @property int|null              $customer_id  Customer the payload is about.
  * @property string                $payload_hash
  * @property array<string, mixed>  $payload
  * @property int|null              $response_status
@@ -74,6 +76,8 @@ class WebhookDelivery extends Model
     protected $fillable = [
         'subscription_id',
         'event',
+        'order_id',
+        'customer_id',
         'payload_hash',
         'payload',
         'response_status',
@@ -142,6 +146,8 @@ class WebhookDelivery extends Model
     {
         return [
             'payload'         => 'array',
+            'order_id'        => 'integer',
+            'customer_id'     => 'integer',
             'response_status' => 'integer',
             'attempts'        => 'integer',
             'delivered_at'    => 'datetime',

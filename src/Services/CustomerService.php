@@ -51,6 +51,7 @@ use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -578,10 +579,12 @@ class CustomerService
     }
 
     /**
-     * Redacts personal values in outbound webhook deliveries that reference
-     * the anonymized orders or the customer, and drops the receiver's stored
-     * response. The rows stay, so delivery history and counts are kept;
-     * `payload_hash` is recomputed for the redacted payload.
+     * Redacts personal values in outbound webhook deliveries about the
+     * anonymized orders or the customer, and drops the receiver's stored
+     * response. Deliveries are found through the indexed `order_id` /
+     * `customer_id` columns ({@see WebhookDispatcher::subjectIds()}). The
+     * rows stay, so delivery history and counts are kept; `payload_hash` is
+     * recomputed for the redacted payload.
      *
      * @since 1.0.0
      *
@@ -592,63 +595,29 @@ class CustomerService
      */
     protected function scrubWebhookDeliveries( array $orderIds, int $customerId ): void
     {
-        $table  = ( new WebhookDelivery() )->getTable();
-        $orders = array_flip( $orderIds );
+        $table = ( new WebhookDelivery() )->getTable();
 
-        DB::table( $table )->select( [ 'id', 'payload' ] )->orderBy( 'id' )->chunk( 500, function ( $rows ) use ( $table, $orders, $customerId ): void {
-            foreach ( $rows as $row ) {
-                $payload = is_string( $row->payload ) ? json_decode( $row->payload, true ) : null;
+        DB::table( $table )
+            ->select( [ 'id', 'payload' ] )
+            ->where( function ( QueryBuilder $query ) use ( $orderIds, $customerId ): void {
+                $query->where( 'customer_id', $customerId );
 
-                if ( ! is_array( $payload ) || ! $this->referencesSubject( $payload, $orders, $customerId ) ) {
-                    continue;
+                if ( [] !== $orderIds ) {
+                    $query->orWhereIn( 'order_id', $orderIds );
                 }
+            } )
+            ->chunkById( 500, function ( $rows ) use ( $table ): void {
+                foreach ( $rows as $row ) {
+                    $payload = is_string( $row->payload ) ? json_decode( $row->payload, true ) : null;
+                    $clean   = is_array( $payload ) ? $this->redactKeys( $payload, self::WEBHOOK_PII_KEYS, true ) : null;
 
-                $clean = $this->redactKeys( $payload, self::WEBHOOK_PII_KEYS, true );
-
-                DB::table( $table )->where( 'id', $row->id )->update( [
-                    'payload'       => json_encode( $clean, WebhookDispatcher::JSON_FLAGS ),
-                    'payload_hash'  => hash( 'sha256', (string) json_encode( $clean, WebhookDispatcher::JSON_FLAGS ) ),
-                    'response_body' => null,
-                ] );
-            }
-        } );
-    }
-
-    /**
-     * Whether a webhook payload mentions one of the orders or the customer.
-     *
-     * @since 1.0.0
-     *
-     * @param  array<array-key, mixed>  $data        Payload (or part of it).
-     * @param  array<int, int>          $orders      Order ids, as keys.
-     * @param  int                      $customerId  Customer id.
-     *
-     * @return bool
-     */
-    protected function referencesSubject( array $data, array $orders, int $customerId ): bool
-    {
-        $type = $data['type'] ?? null;
-        $id   = is_numeric( $data['id'] ?? null ) ? (int) $data['id'] : null;
-
-        if ( null !== $id && ( ( 'order' === $type && isset( $orders[ $id ] ) ) || ( 'customer' === $type && $id === $customerId ) ) ) {
-            return true;
-        }
-
-        if ( is_numeric( $data['order_id'] ?? null ) && isset( $orders[ (int) $data['order_id'] ] ) ) {
-            return true;
-        }
-
-        if ( is_numeric( $data['customer_id'] ?? null ) && (int) $data['customer_id'] === $customerId ) {
-            return true;
-        }
-
-        foreach ( $data as $value ) {
-            if ( is_array( $value ) && $this->referencesSubject( $value, $orders, $customerId ) ) {
-                return true;
-            }
-        }
-
-        return false;
+                    DB::table( $table )->where( 'id', $row->id )->update( null === $clean ? [ 'response_body' => null ] : [
+                        'payload'       => json_encode( $clean, WebhookDispatcher::JSON_FLAGS ),
+                        'payload_hash'  => hash( 'sha256', (string) json_encode( $clean, WebhookDispatcher::JSON_FLAGS ) ),
+                        'response_body' => null,
+                    ] );
+                }
+            } );
     }
 
     /**

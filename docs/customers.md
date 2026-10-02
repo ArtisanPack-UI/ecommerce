@@ -80,7 +80,7 @@ and guest reviews under the same email are matched the same way.
 | Refunds | Kept; `reason` becomes `[redacted]`. |
 | Order-edit history | `reason` becomes `[redacted]`, and the personal fields (`email`, `phone`, `customer_note`, addresses) in `pre_edit_snapshot` and `diff` are scrubbed, so rolling an edit back cannot restore them. |
 | Download events, license activations | IP address and user agent are nulled. Download links and license keys keep working. |
-| Outbound webhook deliveries | Rows that reference those orders or the customer keep their history, but personal values in `payload` are redacted, `payload_hash` is recomputed, and the stored `response_body` is dropped. |
+| Outbound webhook deliveries | Found through the indexed `webhook_deliveries.order_id` / `customer_id` columns, which the dispatcher fills from each payload's subject (`WebhookDispatcher::subjectIds()`; older rows are backfilled by migration). The rows keep their history, but personal values in `payload` are redacted, `payload_hash` is recomputed, and the stored `response_body` is dropped. |
 | Stored idempotent responses | Records from the customer's own routes (`customers.update`, address and note writes) whose response names the customer are deleted. |
 | Addresses, notification preferences, claim attempts | Deleted. |
 | Customer notes, activity entries | Notes are deleted and personal values in the customer's activity entries become `[redacted]` (`ActivityLogService::scrubCustomer()`). A `customer.deleted` entry with counts only is recorded. |
@@ -103,6 +103,7 @@ The delete does not reach these; erase or expire them by your own policy:
 |---|---|
 | `inbound_webhook_deliveries.payload` / `parsed` | Raw payment-provider webhooks (they can include the shopper's email or address). They are keyed by provider event, not by order or customer, so they can't be matched reliably. Prune them on a schedule. |
 | Idempotent responses from order routes (`orders.update`, refunds, shipments, cancel, notes) | They guard money-moving actions against a replayed request, so deleting them early could repeat a refund. They expire after `artisanpack.ecommerce.idempotency.default_ttl_hours` (24 h by default). |
+| Outbound webhook deliveries whose payload names neither an order nor a customer | E.g. a review event when `webhooks.include_admin_fields` is off, or a guest cart event. Their `order_id` / `customer_id` are null, so they can't be matched. Prune delivery history on a schedule. |
 | Order item snapshots (`order_items.product_snapshot`, `meta`) and `orders.meta` | Product data, plus whatever a satellite stored in `meta`. Satellites that put personal data there should erase it on `ap.ecommerce.customer.deleted`. |
 | Payment gateway records, queued mail, application logs | Outside the engine's tables. |
 

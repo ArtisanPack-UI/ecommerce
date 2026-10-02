@@ -166,6 +166,9 @@ How it works:
   `Set-Cookie`, plus `Idempotent-Replay: true`. Responses that contain one-time
   secrets, like a new webhook subscription's `secret`, are stored with those
   fields redacted.
+  The check runs after authentication and the ability check but before
+  route-model binding, so retrying a successful `DELETE` replays its success
+  instead of returning 404 for the now-missing record.
 - **Concurrency.** If a duplicate arrives while the original is still
   running, it waits up to `idempotency.wait_ms` (8,000 ms, polling every
   `poll_ms` = 100 ms) for the result. If the original still hasn't finished,

@@ -23,6 +23,7 @@ use ArtisanPackUI\Ecommerce\Models\ProductReview;
 use ArtisanPackUI\Ecommerce\Models\PromotionUsage;
 use ArtisanPackUI\Ecommerce\Models\Refund;
 use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
+use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
 use ArtisanPackUI\Ecommerce\Services\ActivityLogService;
 use ArtisanPackUI\Ecommerce\Services\CustomerNoteService;
 use ArtisanPackUI\Ecommerce\Services\CustomerService;
@@ -30,6 +31,7 @@ use ArtisanPackUI\Ecommerce\Services\OrderEditService;
 use ArtisanPackUI\Ecommerce\Services\WebhookDispatcher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 
 uses( RefreshDatabase::class );
@@ -375,26 +377,33 @@ it( 'restores no personal data when an order edit is rolled back after a delete'
         ->and( $fresh->shipping_address )->toBeNull();
 } );
 
-it( 'redacts outbound webhook deliveries about the anonymized orders and keeps the rest', function (): void {
+it( 'redacts outbound webhook deliveries found through their subject columns and keeps the rest', function (): void {
+    Queue::fake();
+    WebhookSubscription::factory()->create( [ 'events' => [ 'order.refunded', 'refund.created', 'cart.created' ] ] );
+
     $order = Order::factory()->forCustomer( $this->customer )->create( [ 'email' => 'jane@example.com' ] );
     $other = Order::factory()->create( [ 'email' => 'bob@example.com' ] );
+    $hooks = app( WebhookDispatcher::class );
 
-    $about = WebhookDelivery::factory()->create( [
-        'payload'       => [ 'id' => 'evt-1', 'event' => 'order.refunded', 'data' => [ 'order' => [ 'type' => 'order', 'id' => $order->id, 'email' => 'jane@example.com', 'shipping_address' => [ 'address1' => '1 Main St' ], 'total_amount' => 5_000 ], 'reason' => 'Jane asked' ] ],
-        'response_body' => 'ok jane@example.com',
-    ] );
-    $refundOnly = WebhookDelivery::factory()->create( [
-        'payload' => [ 'id' => 'evt-2', 'event' => 'refund.created', 'data' => [ 'refund' => [ 'type' => 'refund', 'id' => 9, 'order_id' => $order->id, 'reason' => 'Jane asked' ] ] ],
-    ] );
-    $unrelated = WebhookDelivery::factory()->create( [
-        'payload'       => [ 'id' => 'evt-3', 'event' => 'order.refunded', 'data' => [ 'order' => [ 'type' => 'order', 'id' => $other->id, 'email' => 'bob@example.com' ] ] ],
-        'response_body' => 'ok',
-    ] );
+    $about      = $hooks->dispatch( 'order.refunded', [ 'order' => [ 'type' => 'order', 'id' => $order->id, 'customer_id' => $this->customer->id, 'email' => 'jane@example.com', 'shipping_address' => [ 'address1' => '1 Main St' ], 'total_amount' => 5_000 ], 'reason' => 'Jane asked' ] )->first();
+    $refundOnly = $hooks->dispatch( 'refund.created', [ 'refund' => [ 'type' => 'refund', 'id' => 9, 'order_id' => $order->id, 'reason' => 'Jane asked' ] ] )->first();
+    $cartOnly   = $hooks->dispatch( 'cart.created', [ 'cart' => [ 'type' => 'cart', 'id' => 3, 'customer_id' => $this->customer->id, 'email' => 'jane@example.com' ] ] )->first();
+    $unrelated  = $hooks->dispatch( 'order.refunded', [ 'order' => [ 'type' => 'order', 'id' => $other->id, 'email' => 'bob@example.com' ] ] )->first();
+
+    DB::table( 'webhook_deliveries' )->whereIn( 'id', [ $about->id, $unrelated->id ] )->update( [ 'response_body' => 'ok' ] );
+
+    expect( $about->order_id )->toBe( $order->id )
+        ->and( $about->customer_id )->toBe( $this->customer->id )
+        ->and( $refundOnly->order_id )->toBe( $order->id )
+        ->and( $refundOnly->customer_id )->toBeNull()
+        ->and( $cartOnly->order_id )->toBeNull()
+        ->and( $cartOnly->customer_id )->toBe( $this->customer->id );
 
     $this->service->delete( $this->customer );
 
     $aboutRow = DB::table( 'webhook_deliveries' )->where( 'id', $about->id )->first();
     $payload  = json_decode( $aboutRow->payload, true );
+    $decode   = fn ( int $id ): array => json_decode( DB::table( 'webhook_deliveries' )->where( 'id', $id )->value( 'payload' ), true );
 
     expect( $payload['data']['order']['email'] )->toBe( CustomerService::REDACTED )
         ->and( $payload['data']['order']['shipping_address'] )->toBeNull()
@@ -402,9 +411,37 @@ it( 'redacts outbound webhook deliveries about the anonymized orders and keeps t
         ->and( $payload['data']['reason'] )->toBe( CustomerService::REDACTED )
         ->and( $aboutRow->response_body )->toBeNull()
         ->and( $aboutRow->payload_hash )->toBe( hash( 'sha256', (string) json_encode( $payload, WebhookDispatcher::JSON_FLAGS ) ) )
-        ->and( json_decode( DB::table( 'webhook_deliveries' )->where( 'id', $refundOnly->id )->value( 'payload' ), true )['data']['refund']['reason'] )->toBe( CustomerService::REDACTED )
-        ->and( json_decode( DB::table( 'webhook_deliveries' )->where( 'id', $unrelated->id )->value( 'payload' ), true )['data']['order']['email'] )->toBe( 'bob@example.com' )
+        ->and( $decode( $refundOnly->id )['data']['refund']['reason'] )->toBe( CustomerService::REDACTED )
+        ->and( $decode( $cartOnly->id )['data']['cart']['email'] )->toBe( CustomerService::REDACTED )
+        ->and( $decode( $unrelated->id )['data']['order']['email'] )->toBe( 'bob@example.com' )
         ->and( DB::table( 'webhook_deliveries' )->where( 'id', $unrelated->id )->value( 'response_body' ) )->toBe( 'ok' );
+} );
+
+it( 'backfills subject columns for deliveries recorded before the migration', function (): void {
+    $order = Order::factory()->forCustomer( $this->customer )->create( [ 'email' => 'jane@example.com' ] );
+    $other = Order::factory()->create();
+
+    $legacy = WebhookDelivery::factory()->create( [
+        'payload' => [ 'id' => 'evt-1', 'event' => 'order.refunded', 'data' => [ 'order' => [ 'type' => 'order', 'id' => $order->id, 'customer_id' => $this->customer->id, 'email' => 'jane@example.com' ] ] ],
+    ] );
+    $legacyOther = WebhookDelivery::factory()->create( [
+        'payload' => [ 'id' => 'evt-2', 'event' => 'order.refunded', 'data' => [ 'order' => [ 'type' => 'order', 'id' => $other->id, 'email' => 'bob@example.com' ] ] ],
+    ] );
+    DB::table( 'webhook_deliveries' )->update( [ 'order_id' => null, 'customer_id' => null ] );
+
+    $migration = require __DIR__ . '/../../../database/migrations/2026_01_01_000059_add_subject_columns_to_webhook_deliveries_table.php';
+    $migration->down();
+    $migration->up();
+
+    expect( $legacy->fresh()->order_id )->toBe( $order->id )
+        ->and( $legacy->fresh()->customer_id )->toBe( $this->customer->id )
+        ->and( $legacyOther->fresh()->order_id )->toBe( $other->id )
+        ->and( $legacyOther->fresh()->customer_id )->toBeNull();
+
+    $this->service->delete( $this->customer );
+
+    expect( $legacy->fresh()->payload['data']['order']['email'] )->toBe( CustomerService::REDACTED )
+        ->and( $legacyOther->fresh()->payload['data']['order']['email'] )->toBe( 'bob@example.com' );
 } );
 
 it( 'forgets stored idempotent responses from the customer\'s own routes only', function (): void {

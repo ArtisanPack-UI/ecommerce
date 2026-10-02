@@ -106,7 +106,7 @@ class WebhookDispatcher
             'payload'         => $payload,
             'payload_hash'    => hash( 'sha256', (string) json_encode( $payload, self::JSON_FLAGS ) ),
             'next_retry_at'   => $claim,
-        ] );
+        ] + self::subjectIds( $payload ) );
 
         DeliverWebhookJob::dispatch( $delivery->id, $claim->toDateTimeString() )->afterCommit();
 
@@ -124,5 +124,53 @@ class WebhookDispatcher
     public static function claimSeconds(): int
     {
         return max( 30, (int) config( 'artisanpack.ecommerce.webhooks.claim_seconds', 300 ) );
+    }
+
+    /**
+     * The order and customer a payload is about, stored on the delivery row
+     * so customer delete-and-anonymize can find it through an index.
+     *
+     * Searches the payload's `data` breadth-first, so the event's top-level
+     * subject wins over nested references. An order is an object with
+     * `type: order` or an `order_id` key; a customer is an object with
+     * `type: customer` or a `customer_id` key (an order's `customer_id`
+     * counts).
+     *
+     * @since 1.0.0
+     *
+     * @param  array<array-key, mixed>  $payload  Full payload envelope.
+     *
+     * @return array{order_id: int|null, customer_id: int|null}
+     */
+    public static function subjectIds( array $payload ): array
+    {
+        $found = [ 'order_id' => null, 'customer_id' => null ];
+        $queue = [ is_array( $payload['data'] ?? null ) ? $payload['data'] : $payload ];
+
+        while ( [] !== $queue && ( null === $found['order_id'] || null === $found['customer_id'] ) ) {
+            $node = array_shift( $queue );
+            $type = $node['type'] ?? null;
+            $id   = is_numeric( $node['id'] ?? null ) ? (int) $node['id'] : null;
+
+            foreach ( [ 'order' => 'order_id', 'customer' => 'customer_id' ] as $kind => $column ) {
+                if ( null !== $found[ $column ] ) {
+                    continue;
+                }
+
+                if ( $kind === $type && null !== $id ) {
+                    $found[ $column ] = $id;
+                } elseif ( is_numeric( $node[ $column ] ?? null ) ) {
+                    $found[ $column ] = (int) $node[ $column ];
+                }
+            }
+
+            foreach ( $node as $value ) {
+                if ( is_array( $value ) ) {
+                    $queue[] = $value;
+                }
+            }
+        }
+
+        return $found;
     }
 }

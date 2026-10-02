@@ -497,6 +497,11 @@ class EcommerceServiceProvider extends ServiceProvider
 
         if ( method_exists( $kernel, 'addToMiddlewarePriorityAfter' ) ) {
             $kernel->addToMiddlewarePriorityAfter( AuthenticatesRequests::class, EnsureEcommerceAbility::class );
+
+            // Idempotency runs after auth and the ability check but before
+            // route-model binding, so a retried DELETE whose model is now
+            // gone replays the stored success instead of a 404.
+            $kernel->addToMiddlewarePriorityAfter( EnsureEcommerceAbility::class, IdempotencyMiddleware::class );
         }
 
         if ( method_exists( $kernel, 'addToMiddlewarePriorityBefore' ) ) {
