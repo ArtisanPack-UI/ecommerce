@@ -255,3 +255,16 @@ it( 'uses the per-endpoint TTL override when configured', function (): void {
 
     Carbon::setTestNow();
 } );
+
+it( 'keys an unnamed route by its path template, swapping only whole parameter segments', function (): void {
+    Route::middleware( IdempotencyMiddleware::class )->post(
+        '/_test/v1/things/{thing}',
+        fn () => response()->json( [ 'ok' => true ] ),
+    );
+
+    $this->withHeader( 'Idempotency-Key', 'key-unnamed' )
+        ->postJson( '/_test/v1/things/1', [] )
+        ->assertOk();
+
+    expect( IdempotencyRecord::query()->firstOrFail()->endpoint_key )->toBe( 'POST:/_test/v1/things/{thing}' );
+} );

@@ -166,6 +166,9 @@ How it works:
   `Set-Cookie`, plus `Idempotent-Replay: true`. Responses that contain one-time
   secrets, like a new webhook subscription's `secret`, are stored with those
   fields redacted.
+  The check runs after authentication and the ability check but before
+  route-model binding, so retrying a successful `DELETE` replays its success
+  instead of returning 404 for the now-missing record.
 - **Concurrency.** If a duplicate arrives while the original is still
   running, it waits up to `idempotency.wait_ms` (8,000 ms, polling every
   `poll_ms` = 100 ms) for the result. If the original still hasn't finished,
@@ -270,6 +273,9 @@ Prices are always resolved on the server. The client never sends a unit price.
 | `GET` | `customers` | `customer.viewAny` | |
 | `GET` | `customers/{customer}` | `customer.view` | |
 | `PATCH` | `customers/{customer}` | `customer.update` | yes |
+| `DELETE` | `customers/{customer}` (delete and anonymize) | `customer.delete` | yes |
+| `POST` | `customers/{customer}/addresses` | `customer.update` | yes |
+| `PATCH` / `DELETE` | `customers/{customer}/addresses/{address}` | `customer.update` | yes |
 | `GET` | `customers/{customer}/notes` | `customer.view` | |
 | `POST` | `customers/{customer}/notes` | `customer.update` | yes |
 | `DELETE` | `customers/{customer}/notes/{note}` | `customer.update` | yes |
@@ -350,8 +356,10 @@ All of these use the `admin.mutate` rate policy.
 Catalog writes refused by `ProductService` (a taken slug or SKU, an unknown
 type, a bundle that would loop, …) come back as a 422 `product-write-failed`
 problem whose `errors` name the field and a code; see [products.md](products.md).
+Address writes refused by `CustomerAddressService` come back the same way as a
+422 `customer-write-failed`; see [customers.md](customers.md).
 
-Topic guides: [products.md](products.md), [kanban.md](kanban.md), [reviews.md](reviews.md),
+Topic guides: [products.md](products.md), [customers.md](customers.md), [kanban.md](kanban.md), [reviews.md](reviews.md),
 [digital-delivery.md](digital-delivery.md), [notifications.md](notifications.md),
 [webhooks.md](webhooks.md), [search.md](search.md),
 [activity-log.md](activity-log.md).

@@ -3,8 +3,9 @@
 /**
  * CustomerController.
  *
- * `GET customers`, `GET customers/{customer}`, `PATCH customers/{customer}`
- * (engine spec §9.4). Admin-gated.
+ * `GET customers`, `GET customers/{customer}`, `PATCH customers/{customer}`,
+ * and `DELETE customers/{customer}` (engine spec §9.4; delete-and-anonymize
+ * from engine issue #142). Admin-gated.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -22,6 +23,7 @@ use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateCustomerRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\CustomerResource;
 use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
+use ArtisanPackUI\Ecommerce\Services\CustomerService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -92,5 +94,29 @@ class CustomerController extends ApiController
         $customer->fill( $data )->save();
 
         return $this->resourceResponse( $customer, $request, CustomerResource::class, [ 'addresses' => 'addresses' ] );
+    }
+
+    /**
+     * Deletes the customer and anonymizes their orders and related rows
+     * through {@see CustomerService::delete()}. The response carries only
+     * the deleted id, never the erased personal data.
+     *
+     * @since 1.0.0
+     *
+     * @param  Request          $request    Request.
+     * @param  Customer         $customer   Customer.
+     * @param  CustomerService  $customers  Customer service.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Delete and anonymize a customer', description: 'GDPR erasure. Orders keep their totals but lose the customer link and personal data; addresses, notification preferences, claim attempts, and notes are deleted. Returns { data: { type, id, deleted } }.' )]
+    public function destroy( Request $request, Customer $customer, CustomerService $customers ): JsonResponse
+    {
+        $actor = $request->user()?->getAuthIdentifier();
+        $id    = (int) $customer->id;
+
+        $customers->delete( $customer, is_numeric( $actor ) ? (int) $actor : null );
+
+        return response()->json( [ 'data' => [ 'type' => 'customer', 'id' => $id, 'deleted' => true ] ] );
     }
 }

@@ -1118,6 +1118,8 @@ CREATE TABLE webhook_deliveries (
     id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     subscription_id  BIGINT UNSIGNED NOT NULL,
     event            VARCHAR(120) NOT NULL,
+    order_id         BIGINT UNSIGNED NULL,      -- subject order, from the payload (#142)
+    customer_id      BIGINT UNSIGNED NULL,      -- subject customer, from the payload (#142)
     payload_hash     CHAR(64) NOT NULL,
     payload          JSON NOT NULL,
     response_status  SMALLINT UNSIGNED NULL,
@@ -1128,6 +1130,8 @@ CREATE TABLE webhook_deliveries (
     created_at       TIMESTAMP NULL,
     KEY webhook_deliveries_subscription_idx (subscription_id),
     KEY webhook_deliveries_retry_idx        (next_retry_at),
+    KEY webhook_deliveries_order_idx        (order_id),
+    KEY webhook_deliveries_customer_idx     (customer_id),
     CONSTRAINT webhook_deliveries_subscription_fk FOREIGN KEY (subscription_id) REFERENCES webhook_subscriptions(id) ON DELETE CASCADE
 );
 ```

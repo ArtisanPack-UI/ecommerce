@@ -242,17 +242,25 @@ class IdempotencyMiddleware
             return $name;
         }
 
-        $path = '/' . ltrim( $request->path(), '/' );
-        if ( is_object( $route ) && method_exists( $route, 'parameterNames' ) ) {
-            foreach ( $route->parameterNames() as $param ) {
-                $value = $route->parameter( $param );
-                if ( is_scalar( $value ) ) {
-                    $path = str_replace( (string) $value, '{' . $param . '}', $path );
+        $segments = explode( '/', trim( $request->path(), '/' ) );
+
+        // Raw (unbound) values, so the key is the same whether or not route
+        // bindings have run, and only whole segments are swapped.
+        if ( is_object( $route ) && method_exists( $route, 'originalParameters' ) ) {
+            foreach ( $route->originalParameters() as $param => $value ) {
+                if ( ! is_scalar( $value ) ) {
+                    continue;
+                }
+
+                foreach ( $segments as $index => $segment ) {
+                    if ( $segment === (string) $value ) {
+                        $segments[ $index ] = '{' . $param . '}';
+                    }
                 }
             }
         }
 
-        return strtoupper( $request->method() ) . ':' . $path;
+        return strtoupper( $request->method() ) . ':/' . implode( '/', $segments );
     }
 
     /**
