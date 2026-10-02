@@ -51,9 +51,12 @@ diff, and an update that only touched those is not recorded.
 | `price.created`, `price.deleted` | product | `price_id`, `variant_id` (null for a product price), `currency`, `amount`, `compare_at_amount` |
 | `price.updated` | product | `price_id`, `variant_id`, `currency`, `changes` |
 | `inventory.adjusted` | product | `inventory_item_id`, `variant_id`, `delta`, `quantity_on_hand` (`{before, after}`), `reason` |
-| `customer.created`, `customer.deleted` | customer | `email`, `first_name`, `last_name` |
+| `customer.created` | customer | `email`, `first_name`, `last_name` |
+| `customer.deleted` | customer | Two shapes. From `CustomerService::delete()`: `anonymized` (`true`) and `orders` (count anonymized), no personal data; see [customers.md](customers.md#deleting-a-customer). From a direct model delete (`$customer->delete()`, which skips anonymizing): `email`, `first_name`, `last_name`. |
 | `customer.updated` | customer | `changes` |
 | `note.added`, `note.deleted` | customer | `note_id`, `excerpt` (first 120 characters) |
+| `address.added`, `address.deleted` | customer | `address_id`, `is_default_shipping`, `is_default_billing` |
+| `address.updated` | customer | `address_id`, `fields` (names of the changed columns, no values) |
 | `promotion.created`, `promotion.deleted` | promotion | `name`, `key` |
 | `promotion.updated` | promotion | `changes` |
 | `coupon.created`, `coupon.deleted` | promotion | `coupon_id`, `code` |
@@ -108,8 +111,11 @@ Customer entries hold the same personal data the admin already shows
 
 Scrubbing first and anonymizing afterwards would write the erased values
 back into new entries. `scrubCustomer()` is the only sanctioned mutation of
-the append-only log. It does not cover order-side text (order notes, the
-`note.added` timeline excerpts, cancel reasons); the anonymize flow owns those.
+the append-only activity log. It does not touch order-side records
+(order notes, timeline excerpts and reasons, refund and edit reasons); the
+delete-and-anonymize flow, `CustomerService::delete()`, redacts those itself.
+See [customers.md](customers.md#deleting-a-customer) for everything it
+changes.
 
 Price entries never include `cost_amount`.
 

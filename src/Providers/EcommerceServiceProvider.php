@@ -38,6 +38,7 @@ use ArtisanPackUI\Ecommerce\CurrencyRates\FrankfurterRateProvider;
 use ArtisanPackUI\Ecommerce\Ecommerce;
 use ArtisanPackUI\Ecommerce\Events\KanbanCardMoved;
 use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
+use ArtisanPackUI\Ecommerce\Exceptions\CustomerWriteException;
 use ArtisanPackUI\Ecommerce\Exceptions\ProductWriteException;
 use ArtisanPackUI\Ecommerce\Fulfillment\ProportionalByLineTotalStrategy;
 use ArtisanPackUI\Ecommerce\Gateways\Stripe\StripeGateway;
@@ -148,6 +149,7 @@ use ArtisanPackUI\Ecommerce\Registries\ShippingRateProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\TaxProviderRegistry;
 use ArtisanPackUI\Ecommerce\Reviews\NoopReviewModerator;
 use ArtisanPackUI\Ecommerce\Reviews\ProductRatingAggregator;
+use ArtisanPackUI\Ecommerce\Services\ActivityLogService;
 use ArtisanPackUI\Ecommerce\Services\DatabaseCartStorage;
 use ArtisanPackUI\Ecommerce\Services\Fraud\AlwaysApproveFraudProvider;
 use ArtisanPackUI\Ecommerce\Services\Fraud\StripeRadarFraudProvider;
@@ -251,6 +253,10 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->app->singleton( CartStorage::class, DatabaseCartStorage::class );
         $this->app->singleton( OrderNumberGenerator::class, RandomEightCharGenerator::class );
         $this->app->singleton( ReviewModerator::class, NoopReviewModerator::class );
+
+        // One shared instance, so ActivityLogService::withoutRecording()
+        // pauses the model observers too (customer delete-and-anonymize).
+        $this->app->singleton( ActivityLogService::class );
 
         // After every provider has registered, before any boots: rebing
         // registers its schema routes while booting, so the `ecommerce`
@@ -1041,6 +1047,14 @@ class EcommerceServiceProvider extends ServiceProvider
             $handler->renderable( static function ( ProductWriteException $e, $request ) {
                 return $request->routeIs( 'ecommerce.api.*' )
                     ? Problem::make( 422, 'product-write-failed', __( 'Catalog change refused' ), $e->getMessage(), $request, $e->errors )
+                    : null;
+            } );
+
+            // Customer writes refused by CustomerAddressService (missing
+            // street, city, or country; bad country code; too long).
+            $handler->renderable( static function ( CustomerWriteException $e, $request ) {
+                return $request->routeIs( 'ecommerce.api.*' )
+                    ? Problem::make( 422, 'customer-write-failed', __( 'Customer change refused' ), $e->getMessage(), $request, $e->errors )
                     : null;
             } );
 

@@ -151,6 +151,10 @@ All hooks below are available since **1.0.0**.
 | `ap.ecommerce.customer.groups` | filter | `array<string> $groups` (defaults to `customers.meta.groups`), `Customer $customer` | `array<string>` | `Promotions/Conditions/CustomerInGroupCondition` |
 | `ap.ecommerce.customer.noteAdded` | action | `Customer $customer`, `CustomerNote $note` | | `Services/CustomerNoteService` |
 | `ap.ecommerce.customer.noteDeleted` | action | `CustomerNote $note` (already deleted) | | `Services/CustomerNoteService` |
+| `ap.ecommerce.customer.addressAdded` | action | `Customer $customer`, `CustomerAddress $address` | | `Services/CustomerAddressService` |
+| `ap.ecommerce.customer.addressUpdated` | action | `Customer $customer`, `CustomerAddress $address`, `array<int, string> $changedFields` | | `Services/CustomerAddressService` |
+| `ap.ecommerce.customer.addressDeleted` | action | `Customer $customer`, `CustomerAddress $address` (already deleted) | | `Services/CustomerAddressService` |
+| `ap.ecommerce.customer.deleted` | action | `Customer $customer` (already deleted; attributes as they were, so satellites can erase their own copies), `array<string, int> $summary` (`orders`, `addresses`, `notification_preferences`, `claim_attempts`, `notes`, `carts`, `reviews`, `promotion_usages`). Fires once the outermost transaction commits. | | `Services/CustomerService::delete()` |
 
 ## Activity log
 

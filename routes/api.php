@@ -31,6 +31,7 @@ declare( strict_types=1 );
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ActivityLogController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CartController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CouponController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CustomerAddressController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CustomerController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CustomerNoteController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\DigitalDownloadController;
@@ -151,6 +152,16 @@ Route::patch( 'orders/{order}/shipments/{shipment}', [ OrderShipmentController::
 Route::get( 'customers', [ CustomerController::class, 'index' ] )->middleware( $admin( 'customer', 'viewAny' ) )->name( 'customers.index' );
 Route::get( 'customers/{customer}', [ CustomerController::class, 'show' ] )->middleware( $admin( 'customer', 'view' ) )->name( 'customers.show' );
 Route::patch( 'customers/{customer}', [ CustomerController::class, 'update' ] )->middleware( $admin( 'customer', 'update', true ) )->name( 'customers.update' );
+Route::delete( 'customers/{customer}', [ CustomerController::class, 'destroy' ] )->middleware( $admin( 'customer', 'delete', true ) )->name( 'customers.destroy' );
+Route::post( 'customers/{customer}/addresses', [ CustomerAddressController::class, 'store' ] )->middleware( $admin( 'customer', 'update', true ) )->name( 'customers.addresses.store' );
+Route::patch( 'customers/{customer}/addresses/{address}', [ CustomerAddressController::class, 'update' ] )
+    ->scopeBindings()
+    ->middleware( $admin( 'customer', 'update', true ) )
+    ->name( 'customers.addresses.update' );
+Route::delete( 'customers/{customer}/addresses/{address}', [ CustomerAddressController::class, 'destroy' ] )
+    ->scopeBindings()
+    ->middleware( $admin( 'customer', 'update', true ) )
+    ->name( 'customers.addresses.destroy' );
 Route::get( 'customers/{customer}/notes', [ CustomerNoteController::class, 'index' ] )->middleware( $admin( 'customer', 'view' ) )->name( 'customers.notes.index' );
 Route::post( 'customers/{customer}/notes', [ CustomerNoteController::class, 'store' ] )->middleware( $admin( 'customer', 'update', true ) )->name( 'customers.notes.store' );
 Route::delete( 'customers/{customer}/notes/{note}', [ CustomerNoteController::class, 'destroy' ] )
