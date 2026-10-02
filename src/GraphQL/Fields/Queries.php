@@ -42,6 +42,7 @@ use ArtisanPackUI\Ecommerce\Models\ShippingZone;
 use ArtisanPackUI\Ecommerce\Models\TaxClass;
 use ArtisanPackUI\Ecommerce\Models\TaxRate;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
+use ArtisanPackUI\Ecommerce\Registries\SubStatusRegistry;
 use ArtisanPackUI\Ecommerce\Services\NotificationTemplateService;
 use GraphQL\Type\Definition\ResolveInfo;
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -228,6 +229,23 @@ class Queries
                         $info,
                         true,
                     ),
+                ),
+            ],
+            'orderSubstatuses' => [
+                'type'        => '[OrderSubstatus!]!',
+                'description' => 'Order sub-statuses grouped by system status, in position order. Pass systemStatus to list one group.',
+                'args'        => [ 'systemStatus' => 'String' ],
+                'resolve'     => fn ( $root, array $args, $context, ResolveInfo $info ): array => $this->admin(
+                    'orderSubstatus',
+                    'viewAny',
+                    function () use ( $args ): array {
+                        $registry = app( SubStatusRegistry::class );
+
+                        return $this->r->renderMany(
+                            null === ( $args['systemStatus'] ?? null ) ? $registry->all() : $registry->forSystemStatus( (string) $args['systemStatus'] ),
+                            true,
+                        );
+                    },
                 ),
             ],
             'promotion'             => $this->adminFind( 'Promotion', 'promotion', 'view', Promotion::class ),

@@ -27,6 +27,7 @@ use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\Models\ProductVariant;
 use ArtisanPackUI\Ecommerce\ProductTypes\DigitalProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType;
+use ArtisanPackUI\Ecommerce\Registries\SubStatusRegistry;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -315,6 +316,8 @@ class DemoSeeder
         } finally {
             Schema::enableForeignKeyConstraints();
         }
+
+        app( SubStatusRegistry::class )->flush();
     }
 
     /**
@@ -428,6 +431,9 @@ class DemoSeeder
             ->get( [ 'id', 'system_status', 'key' ] )
             ->mapWithKeys( static fn ( object $row ): array => [ $row->system_status . '.' . $row->key => (int) $row->id ] )
             ->all();
+
+        // These writes bypass the model, so the cached lookup is flushed by hand.
+        app( SubStatusRegistry::class )->flush();
     }
 
     /**

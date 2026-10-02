@@ -66,6 +66,7 @@ Gate::authorize( 'viewAny', Product::class );
 | `DigitalFilePolicy` | `DigitalFile` | `viewAny`, `create`, `update`, `delete` |
 | `LicenseKeyPolicy` | `LicenseKey` | `view`, `revoke` |
 | `NotificationTemplatePolicy` | `NotificationTemplate` | `viewAny`, `view`, `update` |
+| `OrderSubstatusPolicy` | `OrderSubstatus` | `viewAny`, `view`, `create`, `update`, `delete` |
 
 `OrderPolicy::view()` also lets a shopper see their own order (the order's
 customer is linked to their user id) when their token allows storefront access.

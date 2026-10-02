@@ -21,6 +21,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Models;
 
 use ArtisanPackUI\Ecommerce\Database\Factories\OrderSubstatusFactory;
+use ArtisanPackUI\Ecommerce\Registries\SubStatusRegistry;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -88,6 +89,26 @@ class OrderSubstatus extends Model
     public function orders(): HasMany
     {
         return $this->hasMany( Order::class, 'substatus_id' );
+    }
+
+    /**
+     * Flushes {@see SubStatusRegistry} whenever a row is saved or deleted,
+     * so writes that bypass the service still reach the cached lookup.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected static function booted(): void
+    {
+        $flush = static function (): void {
+            if ( app()->bound( SubStatusRegistry::class ) ) {
+                app( SubStatusRegistry::class )->flush();
+            }
+        };
+
+        static::saved( $flush );
+        static::deleted( $flush );
     }
 
     /**

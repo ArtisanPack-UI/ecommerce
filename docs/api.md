@@ -328,6 +328,9 @@ All of these use the `admin.mutate` rate policy.
 | `GET` | `admin/activity/products/{product}` | `product.view` | |
 | `GET` | `admin/activity/customers/{customer}` | `customer.view` | |
 | `GET` | `admin/activity/promotions/{promotion}` | `promotion.view` | |
+| `GET` / `POST` | `admin/order-substatuses` (`filter[system_status]`) | `orderSubstatus.viewAny` / `.create` | POST |
+| `PATCH` / `DELETE` | `admin/order-substatuses/{substatus}` | `orderSubstatus.update` / `.delete` | yes |
+| `POST` | `admin/order-substatuses/reorder` (`{ system_status, ids }`) | `orderSubstatus.update` | yes |
 | `GET` / `POST` | `admin/tax-classes` | `taxRate.viewAny` / `taxRate.create` | POST |
 | `GET` / `POST` | `admin/tax-rates` | `taxRate.viewAny` / `taxRate.create` | POST |
 | `PATCH` / `DELETE` | `admin/tax-rates/{rate}` | `taxRate.update` / `taxRate.delete` | yes |
@@ -358,6 +361,9 @@ type, a bundle that would loop, …) come back as a 422 `product-write-failed`
 problem whose `errors` name the field and a code; see [products.md](products.md).
 Address writes refused by `CustomerAddressService` come back the same way as a
 422 `customer-write-failed`; see [customers.md](customers.md).
+Sub-status writes refused by `OrderSubstatusService` (a taken key, a bad
+colour, a sub-status still in use, …) come back as a 422
+`substatus-write-failed`; see [kanban.md](kanban.md#order-sub-statuses).
 
 Topic guides: [products.md](products.md), [customers.md](customers.md), [kanban.md](kanban.md), [reviews.md](reviews.md),
 [digital-delivery.md](digital-delivery.md), [notifications.md](notifications.md),

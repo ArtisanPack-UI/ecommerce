@@ -18,6 +18,53 @@ An order can be on **any number of boards at once**, and each card has its own
 column. A photography order can be at "Printing" on the Production board and
 at "Awaiting label" on the Shipping board at the same time.
 
+## Order sub-statuses
+
+Every column is an order sub-status, and the same sub-statuses also refine an
+order's own `system_status` (`orders.substatus_id`). Sub-statuses are
+user-defined rows in `order_substatuses`, each under one of the six system
+statuses (`pending`, `processing`, `complete`, `cancelled`, `refunded`,
+`failed`). Migration `2026_01_01_000014` seeds one default per system status
+(`awaiting-payment`, `in-progress`, `completed`, `cancelled`, `refunded`,
+`failed`).
+
+Manage them through `OrderSubstatusService`, `admin/order-substatuses`, or the
+GraphQL `…OrderSubstatus` mutations, all gated by the `orderSubstatus`
+abilities:
+
+```php
+$service = app( \ArtisanPackUI\Ecommerce\Services\OrderSubstatusService::class );
+
+$printing = $service->create( [ 'system_status' => 'processing', 'label' => 'Printing', 'color' => '#a855f7' ] ); // key "printing"
+$service->update( $printing, [ 'label' => 'On the press' ] );
+$service->reorder( 'processing', [ $printing->id ] ); // listed ids first, the rest keep their order
+$service->delete( $printing );
+```
+
+- `key` is a lowercase slug, unique within its system status. Leave it blank
+  on create and it is derived from the label.
+- `color` is `null` or `#RRGGBB` (stored upper-case); `icon` is a free icon
+  name up to 80 characters; `is_terminal` marks a finished state for the
+  multi-board roll-up.
+- `system_status` can't change after creation, because that would strand the
+  orders, cards, and columns on it. Create a new sub-status instead.
+- Delete is refused while orders, active board cards, or kanban columns use the
+  sub-status. The `OrderSubstatusWriteException` names the counts in its
+  message and in `$exception->counts` (`orders`, `assignments`, `columns`).
+  Removed cards that still point at it are deleted with it. The last
+  sub-status of a system status can't be deleted.
+
+Refusals throw `OrderSubstatusWriteException` with `{ field, code, message }`
+errors (REST: 422 `substatus-write-failed`; the in-use error also carries
+`counts`). A key left blank is made from the label, with `-2`, `-3`, … added
+when a sibling already uses it. Reads go through the cached `SubStatusRegistry`
+(`all()`, `forSystemStatus()`, `get( $idOrKey, $systemStatus )`; a digit-only
+string is treated as an id). Service writes and model saves/deletes flush it,
+again when the outermost transaction commits, and rows read inside a
+transaction are not cached. Writes that bypass the model (raw `DB::table()`)
+must call `SubStatusRegistry::flush()`; the demo seeder does. Each write fires an
+`ap.ecommerce.orderSubstatus.*` action; see [hooks.md](hooks.md#orders).
+
 ## Routing
 
 `KanbanRoutingService` decides which boards an order goes on. With

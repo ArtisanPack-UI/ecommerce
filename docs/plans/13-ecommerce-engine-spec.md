@@ -1712,7 +1712,7 @@ All registries live under `ArtisanPackUI\Ecommerce\Registries\` and are bound as
 | 11 | `KanbanAutomationRegistry` | `ArtisanPackUI\Ecommerce\Registries\KanbanAutomationRegistry` | `Contracts\KanbanAutomationTrigger` | Core registers: `send-email`, `dispatch-job`, `webhook`, `update-order-field`, `create-shipment`, `print-shipping-label` (delegates to any `ShippingLabelProviderRegistry` entry). Satellites add `notify-slack`, etc. |
 | 12 | `FraudProviderRegistry` | `ArtisanPackUI\Ecommerce\Registries\FraudProviderRegistry` | `Contracts\FraudProvider` | Core registers `stripe-radar`, `always-approve`. Supports `chain` mode (§6.1 parent plan) — a comma-list in settings runs providers in sequence, most-conservative verdict wins. |
 | 13 | `NotificationChannelRegistry` | `ArtisanPackUI\Ecommerce\Registries\NotificationChannelRegistry` | Laravel channel drivers | Thin wrapper for discoverability. Core surfaces `mail`, `database`. |
-| 14 | `SubStatusRegistry` | `ArtisanPackUI\Ecommerce\Registries\SubStatusRegistry` | DB-backed | Populated from `order_substatuses`, cached in the settings tag. Not directly extensible via `register()`; use the admin API to add rows. Exposed as a registry so downstream code shares one lookup surface. |
+| 14 | `SubStatusRegistry` | `ArtisanPackUI\Ecommerce\Registries\SubStatusRegistry` | DB-backed | Populated from `order_substatuses` and cached under `ap.ecommerce.order_substatuses`; `OrderSubstatusService` and the model's saved/deleted events flush it. `all()`, `forSystemStatus()`, `get( $idOrKey, $systemStatus )`. Not directly extensible via `register()`; use `OrderSubstatusService` or the admin API to add rows. Exposed as a registry so downstream code shares one lookup surface. |
 | 15 | `AdminMenuRegistry` | `ArtisanPackUI\Ecommerce\Registries\AdminMenuRegistry` | menu entries (array shape) | Satellites append admin-nav entries here. Consumed by admin UI packages. Shape: `{ key, label, icon?, route, position, permission?, badge? }`. |
 | 16 | `SatelliteRegistry` | `ArtisanPackUI\Ecommerce\Registries\SatelliteRegistry` | descriptor (array) | Backed by `ecommerce_satellites` (§3.32). Satellites `register()` in service-provider `boot()`; the entry powers `php artisan ecommerce:satellite:uninstall`. |
 
@@ -1956,6 +1956,7 @@ Every Laravel Gate ability check routes through `ap.ecommerce.abilities.{resourc
 | `digitalFile` | `viewAny`, `create`, `update`, `delete` |
 | `licenseKey` | `view`, `revoke` |
 | `review` | `viewAny`, `view`, `moderate`, `delete` |
+| `orderSubstatus` | `viewAny`, `view`, `create`, `update`, `delete` |
 
 ---
 
@@ -2149,6 +2150,16 @@ All routes are under `/api/ecommerce/v1/`. Every mutating endpoint requires an `
 | PATCH | `admin/coupons/{coupon}` | admin | required | `ecommerce.admin.mutate` |
 | DELETE | `admin/coupons/{coupon}` | admin | required | `ecommerce.admin.mutate` |
 
+### 9.7a Order sub-statuses (admin)
+
+| Method | Path | Auth | Idempotent | Rate policy |
+|---|---|---|---|---|
+| GET | `admin/order-substatuses` | admin (`orderSubstatus.viewAny`) | — | `ecommerce.admin.mutate` |
+| POST | `admin/order-substatuses` | admin (`orderSubstatus.create`) | required | `ecommerce.admin.mutate` |
+| POST | `admin/order-substatuses/reorder` | admin (`orderSubstatus.update`) | required | `ecommerce.admin.mutate` |
+| PATCH | `admin/order-substatuses/{substatus}` | admin (`orderSubstatus.update`) | required | `ecommerce.admin.mutate` |
+| DELETE | `admin/order-substatuses/{substatus}` | admin (`orderSubstatus.delete`) | required | `ecommerce.admin.mutate` |
+
 ### 9.8 Tax + shipping (admin)
 
 | Method | Path | Auth | Idempotent | Rate policy |
@@ -2280,6 +2291,7 @@ Additional GraphQL-specific types:
 | `customers(filter: CustomerFilter, first: Int, after: Cursor)` | `CustomerConnection` | admin |
 | `promotion(id: ID!)` / `promotions(...)` | `Promotion` / `PromotionConnection` | admin |
 | `coupon(code: String!)` | `Coupon` | session |
+| `orderSubstatuses(systemStatus: String)` | `[OrderSubstatus!]!` | admin |
 | `taxClasses` / `taxRates(...)` | list | admin |
 | `shippingZones` / `shippingZone(id: ID!)` | list / one | admin |
 | `kanbanBoards` | list | admin |
@@ -2322,6 +2334,7 @@ Every mutation carries an implicit `clientMutationId` in accordance with Relay. 
 | `createProductPrice` / `updateProductPrice` / `deleteProductPrice` | matching inputs | matching payloads |
 | `createCategory` / `updateCategory` / `deleteCategory` | matching inputs | matching payloads |
 | `createTag` / `updateTag` / `deleteTag` | matching inputs | matching payloads |
+| `createOrderSubstatus` / `updateOrderSubstatus` / `deleteOrderSubstatus` / `reorderOrderSubstatuses` | matching inputs | matching payloads |
 | `createTaxClass` / `createTaxRate` / `updateTaxRate` / `deleteTaxRate` | matching inputs | matching payloads |
 | `createShippingZone` / `updateShippingZone` / `deleteShippingZone` | matching inputs | matching payloads |
 | `createShippingMethod` / `updateShippingMethod` / `deleteShippingMethod` | matching inputs | matching payloads |
