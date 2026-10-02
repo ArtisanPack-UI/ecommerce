@@ -146,7 +146,9 @@ final class ReportRange
     }
 
     /**
-     * The period of the same length that ends the day before this one.
+     * The period of the same length that ends the day before this one. A
+     * range of whole calendar months with a `month` interval steps back by
+     * the same number of months (Jul–Sep → Apr–Jun).
      *
      * @since 1.0.0
      *
@@ -154,6 +156,20 @@ final class ReportRange
      */
     public function previous(): self
     {
+        // Whole calendar months compared by month: step back by months, so
+        // the previous period has the same month buckets.
+        if ( 'month' === $this->interval
+            && $this->from->isSameDay( $this->from->startOfMonth() )
+            && $this->to->isSameDay( $this->to->endOfMonth() ) ) {
+            $months = (int) $this->from->startOfMonth()->diffInMonths( $this->to->startOfMonth() ) + 1;
+
+            return new self(
+                $this->from->subMonthsNoOverflow( $months )->startOfMonth(),
+                $this->from->subDay()->endOfDay(),
+                $this->interval,
+            );
+        }
+
         $days = $this->days();
 
         return new self(

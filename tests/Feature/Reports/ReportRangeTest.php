@@ -27,6 +27,14 @@ it( 'builds the previous period of the same length', function (): void {
     expect( ReportRange::make( '2026-03-01', '2026-03-31' )->previous()->toArray() )->toMatchArray( [ 'from' => '2026-01-29', 'to' => '2026-02-28' ] );
 } );
 
+it( 'steps back by calendar months for whole months on a month interval', function (): void {
+    $previous = ReportRange::make( '2026-07-01', '2026-09-30', 'month' )->previous();
+
+    expect( $previous->toArray() )->toMatchArray( [ 'from' => '2026-04-01', 'to' => '2026-06-30' ] )
+        ->and( array_keys( $previous->buckets() ) )->toBe( [ '2026-04', '2026-05', '2026-06' ] )
+        ->and( ReportRange::make( '2026-07-05', '2026-09-30', 'month' )->previous()->toArray() )->toMatchArray( [ 'from' => '2026-04-08', 'to' => '2026-07-04' ] );
+} );
+
 it( 'falls back to the application time zone', function (): void {
     config()->set( 'artisanpack.ecommerce.timezone', null );
 

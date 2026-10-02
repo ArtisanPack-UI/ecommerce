@@ -72,7 +72,8 @@ Every amount is converted to the store's **current** base currency, per order:
 interval, compare )` takes `Y-m-d` strings and defaults to the last 30 days.
 Ranges are capped at 1,100 days. Intervals are `day`, `week` (ISO weeks,
 keyed by their Monday), and `month` (keyed `Y-m`). `previous()` is the period
-of the same length that ends the day before.
+of the same length that ends the day before; whole calendar months on a
+`month` interval step back by months instead (Jul–Sep → Apr–Jun).
 
 ## Result shape
 
