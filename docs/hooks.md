@@ -132,6 +132,10 @@ All hooks below are available since **1.0.0**.
 | `ap.ecommerce.order.cancelled` | action | `Order $order` (cancelled) | | `Services/OrderCancellationService` |
 | `ap.ecommerce.order.noteAdded` | action | `Order $order`, `OrderNote $note` | | `Services/OrderNoteService` |
 | `ap.ecommerce.order.noteDeleted` | action | `OrderNote $note` (already deleted) | | `Services/OrderNoteService` |
+| `ap.ecommerce.orderSubstatus.created` | action | `OrderSubstatus $substatus` | | `Services/OrderSubstatusService` |
+| `ap.ecommerce.orderSubstatus.updated` | action | `OrderSubstatus $substatus`, `array<int, string> $changedFields` | | `Services/OrderSubstatusService` |
+| `ap.ecommerce.orderSubstatus.reordered` | action | `string $systemStatus`, `Collection<int, OrderSubstatus> $substatuses` (new order) | | `Services/OrderSubstatusService` |
+| `ap.ecommerce.orderSubstatus.deleted` | action | `OrderSubstatus $substatus` (already deleted) | | `Services/OrderSubstatusService` |
 
 > **`ap.ecommerce.order.placed`.** The engine *listens* for this action to
 > send the order-confirmation notification, route the order onto kanban

@@ -47,7 +47,7 @@ never collide with a host app's GraphQL schemas.
 | `cart(token)` | anyone holding the token | `ecommerce.cart.mutate` |
 | `me`, `myOrders` | signed-in shopper, token with `ecommerce:storefront` (or admin) | `ecommerce.admin.mutate` |
 | `order(id)` | `ecommerce.order.view`, or the shopper who owns it | `ecommerce.admin.mutate` |
-| `orders`, `refund`, `customer`, `customers`, `promotion`, `promotions`, `taxClasses`, `taxRates`, `shippingZones`, `shippingZone`, `inventoryItems`, `webhookSubscriptions`, `webhookSubscription`, `notificationTemplates`, `notificationTemplate` | the matching `ecommerce.{resource}.{action}` ability | `ecommerce.admin.mutate` |
+| `orders`, `refund`, `customer`, `customers`, `promotion`, `promotions`, `taxClasses`, `taxRates`, `shippingZones`, `shippingZone`, `inventoryItems`, `orderSubstatuses(systemStatus)`, `webhookSubscriptions`, `webhookSubscription`, `notificationTemplates`, `notificationTemplate` | the matching `ecommerce.{resource}.{action}` ability | `ecommerce.admin.mutate` |
 
 ## Mutations
 
@@ -73,6 +73,8 @@ snake_case keys. Each mutation takes one `input` argument and returns
 | `createProductPrice` / `updateProductPrice` / `deleteProductPrice` | `admin/products/{product}/prices…` |
 | `createCategory` / `updateCategory` / `deleteCategory` | `admin/product-categories…` |
 | `createTag` / `updateTag` / `deleteTag` | `admin/product-tags…` |
+| `createOrderSubstatus` / `updateOrderSubstatus` / `deleteOrderSubstatus` | `admin/order-substatuses…` |
+| `reorderOrderSubstatuses` (returns `substatuses`) | `POST admin/order-substatuses/reorder` |
 
 The catalog mutations take the same keys as the REST bodies. `prices`,
 `images`, and `children` are typed input lists; `attributes`, `inventory`,

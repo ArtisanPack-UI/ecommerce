@@ -51,6 +51,7 @@ use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderNoteController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderRefundController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderShipmentController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderSubstatusController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderTimelineController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductAdminController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductAttributeController;
@@ -275,6 +276,13 @@ Route::prefix( 'admin' )->name( 'admin.' )->group( function () use ( $admin, $au
         Route::get( 'activity/customers/{customer}', [ ActivityLogController::class, 'customer' ] )->middleware( $admin( 'customer', 'view' ) )->name( 'activity.customers' );
         Route::get( 'activity/promotions/{promotion}', [ ActivityLogController::class, 'promotion' ] )->middleware( $admin( 'promotion', 'view' ) )->name( 'activity.promotions' );
     } );
+
+    // Order sub-statuses.
+    Route::get( 'order-substatuses', [ OrderSubstatusController::class, 'index' ] )->middleware( $admin( 'orderSubstatus', 'viewAny' ) )->name( 'order-substatuses.index' );
+    Route::post( 'order-substatuses', [ OrderSubstatusController::class, 'store' ] )->middleware( $admin( 'orderSubstatus', 'create', true ) )->name( 'order-substatuses.store' );
+    Route::post( 'order-substatuses/reorder', [ OrderSubstatusController::class, 'reorder' ] )->middleware( $admin( 'orderSubstatus', 'update', true ) )->name( 'order-substatuses.reorder' );
+    Route::patch( 'order-substatuses/{substatus}', [ OrderSubstatusController::class, 'update' ] )->whereNumber( 'substatus' )->middleware( $admin( 'orderSubstatus', 'update', true ) )->name( 'order-substatuses.update' );
+    Route::delete( 'order-substatuses/{substatus}', [ OrderSubstatusController::class, 'destroy' ] )->whereNumber( 'substatus' )->middleware( $admin( 'orderSubstatus', 'delete', true ) )->name( 'order-substatuses.destroy' );
 
     // Tax.
     Route::get( 'tax-classes', [ TaxClassController::class, 'index' ] )->middleware( $admin( 'taxRate', 'viewAny' ) )->name( 'tax-classes.index' );

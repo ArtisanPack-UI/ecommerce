@@ -389,6 +389,16 @@ final class ResourceSchemas
                 'promotion_usages' => [ 'PromotionUsage', true, 'promotionUsages', true ],
             ] ),
 
+            'OrderSubstatus' => self::schema( Resources\OrderSubstatusResource::class, Models\OrderSubstatus::class, 'A user-defined sub-status under one of the six system statuses.', [
+                'system_status' => 'String!',
+                'key'           => 'String!',
+                'label'         => 'String!',
+                'color'         => 'String',
+                'icon'          => 'String',
+                'position'      => 'Int!',
+                'is_terminal'   => 'Boolean!',
+            ] + $timestamps ),
+
             'OrderItem' => self::schema( Resources\OrderItemResource::class, Models\OrderItem::class, 'A line on an order.', [
                 'order_id'           => 'Int!',
                 'product_id'         => 'Int',

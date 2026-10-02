@@ -39,6 +39,7 @@ use ArtisanPackUI\Ecommerce\Ecommerce;
 use ArtisanPackUI\Ecommerce\Events\KanbanCardMoved;
 use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
 use ArtisanPackUI\Ecommerce\Exceptions\CustomerWriteException;
+use ArtisanPackUI\Ecommerce\Exceptions\OrderSubstatusWriteException;
 use ArtisanPackUI\Ecommerce\Exceptions\ProductWriteException;
 use ArtisanPackUI\Ecommerce\Fulfillment\ProportionalByLineTotalStrategy;
 use ArtisanPackUI\Ecommerce\Gateways\Stripe\StripeGateway;
@@ -88,6 +89,7 @@ use ArtisanPackUI\Ecommerce\Models\LicenseKey;
 use ArtisanPackUI\Ecommerce\Models\NotificationTemplate;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderBoardAssignment;
+use ArtisanPackUI\Ecommerce\Models\OrderSubstatus;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\Models\ProductReview;
 use ArtisanPackUI\Ecommerce\Models\Promotion;
@@ -106,6 +108,7 @@ use ArtisanPackUI\Ecommerce\Policies\KanbanCardPolicy;
 use ArtisanPackUI\Ecommerce\Policies\LicenseKeyPolicy;
 use ArtisanPackUI\Ecommerce\Policies\NotificationTemplatePolicy;
 use ArtisanPackUI\Ecommerce\Policies\OrderPolicy;
+use ArtisanPackUI\Ecommerce\Policies\OrderSubstatusPolicy;
 use ArtisanPackUI\Ecommerce\Policies\ProductPolicy;
 use ArtisanPackUI\Ecommerce\Policies\PromotionPolicy;
 use ArtisanPackUI\Ecommerce\Policies\RefundPolicy;
@@ -146,6 +149,7 @@ use ArtisanPackUI\Ecommerce\Registries\SatelliteRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingLabelProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingMethodTypeRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingRateProviderRegistry;
+use ArtisanPackUI\Ecommerce\Registries\SubStatusRegistry;
 use ArtisanPackUI\Ecommerce\Registries\TaxProviderRegistry;
 use ArtisanPackUI\Ecommerce\Reviews\NoopReviewModerator;
 use ArtisanPackUI\Ecommerce\Reviews\ProductRatingAggregator;
@@ -249,6 +253,8 @@ class EcommerceServiceProvider extends ServiceProvider
         }
 
         $this->app->singleton( SatelliteRegistry::class, static fn ( $app ): SatelliteRegistry => new SatelliteRegistry( $app ) );
+        // Scoped so queue workers and Octane re-read it per job / request.
+        $this->app->scoped( SubStatusRegistry::class );
 
         $this->app->singleton( CartStorage::class, DatabaseCartStorage::class );
         $this->app->singleton( OrderNumberGenerator::class, RandomEightCharGenerator::class );
@@ -1063,6 +1069,14 @@ class EcommerceServiceProvider extends ServiceProvider
                     : null;
             } );
 
+            // Sub-status writes refused by OrderSubstatusService (unknown
+            // system status, taken key, bad colour, still in use, …).
+            $handler->renderable( static function ( OrderSubstatusWriteException $e, $request ) {
+                return $request->routeIs( 'ecommerce.api.*' )
+                    ? Problem::make( 422, 'substatus-write-failed', __( 'Sub-status change refused' ), $e->getMessage(), $request, $e->errors )
+                    : null;
+            } );
+
             // Expected storefront cart failures (unknown product, bad coupon, …).
             $handler->renderable( static function ( CartOperationException $e, $request ) {
                 return $request->routeIs( 'ecommerce.api.*' )
@@ -1191,6 +1205,7 @@ class EcommerceServiceProvider extends ServiceProvider
             DigitalFile::class          => DigitalFilePolicy::class,
             LicenseKey::class           => LicenseKeyPolicy::class,
             NotificationTemplate::class => NotificationTemplatePolicy::class,
+            OrderSubstatus::class       => OrderSubstatusPolicy::class,
         ];
 
         $registered = Gate::policies();

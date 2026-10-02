@@ -29,6 +29,8 @@
  * | `createProductPrice` / `updateProductPrice` / `deleteProductPrice` | `admin/products/{product}/prices[/{price}]` |
  * | `createCategory` / `updateCategory` / `deleteCategory` | `admin/product-categories[/{category}]` |
  * | `createTag` / `updateTag` / `deleteTag` | `admin/product-tags[/{tag}]` |
+ * | `createOrderSubstatus` / `updateOrderSubstatus` / `deleteOrderSubstatus` | `admin/order-substatuses[/{substatus}]` |
+ * | `reorderOrderSubstatuses` | `POST admin/order-substatuses/reorder` |
  *
  * Inputs use the REST payload's snake_case keys. Expected failures
  * (validation, unknown product, bad coupon, refused refund) come back in
@@ -51,6 +53,7 @@ namespace ArtisanPackUI\Ecommerce\GraphQL\Fields;
 use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
 use ArtisanPackUI\Ecommerce\Exceptions\NotificationTemplateException;
 use ArtisanPackUI\Ecommerce\Exceptions\OrderNotCancellableException;
+use ArtisanPackUI\Ecommerce\Exceptions\OrderSubstatusWriteException;
 use ArtisanPackUI\Ecommerce\Exceptions\ProductWriteException;
 use ArtisanPackUI\Ecommerce\Exceptions\RefundNotAllowedException;
 use ArtisanPackUI\Ecommerce\GraphQL\GraphQLError;
@@ -62,12 +65,14 @@ use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ApplyCouponRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CancelOrderRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CreateCartRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\IssueRefundRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\OrderSubstatusRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\PreviewNotificationTemplateRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductCategoryRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductPriceRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductTagRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductVariantRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ReorderOrderSubstatusesRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateCartItemRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateNotificationTemplateRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\WebhookSubscriptionRequest;
@@ -76,6 +81,7 @@ use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
 use ArtisanPackUI\Ecommerce\Models\NotificationTemplate;
 use ArtisanPackUI\Ecommerce\Models\Order;
+use ArtisanPackUI\Ecommerce\Models\OrderSubstatus;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\Models\ProductCategory;
 use ArtisanPackUI\Ecommerce\Models\ProductPrice;
@@ -86,6 +92,7 @@ use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
 use ArtisanPackUI\Ecommerce\Services\NotificationTemplateService;
 use ArtisanPackUI\Ecommerce\Services\OrderCancellationService;
 use ArtisanPackUI\Ecommerce\Services\OrderNoteService;
+use ArtisanPackUI\Ecommerce\Services\OrderSubstatusService;
 use ArtisanPackUI\Ecommerce\Services\ProductCategoryService;
 use ArtisanPackUI\Ecommerce\Services\ProductService;
 use ArtisanPackUI\Ecommerce\Services\ProductTagService;
@@ -267,6 +274,15 @@ class Mutations
             'UpdateTagPayload'             => $output( [ 'tag' => 'ProductTag' ] ),
             'DeleteTagInput'               => $input( [ 'id' => 'ID!' ] ),
             'DeleteTagPayload'             => $output( [ 'deleted_id' => 'ID' ] ),
+
+            'CreateOrderSubstatusInput'      => $input( [ 'system_status' => 'String!', 'label' => 'String!' ] + $this->substatusFields() ),
+            'CreateOrderSubstatusPayload'    => $output( [ 'substatus' => 'OrderSubstatus' ] ),
+            'UpdateOrderSubstatusInput'      => $input( [ 'id' => 'ID!', 'label' => 'String' ] + $this->substatusFields() ),
+            'UpdateOrderSubstatusPayload'    => $output( [ 'substatus' => 'OrderSubstatus' ] ),
+            'DeleteOrderSubstatusInput'      => $input( [ 'id' => 'ID!' ] ),
+            'DeleteOrderSubstatusPayload'    => $output( [ 'deleted_id' => 'ID' ] ),
+            'ReorderOrderSubstatusesInput'   => $input( [ 'system_status' => 'String!', 'ids' => '[ID!]!' ] ),
+            'ReorderOrderSubstatusesPayload' => $output( [ 'substatuses' => '[OrderSubstatus!]' ] ),
         ];
     }
 
@@ -640,6 +656,43 @@ class Mutations
 
                 return [ 'deleted_id' => $tag->id ];
             } ),
+
+            'createOrderSubstatus' => $this->mutation( 'CreateOrderSubstatus', function ( array $input, ResolveInfo $info ): array {
+                $this->substatusAbility( 'create' );
+                $this->validate( $input, $this->required( OrderSubstatusRequest::baseRules(), [ 'system_status', 'label' ] ) );
+
+                $substatus = app( OrderSubstatusService::class )->create( $this->without( $input, [ 'clientMutationId' ] ) );
+
+                return [ 'substatus' => $this->r->present( $substatus, 'OrderSubstatus', $this->r->selection( $info, 'substatus' ), true ) ];
+            } ),
+
+            'updateOrderSubstatus' => $this->mutation( 'UpdateOrderSubstatus', function ( array $input, ResolveInfo $info ): array {
+                $this->substatusAbility( 'update' );
+                $substatus = OrderSubstatus::query()->find( $input['id'] ) ?? throw GraphQLError::notFound();
+                $this->validate( $input, $this->sometimes( OrderSubstatusRequest::baseRules() ) );
+
+                $substatus = app( OrderSubstatusService::class )->update( $substatus, $this->without( $input, [ 'clientMutationId', 'id' ] ) );
+
+                return [ 'substatus' => $this->r->present( $substatus, 'OrderSubstatus', $this->r->selection( $info, 'substatus' ), true ) ];
+            } ),
+
+            'deleteOrderSubstatus' => $this->mutation( 'DeleteOrderSubstatus', function ( array $input ): array {
+                $this->substatusAbility( 'delete' );
+                $substatus = OrderSubstatus::query()->find( $input['id'] ) ?? throw GraphQLError::notFound();
+
+                app( OrderSubstatusService::class )->delete( $substatus );
+
+                return [ 'deleted_id' => $substatus->id ];
+            } ),
+
+            'reorderOrderSubstatuses' => $this->mutation( 'ReorderOrderSubstatuses', function ( array $input ): array {
+                $this->substatusAbility( 'update' );
+                $this->validate( $input, ReorderOrderSubstatusesRequest::baseRules() );
+
+                $ordered = app( OrderSubstatusService::class )->reorder( (string) $input['system_status'], (array) $input['ids'] );
+
+                return [ 'substatuses' => $this->r->renderMany( $ordered, true ) ];
+            } ),
         ];
     }
 
@@ -675,6 +728,8 @@ class Mutations
                 } catch ( NotificationTemplateException $exception ) {
                     $payload = [ 'errors' => $exception->errors ];
                 } catch ( ProductWriteException $exception ) {
+                    $payload = [ 'errors' => $exception->errors ];
+                } catch ( OrderSubstatusWriteException $exception ) {
                     $payload = [ 'errors' => $exception->errors ];
                 }
 
@@ -882,6 +937,24 @@ class Mutations
     }
 
     /**
+     * Authorizes an order sub-status admin action and applies the admin
+     * rate policy.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $action  Action name.
+     *
+     * @throws GraphQLError When not allowed.
+     *
+     * @return void
+     */
+    protected function substatusAbility( string $action ): void
+    {
+        $this->r->authorize( 'orderSubstatus', $action );
+        $this->r->throttle( 'ecommerce.admin.mutate' );
+    }
+
+    /**
      * Refuses a price write when its product's type is missing.
      *
      * @since 1.0.0
@@ -984,6 +1057,23 @@ class Mutations
             'image_media_id' => 'Int',
             'icon'           => 'String',
             'position'       => 'Int',
+        ];
+    }
+
+    /**
+     * Shared optional fields of the order sub-status inputs.
+     *
+     * @since 1.0.0
+     *
+     * @return array<string, string>
+     */
+    protected function substatusFields(): array
+    {
+        return [
+            'key'         => 'String',
+            'color'       => 'String',
+            'icon'        => 'String',
+            'is_terminal' => 'Boolean',
         ];
     }
 
