@@ -981,13 +981,19 @@ class DemoSeeder
         $this->allocate( $lines, 'discount', $discount );
         $this->allocate( $lines, 'shipping', $shipping );
 
-        $tax = 0;
+        $tax          = 0;
+        $taxBreakdown = [];
 
         foreach ( $lines as &$line ) {
-            [ $rate ]           = $this->taxRates[ $line['sellable']['tax_class'] . '.' . $country ] ?? [ 0, '' ];
-            $line['tax']        = intdiv( ( $line['subtotal'] - $line['discount'] ) * $rate + 500_000_000, 1_000_000_000 );
-            $line['total']      = $line['subtotal'] + $line['tax'] + $line['shipping'] - $line['discount'];
+            [ $rate, $rateLabel ] = $this->taxRates[ $line['sellable']['tax_class'] . '.' . $country ] ?? [ 0, '' ];
+            $line['tax']          = intdiv( ( $line['subtotal'] - $line['discount'] ) * $rate + 500_000_000, 1_000_000_000 );
+            $line['total']        = $line['subtotal'] + $line['tax'] + $line['shipping'] - $line['discount'];
             $tax += $line['tax'];
+
+            if ( $line['tax'] > 0 ) {
+                $taxBreakdown[ $rateLabel . '|' . $rate ] ??= [ 'label' => $rateLabel, 'rate_ubps' => $rate, 'amount' => 0, 'country_code' => $country ];
+                $taxBreakdown[ $rateLabel . '|' . $rate ]['amount'] += $line['tax'];
+            }
         }
         unset( $line );
 
@@ -1047,7 +1053,7 @@ class DemoSeeder
             'ip_address'              => '203.0.113.' . $this->random->getInt( 1, 254 ),
             'customer_note'           => $this->chance( 10 ) ? $this->pick( DemoCatalog::CUSTOMER_NOTES[ $locale ] ) : null,
             'is_claimed'              => null !== $customer,
-            'meta'                    => json_encode( [ 'demo' => true, 'locale' => $locale ] ),
+            'meta'                    => json_encode( [ 'demo' => true, 'locale' => $locale, 'tax_breakdown' => array_values( $taxBreakdown ) ] ),
             'placed_at'               => $placedAt,
             'created_at'              => $placedAt,
             'updated_at'              => $updatedAt,

@@ -1957,6 +1957,9 @@ Every Laravel Gate ability check routes through `ap.ecommerce.abilities.{resourc
 | `licenseKey` | `view`, `revoke` |
 | `review` | `viewAny`, `view`, `moderate`, `delete` |
 | `orderSubstatus` | `viewAny`, `view`, `create`, `update`, `delete` |
+| `inventory` | `viewAny`, `adjust` |
+| `settings` | `view`, `update` |
+| `report` | `view` |
 
 ---
 

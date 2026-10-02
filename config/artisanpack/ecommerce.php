@@ -27,6 +27,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Store time zone
+    |--------------------------------------------------------------------------
+    |
+    | IANA time zone the store reports in: report date ranges and day / week /
+    | month buckets start at midnight here. `null` uses `app.timezone`.
+    |
+    | Base currency, time zone, and the other keys the settings registry
+    | allow-lists can also be changed from an admin; stored values in
+    | `ecommerce_settings` overlay what is set here (see docs/settings.md).
+    |
+    */
+
+    'timezone' => env( 'ECOMMERCE_TIMEZONE' ),
+
+    /*
+    |--------------------------------------------------------------------------
     | Currency
     |--------------------------------------------------------------------------
     |

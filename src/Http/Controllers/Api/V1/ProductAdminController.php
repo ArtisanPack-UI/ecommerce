@@ -119,6 +119,10 @@ class ProductAdminController extends ApiController
     #[ApiOperation( summary: 'Update a product', resource: ProductResource::class )]
     public function update( ProductRequest $request, Product $product ): JsonResponse
     {
+        if ( $request->has( 'stock_adjustment' ) && null !== ( $denied = $this->forbiddenUnless( $request, 'inventory', 'adjust' ) ) ) {
+            return $denied;
+        }
+
         return $this->resourceResponse( $this->products->update( $product, $request->validated() ), $request, ProductResource::class, self::includes() );
     }
 

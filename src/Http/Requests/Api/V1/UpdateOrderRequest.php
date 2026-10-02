@@ -46,6 +46,11 @@ class UpdateOrderRequest extends ApiFormRequest
                 if ( is_array( $value ) && array_key_exists( 'fraud_decision', $value ) ) {
                     $fail( __( 'meta.fraud_decision is managed by the engine and cannot be changed.' ) );
                 }
+
+                // Recorded when the order is placed; the tax report reads it.
+                if ( is_array( $value ) && array_key_exists( 'tax_breakdown', $value ) ) {
+                    $fail( __( 'meta.tax_breakdown is recorded when the order is placed and cannot be changed.' ) );
+                }
             } ],
         ];
     }

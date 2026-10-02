@@ -519,6 +519,11 @@ class Mutations
 
             'updateProduct' => $this->mutation( 'UpdateProduct', function ( array $input, ResolveInfo $info ): array {
                 $this->catalog( 'update' );
+
+                if ( isset( $input['stock_adjustment'] ) ) {
+                    $this->r->authorize( 'inventory', 'adjust' );
+                }
+
                 $product = Product::query()->find( $input['id'] ) ?? throw GraphQLError::notFound();
                 $this->validate( $input, $this->sometimes( ProductRequest::baseRules() ) );
 
@@ -548,6 +553,11 @@ class Mutations
 
             'updateProductVariant' => $this->mutation( 'UpdateProductVariant', function ( array $input, ResolveInfo $info ): array {
                 $this->catalog( 'update' );
+
+                if ( isset( $input['stock_adjustment'] ) ) {
+                    $this->r->authorize( 'inventory', 'adjust' );
+                }
+
                 $variant = ProductVariant::query()->find( $input['id'] ) ?? throw GraphQLError::notFound();
                 $this->validate( $input, $this->sometimes( ProductVariantRequest::baseRules() ) );
 
