@@ -73,6 +73,10 @@ class ProductVariantController extends ApiController
     #[ApiOperation( summary: 'Update a product variant', resource: ProductVariantResource::class )]
     public function update( ProductVariantRequest $request, Product $product, ProductVariant $variant ): JsonResponse
     {
+        if ( $request->has( 'stock_adjustment' ) && null !== ( $denied = $this->forbiddenUnless( $request, 'inventory', 'adjust' ) ) ) {
+            return $denied;
+        }
+
         return $this->resourceResponse( $this->products->updateVariant( $variant, $request->validated() ), $request, ProductVariantResource::class, [ 'prices' => 'prices' ] );
     }
 

@@ -254,7 +254,7 @@ class Queries
             'taxRates'              => $this->adminConnection( 'TaxRate', 'taxRate', TaxRate::class ),
             'shippingZones'         => $this->adminList( 'ShippingZone', 'shippingZone', ShippingZone::class, 'priority' ),
             'shippingZone'          => $this->adminFind( 'ShippingZone', 'shippingZone', 'viewAny', ShippingZone::class ),
-            'inventoryItems'        => $this->adminConnection( 'InventoryItem', 'product', InventoryItem::class ),
+            'inventoryItems'        => $this->adminConnection( 'InventoryItem', 'inventory', InventoryItem::class ),
             'webhookSubscriptions'  => $this->adminList( 'WebhookSubscription', 'webhookSubscription', WebhookSubscription::class, 'name' ),
             'webhookSubscription'   => $this->adminFind( 'WebhookSubscription', 'webhookSubscription', 'viewAny', WebhookSubscription::class ),
             'notificationTemplates' => [

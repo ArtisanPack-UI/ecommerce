@@ -41,6 +41,7 @@ use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
 use ArtisanPackUI\Ecommerce\Exceptions\CustomerWriteException;
 use ArtisanPackUI\Ecommerce\Exceptions\OrderSubstatusWriteException;
 use ArtisanPackUI\Ecommerce\Exceptions\ProductWriteException;
+use ArtisanPackUI\Ecommerce\Exceptions\SettingsWriteException;
 use ArtisanPackUI\Ecommerce\Fulfillment\ProportionalByLineTotalStrategy;
 use ArtisanPackUI\Ecommerce\Gateways\Stripe\StripeGateway;
 use ArtisanPackUI\Ecommerce\GraphQL\EcommerceSchema;
@@ -82,6 +83,8 @@ use ArtisanPackUI\Ecommerce\Logging\EcommerceLogFormatter;
 use ArtisanPackUI\Ecommerce\Models\Coupon;
 use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\DigitalFile;
+use ArtisanPackUI\Ecommerce\Models\EcommerceSetting;
+use ArtisanPackUI\Ecommerce\Models\InventoryItem;
 use ArtisanPackUI\Ecommerce\Models\KanbanAutomation;
 use ArtisanPackUI\Ecommerce\Models\KanbanBoard;
 use ArtisanPackUI\Ecommerce\Models\KanbanColumn;
@@ -103,6 +106,7 @@ use ArtisanPackUI\Ecommerce\Notifications\NotificationCatalog;
 use ArtisanPackUI\Ecommerce\Policies\CouponPolicy;
 use ArtisanPackUI\Ecommerce\Policies\CustomerPolicy;
 use ArtisanPackUI\Ecommerce\Policies\DigitalFilePolicy;
+use ArtisanPackUI\Ecommerce\Policies\InventoryPolicy;
 use ArtisanPackUI\Ecommerce\Policies\KanbanBoardPolicy;
 use ArtisanPackUI\Ecommerce\Policies\KanbanCardPolicy;
 use ArtisanPackUI\Ecommerce\Policies\LicenseKeyPolicy;
@@ -112,7 +116,9 @@ use ArtisanPackUI\Ecommerce\Policies\OrderSubstatusPolicy;
 use ArtisanPackUI\Ecommerce\Policies\ProductPolicy;
 use ArtisanPackUI\Ecommerce\Policies\PromotionPolicy;
 use ArtisanPackUI\Ecommerce\Policies\RefundPolicy;
+use ArtisanPackUI\Ecommerce\Policies\ReportPolicy;
 use ArtisanPackUI\Ecommerce\Policies\ReviewPolicy;
+use ArtisanPackUI\Ecommerce\Policies\SettingsPolicy;
 use ArtisanPackUI\Ecommerce\Policies\ShippingZonePolicy;
 use ArtisanPackUI\Ecommerce\Policies\TaxRatePolicy;
 use ArtisanPackUI\Ecommerce\Policies\WebhookSubscriptionPolicy;
@@ -145,12 +151,22 @@ use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PromotionActionRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PromotionConditionRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PromotionSourceRegistry;
+use ArtisanPackUI\Ecommerce\Registries\ReportRegistry;
 use ArtisanPackUI\Ecommerce\Registries\SatelliteRegistry;
+use ArtisanPackUI\Ecommerce\Registries\SettingsRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingLabelProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingMethodTypeRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingRateProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\SubStatusRegistry;
 use ArtisanPackUI\Ecommerce\Registries\TaxProviderRegistry;
+use ArtisanPackUI\Ecommerce\Reports\CategoryRevenueReport;
+use ArtisanPackUI\Ecommerce\Reports\InventoryLevelsReport;
+use ArtisanPackUI\Ecommerce\Reports\LowStockReport;
+use ArtisanPackUI\Ecommerce\Reports\Report;
+use ArtisanPackUI\Ecommerce\Reports\SalesReport;
+use ArtisanPackUI\Ecommerce\Reports\SummaryReport;
+use ArtisanPackUI\Ecommerce\Reports\TaxCollectedReport;
+use ArtisanPackUI\Ecommerce\Reports\TopProductsReport;
 use ArtisanPackUI\Ecommerce\Reviews\NoopReviewModerator;
 use ArtisanPackUI\Ecommerce\Reviews\ProductRatingAggregator;
 use ArtisanPackUI\Ecommerce\Services\ActivityLogService;
@@ -160,6 +176,8 @@ use ArtisanPackUI\Ecommerce\Services\Fraud\StripeRadarFraudProvider;
 use ArtisanPackUI\Ecommerce\Services\KanbanAutomationRunner;
 use ArtisanPackUI\Ecommerce\Services\KanbanRoutingService;
 use ArtisanPackUI\Ecommerce\Services\RandomEightCharGenerator;
+use ArtisanPackUI\Ecommerce\Settings\CoreSettings;
+use ArtisanPackUI\Ecommerce\Settings\SettingsRepository;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\FlatRateMethod;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\FreeShippingMethod;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\LocalPickupMethod;
@@ -176,6 +194,7 @@ use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Contracts\Translation\Loader;
+use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Gate;
@@ -253,6 +272,9 @@ class EcommerceServiceProvider extends ServiceProvider
         }
 
         $this->app->singleton( SatelliteRegistry::class, static fn ( $app ): SatelliteRegistry => new SatelliteRegistry( $app ) );
+        $this->app->singleton( SettingsRegistry::class, static fn ( $app ): SettingsRegistry => new SettingsRegistry( $app ) );
+        $this->app->singleton( SettingsRepository::class );
+        $this->app->singleton( ReportRegistry::class, static fn ( $app ): ReportRegistry => new ReportRegistry( $app ) );
         // Scoped so queue workers and Octane re-read it per job / request.
         $this->app->scoped( SubStatusRegistry::class );
 
@@ -284,6 +306,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->loadMigrationsFrom( __DIR__ . '/../../database/migrations' );
 
         $this->registerTranslations();
+        $this->registerCoreSettings();
         $this->registerRequestIdMiddleware();
         $this->registerMiddlewarePriority();
         $this->registerIdempotencyMiddleware();
@@ -299,6 +322,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->registerCorePromotionRules();
         $this->registerCoreKanban();
         $this->registerCoreNotificationTemplates();
+        $this->registerCoreReports();
         $this->registerWebhookRoute();
         $this->registerPolicies();
         $this->registerRestRoutes();
@@ -871,6 +895,60 @@ class EcommerceServiceProvider extends ServiceProvider
     }
 
     /**
+     * Fills the settings allow-list (engine issue #145) and applies stored
+     * values to config. Runs first in `boot()` so the rest of the boot
+     * (gateway registration, listeners) reads the admin's values. Queue
+     * workers and Octane re-apply them before each job / request so a
+     * long-running worker sees changes made after it started. Gateway and
+     * fraud-provider registration still happens at boot, so toggling Stripe
+     * needs a worker restart.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCoreSettings(): void
+    {
+        // Booted by `config:cache` / `optimize`: keep stored values out of
+        // the cached config file, or resetting them would never take effect.
+        if ( $this->app->runningInConsole() && in_array( $_SERVER['argv'][1] ?? null, [ 'config:cache', 'optimize' ], true ) ) {
+            $this->app->make( SettingsRepository::class )->setOverlayEnabled( false );
+        }
+
+        CoreSettings::register( $this->app->make( SettingsRegistry::class ) );
+
+        $refresh = function (): void {
+            $this->app->make( SettingsRepository::class )->refresh();
+        };
+
+        $events = $this->app->make( Dispatcher::class );
+        $events->listen( JobProcessing::class, $refresh );
+        // Octane keeps the app between requests: re-read per request.
+        $events->listen( 'Laravel\\Octane\\Events\\RequestReceived', $refresh );
+    }
+
+    /**
+     * Registers the core reports (engine issue #146, parent plan §10.2
+     * item 7). Satellites add theirs to {@see ReportRegistry} from `boot()`.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCoreReports(): void
+    {
+        $reports = $this->app->make( ReportRegistry::class );
+
+        $reports->register( 'sales', SalesReport::class, [ 'label' => __( 'Sales over time' ), 'position' => 10 ] );
+        $reports->register( 'top-products', TopProductsReport::class, [ 'label' => __( 'Top products' ), 'position' => 20 ] );
+        $reports->register( 'revenue-by-category', CategoryRevenueReport::class, [ 'label' => __( 'Revenue by category' ), 'position' => 30 ] );
+        $reports->register( 'tax', TaxCollectedReport::class, [ 'label' => __( 'Tax collected' ), 'position' => 40 ] );
+        $reports->register( 'inventory', InventoryLevelsReport::class, [ 'label' => __( 'Inventory levels' ), 'position' => 50 ] );
+        $reports->register( 'low-stock', LowStockReport::class, [ 'label' => __( 'Low stock' ), 'position' => 60 ] );
+        $reports->register( 'summary', SummaryReport::class, [ 'label' => __( 'Summary' ), 'position' => 1000 ] );
+    }
+
+    /**
      * Wires the kanban engine: automations run on every card move; with
      * `artisanpack.ecommerce.kanban.auto_route`, orders are routed onto
      * boards when placed and re-routed when edited; with
@@ -890,15 +968,19 @@ class EcommerceServiceProvider extends ServiceProvider
         $events = $this->app->make( Dispatcher::class );
         $events->listen( KanbanCardMoved::class, [ KanbanAutomationRunner::class, 'handle' ] );
 
-        if ( (bool) $config->get( 'artisanpack.ecommerce.kanban.auto_route', true ) ) {
-            addAction( 'ap.ecommerce.order.placed', function ( Order $order ): void {
+        // Checked per order rather than at boot, so the admin setting
+        // takes effect without a restart.
+        addAction( 'ap.ecommerce.order.placed', function ( Order $order ): void {
+            if ( (bool) $this->app['config']->get( 'artisanpack.ecommerce.kanban.auto_route', true ) ) {
                 $this->app->make( KanbanRoutingService::class )->route( $order );
-            } );
+            }
+        } );
 
-            addAction( 'ap.ecommerce.order.edited', function ( Order $order ): void {
+        addAction( 'ap.ecommerce.order.edited', function ( Order $order ): void {
+            if ( (bool) $this->app['config']->get( 'artisanpack.ecommerce.kanban.auto_route', true ) ) {
                 $this->app->make( KanbanRoutingService::class )->reroute( $order );
-            } );
-        }
+            }
+        } );
 
         if ( ! (bool) $config->get( 'artisanpack.ecommerce.kanban.broadcast', false ) ) {
             return;
@@ -1077,6 +1159,14 @@ class EcommerceServiceProvider extends ServiceProvider
                     : null;
             } );
 
+            // Settings writes refused by SettingsRepository (unknown key,
+            // invalid value, unconfirmed base-currency change).
+            $handler->renderable( static function ( SettingsWriteException $e, $request ) {
+                return $request->routeIs( 'ecommerce.api.*' )
+                    ? Problem::make( 422, 'settings-write-failed', __( 'Settings change refused' ), $e->getMessage(), $request, $e->errors )
+                    : null;
+            } );
+
             // Expected storefront cart failures (unknown product, bad coupon, …).
             $handler->renderable( static function ( CartOperationException $e, $request ) {
                 return $request->routeIs( 'ecommerce.api.*' )
@@ -1206,6 +1296,9 @@ class EcommerceServiceProvider extends ServiceProvider
             LicenseKey::class           => LicenseKeyPolicy::class,
             NotificationTemplate::class => NotificationTemplatePolicy::class,
             OrderSubstatus::class       => OrderSubstatusPolicy::class,
+            InventoryItem::class        => InventoryPolicy::class,
+            EcommerceSetting::class     => SettingsPolicy::class,
+            Report::class               => ReportPolicy::class,
         ];
 
         $registered = Gate::policies();

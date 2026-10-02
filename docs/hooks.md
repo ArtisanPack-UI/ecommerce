@@ -257,6 +257,19 @@ See [products.md](products.md).
 | `ap.ecommerce.webhook.failed` | action | `WebhookDelivery $delivery`, `Throwable $reason` | | `Services/WebhookDeliveryService` |
 | `ap.ecommerce.webhook.subscriptionDisabled` | action | `WebhookSubscription $subscription` (the failure ceiling was reached) | | `Services/WebhookDeliveryService` |
 
+## Settings
+
+| Hook | Type | Arguments | Returns | Fired in |
+|---|---|---|---|---|
+| `ap.ecommerce.settings.updated` | action | `string $group`, `array<string, array{from, to, reset: bool}> $changes` (by setting key). Fires after commit. | | `Settings/SettingsRepository::update()` |
+| `ap.ecommerce.settings.baseCurrencyChanged` | action | `string $from`, `string $to`. Fires after commit, after `settings.updated`. Historical orders keep their snapshot. | | `Settings/SettingsRepository::update()` |
+
+## Reports
+
+| Hook | Type | Arguments | Returns | Fired in |
+|---|---|---|---|---|
+| `ap.ecommerce.reports.result` | filter | `array $result`, `string $key`, `?ReportRange $range`, `array $options` | `array` | `Reports/ReportRunner::run()` |
+
 ## API augmentation
 
 | Hook | Type | Arguments | Returns | Fired in |

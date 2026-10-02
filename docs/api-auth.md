@@ -67,6 +67,16 @@ Gate::authorize( 'viewAny', Product::class );
 | `LicenseKeyPolicy` | `LicenseKey` | `view`, `revoke` |
 | `NotificationTemplatePolicy` | `NotificationTemplate` | `viewAny`, `view`, `update` |
 | `OrderSubstatusPolicy` | `OrderSubstatus` | `viewAny`, `view`, `create`, `update`, `delete` |
+| `InventoryPolicy` | `InventoryItem` | `viewAny`, `adjust` |
+| `SettingsPolicy` | `EcommerceSetting` | `view`, `update` |
+| `ReportPolicy` | `Reports\Report` | `view` |
+
+`inventory` is separate from `product`, so warehouse staff can count stock
+without editing products: `admin/inventory`, `POST admin/products/{product}/stock`,
+and a `stock_adjustment` inside a product or variant update all need it.
+Settings and reports have no rows to authorize against, so check them by class:
+`$user->can( 'update', EcommerceSetting::class )`,
+`$user->can( 'view', Report::class )`.
 
 `OrderPolicy::view()` also lets a shopper see their own order (the order's
 customer is linked to their user id) when their token allows storefront access.
@@ -89,7 +99,7 @@ user's abilities allow:
 |---|---|
 | `ecommerce:admin` | Every admin endpoint the user is allowed |
 | `ecommerce:storefront` | Shopper surfaces only (`me`, `myOrders`, own `order`), never an admin endpoint, even for an admin user |
-| `ecommerce:{resources}.read` / `.write` | One resource family, e.g. `ecommerce:orders.read`, `ecommerce:tax-rates.write` |
+| `ecommerce:{resources}.read` / `.write` | One resource family, e.g. `ecommerce:orders.read`, `ecommerce:tax-rates.write`, `ecommerce:inventories.write`, `ecommerce:settings.read`, `ecommerce:reports.read` |
 | `*` | Sanctum's default when no abilities are given: behaves like `ecommerce:admin` |
 
 `view` / `viewAny` need `.read`; every other action needs `.write`.

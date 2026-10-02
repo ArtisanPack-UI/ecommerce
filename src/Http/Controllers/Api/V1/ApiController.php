@@ -19,8 +19,10 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Auth\EcommerceAuthorizer;
 use ArtisanPackUI\Ecommerce\Http\Resources\EcommerceResource;
 use ArtisanPackUI\Ecommerce\Http\Support\ListQuery;
+use ArtisanPackUI\Ecommerce\Http\Support\Problem;
 use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -89,5 +91,27 @@ abstract class ApiController extends Controller
         $model->loadMissing( ListQuery::includes( $request, $includes ) );
 
         return ( new $resourceClass( $model ) )->response( $request )->setStatusCode( $status );
+    }
+
+    /**
+     * A 403 problem unless the caller also holds `ecommerce.{resource}.{action}`,
+     * for routes where part of the payload needs a second ability (a stock
+     * adjustment inside a product update needs `inventory.adjust`).
+     *
+     * @since 1.0.0
+     *
+     * @param  Request  $request   Request.
+     * @param  string   $resource  Resource name.
+     * @param  string   $action    Action name.
+     *
+     * @return JsonResponse|null Null when allowed.
+     */
+    protected function forbiddenUnless( Request $request, string $resource, string $action ): ?JsonResponse
+    {
+        if ( app( EcommerceAuthorizer::class )->allows( $request->user(), $resource, $action, $request, $request ) ) {
+            return null;
+        }
+
+        return Problem::make( 403, 'forbidden', __( 'Forbidden' ), __( 'Missing ability :ability.', [ 'ability' => sprintf( 'ecommerce.%s.%s', $resource, $action ) ] ), $request );
     }
 }

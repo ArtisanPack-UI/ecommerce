@@ -64,8 +64,10 @@ use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductReviewController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductTagController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ProductVariantController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\PromotionController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ReportController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ReviewController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\SearchController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\SettingsController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ShippingMethodController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ShippingZoneController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\TaxClassController;
@@ -249,7 +251,9 @@ Route::prefix( 'admin' )->name( 'admin.' )->group( function () use ( $admin, $au
         Route::post( 'products/{product}/categories', [ ProductLinkController::class, 'categories' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.categories' );
         Route::post( 'products/{product}/tags', [ ProductLinkController::class, 'tags' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.tags' );
         Route::post( 'products/{product}/children', [ ProductLinkController::class, 'children' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.children' );
-        Route::post( 'products/{product}/stock', [ ProductLinkController::class, 'stock' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.stock' );
+        // Stock adjustments use the inventory ability (engine issue #148), so
+        // warehouse staff can count stock without editing products.
+        Route::post( 'products/{product}/stock', [ ProductLinkController::class, 'stock' ] )->middleware( $admin( 'inventory', 'adjust', true ) )->name( 'products.stock' );
 
         Route::get( 'product-categories', [ ProductCategoryController::class, 'index' ] )->middleware( $admin( 'product', 'viewAny' ) )->name( 'product-categories.index' );
         Route::post( 'product-categories', [ ProductCategoryController::class, 'store' ] )->middleware( $admin( 'product', 'create', true ) )->name( 'product-categories.store' );
@@ -268,7 +272,16 @@ Route::prefix( 'admin' )->name( 'admin.' )->group( function () use ( $admin, $au
     } );
 
     // Inventory.
-    Route::get( 'inventory', [ InventoryController::class, 'index' ] )->middleware( $admin( 'product', 'viewAny' ) )->name( 'inventory.index' );
+    Route::get( 'inventory', [ InventoryController::class, 'index' ] )->middleware( $admin( 'inventory', 'viewAny' ) )->name( 'inventory.index' );
+
+    // Settings (engine issue #145).
+    Route::get( 'settings', [ SettingsController::class, 'index' ] )->middleware( $admin( 'settings', 'view' ) )->name( 'settings.index' );
+    Route::get( 'settings/{group}', [ SettingsController::class, 'show' ] )->where( 'group', '[a-z0-9_-]+' )->middleware( $admin( 'settings', 'view' ) )->name( 'settings.show' );
+    Route::patch( 'settings/{group}', [ SettingsController::class, 'update' ] )->where( 'group', '[a-z0-9_-]+' )->middleware( $admin( 'settings', 'update', true ) )->name( 'settings.update' );
+
+    // Reports (engine issue #146).
+    Route::get( 'reports', [ ReportController::class, 'index' ] )->middleware( $admin( 'report', 'view' ) )->name( 'reports.index' );
+    Route::get( 'reports/{report}', [ ReportController::class, 'show' ] )->where( 'report', '[a-z0-9_-]+' )->middleware( $admin( 'report', 'view' ) )->name( 'reports.show' );
 
     // Activity log (products, customers, promotions; orders use their timeline).
     Route::where( [ 'product' => '[0-9]+', 'customer' => '[0-9]+', 'promotion' => '[0-9]+' ] )->group( function () use ( $admin ): void {

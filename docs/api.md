@@ -317,14 +317,19 @@ All of these use the `admin.mutate` rate policy.
 | `PATCH` / `DELETE` | `admin/products/{product}/attributes/{attribute}` | `product.update` | yes |
 | `POST` | `admin/products/{product}/categories`, `…/tags` (`{ ids, mode: sync\|attach\|detach }`) | `product.update` | yes |
 | `POST` | `admin/products/{product}/children` (`{ children: [...] }`) | `product.update` | yes |
-| `POST` | `admin/products/{product}/stock` (`{ delta, reason, product_variant_id? }`) | `product.update` | yes |
+| `POST` | `admin/products/{product}/stock` (`{ delta, reason, product_variant_id? }`) | `inventory.adjust` | yes |
 | `GET` / `POST` | `admin/product-categories` | `product.viewAny` / `product.create` | POST |
 | `PATCH` / `DELETE` | `admin/product-categories/{category}` | `product.update` / `product.delete` | yes |
 | `POST` | `admin/product-categories/reorder` (`{ parent_id, ids }`) | `product.update` | yes |
 | `GET` / `POST` | `admin/product-tags` | `product.viewAny` / `product.create` | POST |
 | `PATCH` / `DELETE` | `admin/product-tags/{tag}` | `product.update` / `product.delete` | yes |
 | `POST` | `admin/product-tags/{tag}/merge` (`{ target_id }`) | `product.update` and `product.delete` | yes |
-| `GET` | `admin/inventory` | `product.viewAny` | |
+| `GET` | `admin/inventory` | `inventory.viewAny` | |
+| `GET` | `admin/settings` (groups) | `settings.view` | |
+| `GET` | `admin/settings/{group}` (values and secret statuses) | `settings.view` | |
+| `PATCH` | `admin/settings/{group}` (`{ values, reset?, confirm_base_currency_change? }`) | `settings.update` | yes |
+| `GET` | `admin/reports` | `report.view` | |
+| `GET` | `admin/reports/{report}` (`from`, `to`, `interval`, `compare`, report options) | `report.view` | |
 | `GET` | `admin/activity/products/{product}` | `product.view` | |
 | `GET` | `admin/activity/customers/{customer}` | `customer.view` | |
 | `GET` | `admin/activity/promotions/{promotion}` | `promotion.view` | |
@@ -364,11 +369,18 @@ Address writes refused by `CustomerAddressService` come back the same way as a
 Sub-status writes refused by `OrderSubstatusService` (a taken key, a bad
 colour, a sub-status still in use, …) come back as a 422
 `substatus-write-failed`; see [kanban.md](kanban.md#order-sub-statuses).
+Settings writes refused by `SettingsRepository` (a key that is not
+allow-listed, an invalid value, an unconfirmed base-currency change) come back
+as a 422 `settings-write-failed`; see [settings.md](settings.md).
+
+A `stock_adjustment` inside `PATCH admin/products/{product}` or
+`…/variants/{variant}` needs `inventory.adjust` as well as `product.update`.
 
 Topic guides: [products.md](products.md), [customers.md](customers.md), [kanban.md](kanban.md), [reviews.md](reviews.md),
 [digital-delivery.md](digital-delivery.md), [notifications.md](notifications.md),
 [webhooks.md](webhooks.md), [search.md](search.md),
-[activity-log.md](activity-log.md).
+[activity-log.md](activity-log.md), [settings.md](settings.md),
+[reports.md](reports.md).
 
 > **Not in 1.0.0:** the parent plan's checkout endpoints (engine spec §9.2,
 > e.g. `POST /checkout/finalize`) and the admin inventory writes (§9.6). Stock

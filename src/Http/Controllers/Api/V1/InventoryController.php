@@ -50,7 +50,7 @@ class InventoryController extends ApiController
                 'stockable_id' => [ 'stockable_id', 'int' ],
                 'warehouse_id' => [ 'warehouse_id', 'int' ],
                 'low_stock'    => static fn ( Builder $query, string $value ) => in_array( $value, [ '1', 'true' ], true )
-                    ? $query->whereNotNull( 'low_stock_threshold' )->whereRaw( '(quantity_on_hand - quantity_reserved) <= low_stock_threshold' )
+                    ? $query->whereNotNull( 'low_stock_threshold' )->whereRaw( 'quantity_on_hand <= low_stock_threshold + quantity_reserved' )
                     : $query,
             ],
             [ 'quantity_on_hand' => 'quantity_on_hand' ],
