@@ -10,6 +10,10 @@
  * 2. a key passed to `__()` / `trans_choice()` is missing from any shipped
  *    catalogue (`lang/{en,es,fr,de}.json`).
  *
+ * Satellites lint themselves with `--no-engine --path=… --lang=…`: only
+ * their own sources are scanned, against their own catalogues. Blade
+ * templates are compiled before they are scanned.
+ *
  * The rule the lint enforces: a string is user-facing when it can reach an
  * end user (shopper, store admin, API client) — HTTP problem responses,
  * validation messages, exception messages the HTTP / GraphQL layers render,
@@ -30,8 +34,12 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Console\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Str;
+use Illuminate\View\Compilers\ComponentTagCompiler;
+use InvalidArgumentException;
 use Symfony\Component\Finder\Finder;
+use Throwable;
 
 /**
  * @package    ArtisanPack_UI
@@ -125,6 +133,7 @@ class LintTranslationsCommand extends Command
     protected $signature = 'ecommerce:lint:translations
         {--path=* : Additional source directories to scan (relative to base_path() or absolute).}
         {--lang= : Catalogue directory to check (defaults to the engine\'s lang/).}
+        {--no-engine : Scan only the --path directories, not the engine\'s own src/ (for linting a satellite).}
         {--sync : Add every missing key to en.json, with the English source as its own translation.}';
 
     /**
@@ -152,8 +161,8 @@ class LintTranslationsCommand extends Command
 
             foreach ( $finder as $file ) {
                 $scanned++;
-                $source   = (string) file_get_contents( $file->getRealPath() );
                 $relative = str_replace( DIRECTORY_SEPARATOR, '/', $file->getRelativePathname() );
+                $source   = $this->readSource( $file->getRealPath(), $relative, $violations );
 
                 foreach ( $this->extractKeys( $source ) as $key ) {
                     $keys[ $key ] = true;
@@ -349,6 +358,85 @@ class LintTranslationsCommand extends Command
     }
 
     /**
+     * Compiles a Blade template to PHP without rendering it.
+     *
+     * Component tags are compiled first by a compiler that treats a
+     * component it cannot resolve (one from a package the lint run did not
+     * load) as an anonymous component, so its bound attributes are still
+     * compiled — `:label="__( '…' )"` becomes `'label' => __( '…' )`. The
+     * application's Blade compiler is cloned, so its custom directives apply
+     * and its state is left alone.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $source  Template source.
+     *
+     * @return string
+     */
+    protected function compileBlade( string $source ): string
+    {
+        $blade = clone Blade::getFacadeRoot();
+        $tags  = new class( $blade->getClassComponentAliases(), $blade->getClassComponentNamespaces(), $blade ) extends ComponentTagCompiler {
+            /**
+             * The component's class, or a placeholder view name when it
+             * cannot be resolved.
+             *
+             * @since 1.0.0
+             *
+             * @param  string  $component  Component alias.
+             *
+             * @return string
+             */
+            public function componentClass( string $component )
+            {
+                try {
+                    return parent::componentClass( $component );
+                } catch ( InvalidArgumentException ) {
+                    return 'i18n-lint-unresolved::' . $component;
+                }
+            }
+        };
+
+        $blade->withoutComponentTags();
+
+        return $blade->compileString( $tags->compile( $source ) );
+    }
+
+    /**
+     * The PHP source of a scanned file.
+     *
+     * Blade templates (`*.blade.php`) are compiled first, so keys in echoes,
+     * directive arguments, and component attributes are checked like PHP;
+     * plain template text stays out of scope. Line numbers reported for a
+     * template refer to its compiled form. A template that fails to compile
+     * is reported and scanned as written.
+     *
+     * @since 1.0.0
+     *
+     * @param  string              $path        Absolute path.
+     * @param  string              $relative    Path relative to the scan root.
+     * @param  array<int, string>  $violations  Collected violations.
+     *
+     * @return string
+     */
+    protected function readSource( string $path, string $relative, array &$violations ): string
+    {
+        $source = (string) file_get_contents( $path );
+
+        if ( ! Str::endsWith( $relative, '.blade.php' ) ) {
+            return $source;
+        }
+
+        try {
+            return $this->compileBlade( $source );
+        } catch ( Throwable $exception ) {
+            $violations[] = sprintf( 'Blade template could not be compiled: %s (%s)', $relative, $exception->getMessage() );
+
+            return $source;
+        }
+    }
+
+    /**
      * Resolves the directories to scan: the engine's own `src/`, plus any
      * `--path` values.
      *
@@ -358,7 +446,7 @@ class LintTranslationsCommand extends Command
      */
     protected function resolveSourcePaths(): array
     {
-        $paths = [ realpath( __DIR__ . '/../..' ) ?: __DIR__ . '/../..' ];
+        $paths = (bool) $this->option( 'no-engine' ) ? [] : [ realpath( __DIR__ . '/../..' ) ?: __DIR__ . '/../..' ];
 
         foreach ( (array) $this->option( 'path' ) as $additional ) {
             if ( '' === $additional ) {

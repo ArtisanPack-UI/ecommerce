@@ -140,3 +140,62 @@ it( 'syncs missing keys into en.json and keeps failing until the other locales a
 
     lintTranslations()->assertExitCode( 0 );
 } );
+
+it( 'lints only the given paths with --no-engine', function (): void {
+    $lang = $this->tmp . '/satellite-lang';
+    File::ensureDirectoryExists( $lang );
+
+    foreach ( [ 'en', 'es', 'fr', 'de' ] as $locale ) {
+        File::put( $lang . '/' . $locale . '.json', json_encode( [ 'Satellite only' => 'Satellite only' ] ) );
+    }
+
+    File::put( $this->src . '/Satellite.php', "<?php\n\$label = __( 'Satellite only' );\n" );
+
+    $this->artisan( 'ecommerce:lint:translations', [ '--path' => [ $this->src ], '--lang' => $lang, '--no-engine' => true ] )
+        ->expectsOutputToContain( 'Scanned 1 file(s), 1 key(s)' )
+        ->assertExitCode( 0 );
+
+    // Without the flag the engine's own keys are checked against the satellite catalogue too.
+    $this->artisan( 'ecommerce:lint:translations', [ '--path' => [ $this->src ], '--lang' => $lang ] )
+        ->assertExitCode( 1 );
+} );
+
+it( 'reads translation keys from Blade echoes, directives, and component attributes', function (): void {
+    File::put( $this->src . '/page.blade.php', <<<'BLADE'
+<h1>{{ __( 'Blade heading key' ) }}</h1>
+<x-alert :title="__( 'Blade attribute key' )" />
+@include( 'partial', [ 'label' => trans_choice( ':count blade item|:count blade items', 2 ) ] )
+<p>Plain template text is out of scope.</p>
+BLADE );
+
+    lintTranslations( [ '--no-engine' => true ] )
+        ->expectsOutputToContain( 'Missing translation [en]: "Blade heading key"' )
+        ->expectsOutputToContain( 'Missing translation [de]: "Blade attribute key"' )
+        ->expectsOutputToContain( 'Missing translation [fr]: ":count blade item|:count blade items"' )
+        ->doesntExpectOutputToContain( 'Plain template text' )
+        ->assertExitCode( 1 );
+} );
+
+it( 'flags a bare string bound to a sink in Blade', function (): void {
+    File::put( $this->src . '/form.blade.php', <<<'BLADE'
+@include( 'field', [ 'label' => 'Shipping address line' ] )
+BLADE );
+
+    lintTranslations( [ '--no-engine' => true ] )
+        ->expectsOutputToContain( 'Bare user-facing string: form.blade.php' )
+        ->assertExitCode( 1 );
+} );
+
+it( 'passes a translated Blade template', function (): void {
+    $lang = $this->tmp . '/blade-lang';
+    File::ensureDirectoryExists( $lang );
+
+    foreach ( [ 'en', 'es', 'fr', 'de' ] as $locale ) {
+        File::put( $lang . '/' . $locale . '.json', json_encode( [ 'Blade ok' => 'Blade ok' ] ) );
+    }
+
+    File::put( $this->src . '/ok.blade.php', "<p>{{ __( 'Blade ok' ) }}</p>\n" );
+
+    $this->artisan( 'ecommerce:lint:translations', [ '--path' => [ $this->src ], '--lang' => $lang, '--no-engine' => true ] )
+        ->assertExitCode( 0 );
+} );
