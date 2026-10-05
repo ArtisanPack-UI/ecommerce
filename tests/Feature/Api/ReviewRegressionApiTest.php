@@ -84,7 +84,7 @@ it( 'answers unauthenticated requests with a problem+json 401, even without an A
 } );
 
 it( 'clears shipment tracking fields sent as null', function (): void {
-    $order = Order::factory()->create();
+    $order = Order::factory()->withSystemStatus( 'processing' )->create();
     ArtisanPackUI\Ecommerce\Models\OrderItem::factory()->create( [ 'order_id' => $order->id ] );
     $this->actingAs( ecommerceAdmin(), 'sanctum' );
 

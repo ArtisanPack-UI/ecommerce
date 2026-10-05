@@ -52,7 +52,7 @@ it( 'inherits the product weight unit when a variant overrides only the weight',
 } );
 
 it( 'rolls fulfillment status up to lines and the order and fires the fulfilled hooks', function (): void {
-    $order = Order::factory()->create();
+    $order = Order::factory()->withSystemStatus( 'processing' )->create();
     $a     = OrderItem::factory()->create( [ 'order_id' => $order->id, 'quantity' => 2 ] );
     $b     = OrderItem::factory()->create( [ 'order_id' => $order->id, 'quantity' => 1 ] );
 
@@ -80,7 +80,7 @@ it( 'rolls fulfillment status up to lines and the order and fires the fulfilled 
 } );
 
 it( 'skips lines that do not need shipping and refuses terminal orders', function (): void {
-    $order    = Order::factory()->create();
+    $order    = Order::factory()->withSystemStatus( 'processing' )->create();
     $physical = OrderItem::factory()->create( [ 'order_id' => $order->id ] );
     $digital  = OrderItem::factory()->create( [ 'order_id' => $order->id, 'product_id' => Product::factory()->digital()->create()->id ] );
 
@@ -99,7 +99,7 @@ it( 'skips lines that do not need shipping and refuses terminal orders', functio
 } );
 
 it( 'fires order.delivered when a shipment is created already delivered', function (): void {
-    $order = Order::factory()->create();
+    $order = Order::factory()->withSystemStatus( 'processing' )->create();
     OrderItem::factory()->create( [ 'order_id' => $order->id ] );
 
     $delivered = 0;
@@ -114,7 +114,7 @@ it( 'fires order.delivered when a shipment is created already delivered', functi
 } );
 
 it( 'fires trackingUpdated on pickup redemption and refuses to re-issue a collected code', function (): void {
-    $order = Order::factory()->create();
+    $order = Order::factory()->withSystemStatus( 'processing' )->create();
     OrderItem::factory()->create( [ 'order_id' => $order->id ] );
 
     $payload = null;
@@ -133,4 +133,48 @@ it( 'fires trackingUpdated on pickup redemption and refuses to re-issue a collec
     expect( $handoff->redeem( $shipment, $payload ) )->toBeTrue();
     expect( $tracking )->toBe( [ 'delivered' ] );
     expect( fn () => $handoff->issue( $shipment->fresh() ) )->toThrow( LogicException::class );
+} );
+
+describe( 'D9', function (): void {
+    it( 'ships only units that weren\'t refunded, and counts refunded units as done', function (): void {
+        $order  = Order::factory()->withSystemStatus( 'processing' )->create();
+        $line   = OrderItem::factory()->create( [ 'order_id' => $order->id, 'quantity' => 3 ] );
+        $refund = ArtisanPackUI\Ecommerce\Models\Refund::factory()->create( [ 'order_id' => $order->id, 'status' => 'succeeded' ] );
+        ArtisanPackUI\Ecommerce\Models\RefundItem::query()->create( [ 'refund_id' => $refund->id, 'order_item_id' => $line->id, 'quantity' => 2, 'amount' => 0, 'currency' => 'USD', 'restock' => false ] );
+
+        $service = app( ShipmentService::class );
+
+        expect( $service->remainingQuantities( $order ) )->toBe( [ $line->id => 1 ] );
+        expect( fn () => $service->create( $order, 'flat-rate', [ $line->id => 2 ] ) )->toThrow( InvalidArgumentException::class );
+
+        $service->create( $order, 'flat-rate', [ $line->id => 1 ] );
+
+        expect( $line->refresh()->fulfillment_status )->toBe( 'fulfilled' )
+            ->and( $order->refresh()->fulfillment_status )->toBe( 'fulfilled' );
+    } );
+
+    it( 'refuses to ship an unpaid order unless allowed', function (): void {
+        $order   = Order::factory()->create( [ 'system_status' => 'pending' ] );
+        $line    = OrderItem::factory()->create( [ 'order_id' => $order->id ] );
+        $service = app( ShipmentService::class );
+
+        expect( fn () => $service->create( $order, 'flat-rate' ) )->toThrow( InvalidArgumentException::class, 'paid' );
+
+        config()->set( 'artisanpack.ecommerce.fulfillment.allow_unpaid_shipments', true );
+
+        expect( $service->create( $order, 'flat-rate' )->items )->toHaveCount( 1 );
+        expect( $line->refresh()->fulfillment_status )->toBe( 'fulfilled' );
+    } );
+
+    it( 'never moves a delivered shipment back in transit', function (): void {
+        $order    = Order::factory()->withSystemStatus( 'processing' )->create();
+        OrderItem::factory()->create( [ 'order_id' => $order->id ] );
+        $service  = app( ShipmentService::class );
+        $shipment = $service->create( $order, 'flat-rate', [], [ 'status' => 'delivered' ] );
+
+        expect( fn () => $service->updateTracking( $shipment, new ArtisanPackUI\Ecommerce\ValueObjects\TrackingStatus( status: 'in_transit' ) ) )
+            ->toThrow( InvalidArgumentException::class );
+
+        expect( $service->updateTracking( $shipment, new ArtisanPackUI\Ecommerce\ValueObjects\TrackingStatus( status: 'exception' ) )->status )->toBe( 'exception' );
+    } );
 } );

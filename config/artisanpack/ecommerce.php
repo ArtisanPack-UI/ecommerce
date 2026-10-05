@@ -213,6 +213,10 @@ return [
     |                          Retries reuse the claim key, so carriers that
     |                          honour idempotency keys never double-charge.
     |
+    | `allow_unpaid_shipments` — Allow shipments on orders that are still
+    |                          `pending` (unpaid). Off by default: only
+    |                          `processing` and `complete` orders ship.
+    |
     */
 
     'fulfillment' => [
@@ -221,6 +225,7 @@ return [
             'proportional-by-line-total',
         ),
         'label_claim_ttl_minutes' => (int) env( 'ECOMMERCE_LABEL_CLAIM_TTL_MINUTES', 10 ),
+        'allow_unpaid_shipments'  => (bool) env( 'ECOMMERCE_ALLOW_UNPAID_SHIPMENTS', false ),
     ],
 
     /*

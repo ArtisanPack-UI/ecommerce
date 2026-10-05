@@ -56,7 +56,7 @@ function claimTestProvider( Closure $during, int $labelId = 501 ): ShippingLabel
 
 beforeEach( function (): void {
     $this->service  = app( ShipmentService::class );
-    $order          = Order::factory()->create();
+    $order          = Order::factory()->withSystemStatus( 'processing' )->create();
     OrderItem::factory()->create( [ 'order_id' => $order->id, 'quantity' => 1 ] );
     $this->shipment = $this->service->create( $order, 'flat-rate' );
 } );
