@@ -4,7 +4,7 @@
  * Creates the `ecommerce_settings` table.
  *
  * Store settings edited from an admin (engine issue #145). Each row holds
- * one allow-listed key from {@see \ArtisanPackUI\Ecommerce\Registries\SettingsRegistry}
+ * one allow-listed key from {@see ArtisanPackUI\Ecommerce\Registries\SettingsRegistry}
  * and overlays the matching `config( 'artisanpack.ecommerce' )` value.
  * Secrets (gateway credentials, signing keys) are never stored here.
  *

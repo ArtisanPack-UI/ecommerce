@@ -476,7 +476,6 @@ return [
         'signature_tolerance_seconds' => (int) env( 'ECOMMERCE_SERVICE_SIGNATURE_TOLERANCE', 300 ),
     ],
 
-
     /*
     |--------------------------------------------------------------------------
     | Outbound webhooks
@@ -514,15 +513,15 @@ return [
 
     'webhooks' => [
         'events' => [
-            \ArtisanPackUI\Ecommerce\Events\OrderStatusChanged::class,
-            \ArtisanPackUI\Ecommerce\Events\OrderSubstatusChanged::class,
-            \ArtisanPackUI\Ecommerce\Events\OrderCancelled::class,
-            \ArtisanPackUI\Ecommerce\Events\OrderEdited::class,
-            \ArtisanPackUI\Ecommerce\Events\OrderRefunded::class,
-            \ArtisanPackUI\Ecommerce\Events\PaymentSucceeded::class,
-            \ArtisanPackUI\Ecommerce\Events\PaymentFailed::class,
-            \ArtisanPackUI\Ecommerce\Events\PaymentRefunded::class,
-            \ArtisanPackUI\Ecommerce\Events\FraudBlocked::class,
+            ArtisanPackUI\Ecommerce\Events\OrderStatusChanged::class,
+            ArtisanPackUI\Ecommerce\Events\OrderSubstatusChanged::class,
+            ArtisanPackUI\Ecommerce\Events\OrderCancelled::class,
+            ArtisanPackUI\Ecommerce\Events\OrderEdited::class,
+            ArtisanPackUI\Ecommerce\Events\OrderRefunded::class,
+            ArtisanPackUI\Ecommerce\Events\PaymentSucceeded::class,
+            ArtisanPackUI\Ecommerce\Events\PaymentFailed::class,
+            ArtisanPackUI\Ecommerce\Events\PaymentRefunded::class,
+            ArtisanPackUI\Ecommerce\Events\FraudBlocked::class,
         ],
         'backoff_seconds'        => [ 60, 300, 900, 1_800, 3_600, 7_200, 14_400, 28_800, 43_200, 86_400 ],
         'max_attempts'           => (int) env( 'ECOMMERCE_WEBHOOK_MAX_ATTEMPTS', 10 ),
@@ -557,7 +556,6 @@ return [
         'index'  => env( 'ECOMMERCE_SEARCH_INDEX', 'ecommerce_products' ),
     ],
 
-
     /*
     |--------------------------------------------------------------------------
     | GraphQL
@@ -581,6 +579,12 @@ return [
     |                   aliases add up quickly.
     | `list_complexity_factor` — Assumed size of a relation list (default 5).
     | `max_batch`     — Maximum operations in one batched request.
+    | `introspection` — Allow `__schema` / `__type` queries on this schema.
+    |                   Null (the default) allows them everywhere except in
+    |                   production. These four limits govern the ecommerce
+    |                   schema only: rebing's global `graphql.security` values
+    |                   don't apply to it, and the engine never changes them
+    |                   for a host app's own schemas.
     | `subscriptions` — Broadcast subscription events over Laravel
     |                   broadcasting (requires a configured broadcaster).
     |
@@ -592,8 +596,9 @@ return [
         'max_complexity' => (int) env( 'ECOMMERCE_GRAPHQL_MAX_COMPLEXITY', 5_000 ),
 
         'list_complexity_factor' => (int) env( 'ECOMMERCE_GRAPHQL_LIST_COMPLEXITY_FACTOR', 5 ),
-        'max_batch'      => (int) env( 'ECOMMERCE_GRAPHQL_MAX_BATCH', 10 ),
-        'subscriptions' => (bool) env( 'ECOMMERCE_GRAPHQL_SUBSCRIPTIONS', false ),
+        'max_batch'              => (int) env( 'ECOMMERCE_GRAPHQL_MAX_BATCH', 10 ),
+        'introspection'          => null === env( 'ECOMMERCE_GRAPHQL_INTROSPECTION' ) ? null : (bool) env( 'ECOMMERCE_GRAPHQL_INTROSPECTION' ),
+        'subscriptions'          => (bool) env( 'ECOMMERCE_GRAPHQL_SUBSCRIPTIONS', false ),
     ],
 
     /*
@@ -649,10 +654,10 @@ return [
     */
 
     'digital' => [
-        'auto_issue'           => (bool) env( 'ECOMMERCE_DIGITAL_AUTO_ISSUE', true ),
-        'download_limit'       => (int) env( 'ECOMMERCE_DIGITAL_DOWNLOAD_LIMIT', 5 ),
-        'download_expiry_days' => (int) env( 'ECOMMERCE_DIGITAL_DOWNLOAD_EXPIRY_DAYS', 30 ),
-        'disk'                 => env( 'ECOMMERCE_DIGITAL_DISK', 'local' ),
+        'auto_issue'            => (bool) env( 'ECOMMERCE_DIGITAL_AUTO_ISSUE', true ),
+        'download_limit'        => (int) env( 'ECOMMERCE_DIGITAL_DOWNLOAD_LIMIT', 5 ),
+        'download_expiry_days'  => (int) env( 'ECOMMERCE_DIGITAL_DOWNLOAD_EXPIRY_DAYS', 30 ),
+        'disk'                  => env( 'ECOMMERCE_DIGITAL_DISK', 'local' ),
         'stream_window_minutes' => (int) env( 'ECOMMERCE_DIGITAL_STREAM_WINDOW_MINUTES', 240 ),
         'stream_byte_allowance' => (int) env( 'ECOMMERCE_DIGITAL_STREAM_BYTE_ALLOWANCE', 3 ),
         'allowed_disks'         => [ env( 'ECOMMERCE_DIGITAL_DISK', 'local' ) ],

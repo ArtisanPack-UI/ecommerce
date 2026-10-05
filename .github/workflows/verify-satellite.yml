@@ -4,13 +4,24 @@
 # only, so it never runs on the engine's own pushes. Copy
 # `stubs/workflows/verify-satellite.yml` into a satellite as the caller.
 #
-# On every call it runs `ecommerce-verify-satellite` and uploads the report
-# as a workflow artifact. On a tag ref it also signs the report in a
-# separate step (when the `ECOMMERCE_VERIFY_SIGNING_KEY` secret is provided;
-# the step that runs satellite code never sees the key) and attaches
-# `.ecommerce-verify-report.json` + `verify-report.sig` to the GitHub
-# release for that tag — which is what the docs site checks to grant the
-# "contract-verified" badge.
+# Two jobs, so the signing key never shares a runner with satellite code:
+#
+# 1. `verify` runs `ecommerce-verify-satellite` (the satellite's code, its
+#    dependencies, and their Composer plugins) with no secrets, and uploads
+#    `.ecommerce-verify-report.json` as the `ecommerce-verify-report`
+#    artifact.
+# 2. `sign` (tag refs only, when `ECOMMERCE_VERIFY_SIGNING_KEY` is passed)
+#    runs on a fresh runner. It downloads only that artifact, checks out the
+#    engine at the exact commit of this workflow file (no `composer
+#    install`), signs with the engine's dependency-free `bin/ecommerce-sign-report`,
+#    and uploads the report plus `verify-report.sig` as the
+#    `ecommerce-verify-signature` artifact.
+#
+# This workflow never creates or edits a GitHub release: under immutable
+# releases a release created here would lock before the satellite's own
+# release step could attach its assets. The satellite's release job
+# downloads `ecommerce-verify-signature` and attaches both files through its
+# own release step's `files:` (see the stub).
 name: Verify satellite
 
 on:
@@ -33,13 +44,17 @@ on:
         type: string
         default: ''
       upload-release-assets:
-        description: Attach the report and signature to the tag's GitHub release.
+        description: Deprecated and ignored. Attach the `ecommerce-verify-signature` artifact from your own release step instead.
         type: boolean
-        default: true
+        default: false
     secrets:
       ECOMMERCE_VERIFY_SIGNING_KEY:
         description: Base64 Ed25519 secret key used to sign the report on tagged releases.
         required: false
+    outputs:
+      signed:
+        description: Whether a signature was produced (the `ecommerce-verify-signature` artifact exists).
+        value: ${{ jobs.sign.outputs.signed }}
 
 permissions:
   contents: read
@@ -50,15 +65,11 @@ jobs:
     timeout-minutes: 30
     name: Contract verification
     permissions:
-      contents: write
+      contents: read
 
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
-
-    env:
-      IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
-      HAS_SIGNING_KEY: ${{ secrets.ECOMMERCE_VERIFY_SIGNING_KEY != '' }}
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -86,8 +97,6 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist
 
-      # Runs the satellite's (and its dependencies') code, so it never sees
-      # the signing key.
       - name: Verify contracts
         env:
           EXTRA_ARGS: ${{ inputs.extra-args }}
@@ -96,34 +105,79 @@ jobs:
           # shellcheck disable=SC2086
           vendor/bin/ecommerce-verify-satellite --package-version="$REF_NAME" $EXTRA_ARGS
 
-      # The key is only exposed here, to a script that loads the engine's
-      # ReportSigner and nothing else (no autoloader, no satellite code).
-      - name: Sign report
-        if: ${{ success() && env.IS_TAG == 'true' && env.HAS_SIGNING_KEY == 'true' }}
-        env:
-          ECOMMERCE_VERIFY_SIGNING_KEY: ${{ secrets.ECOMMERCE_VERIFY_SIGNING_KEY }}
-        run: vendor/bin/ecommerce-sign-report .ecommerce-verify-report.json verify-report.sig
+      - name: Note the ignored input
+        if: ${{ inputs.upload-release-assets }}
+        run: echo "::warning::upload-release-assets is ignored. Attach the ecommerce-verify-signature artifact from your own release step."
 
       - name: Upload report artifact
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ecommerce-verify-report
-          path: |
-            ${{ inputs.working-directory }}/.ecommerce-verify-report.json
-            ${{ inputs.working-directory }}/verify-report.sig
+          path: ${{ inputs.working-directory }}/.ecommerce-verify-report.json
+          include-hidden-files: true
           if-no-files-found: ignore
 
-      - name: Attach report to the release
-        if: ${{ success() && inputs.upload-release-assets && startsWith(github.ref, 'refs/tags/') }}
+  sign:
+    needs: verify
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    name: Sign report
+    permissions:
+      contents: read
+    outputs:
+      signed: ${{ steps.sign.outputs.signed }}
+
+    steps:
+      - name: Download the report
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecommerce-verify-report
+          path: report
+
+      # The engine's signer, from the same commit as this workflow file. No
+      # Composer install: nothing but the engine's ReportSigner is loaded.
+      - name: Check out the engine signer
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ArtisanPack-UI/ecommerce
+          ref: ${{ github.job_workflow_sha }}
+          path: engine
+          persist-credentials: false
+          sparse-checkout: |
+            bin/ecommerce-sign-report
+            src/Testing/Verification/ReportSigner.php
+          sparse-checkout-cone-mode: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.4'
+          extensions: sodium
+          coverage: none
+          tools: none
+
+      - name: Sign
+        id: sign
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
+          ECOMMERCE_VERIFY_SIGNING_KEY: ${{ secrets.ECOMMERCE_VERIFY_SIGNING_KEY }}
         run: |
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --verify-tag --title "$TAG" --notes ""
-          assets=(.ecommerce-verify-report.json)
-          if [ -f verify-report.sig ]; then
-            assets+=(verify-report.sig)
+          if [ -z "$ECOMMERCE_VERIFY_SIGNING_KEY" ]; then
+            echo "::notice::No ECOMMERCE_VERIFY_SIGNING_KEY was passed; the report stays unsigned."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-          gh release upload "$TAG" "${assets[@]}" --clobber
+          php engine/bin/ecommerce-sign-report report/.ecommerce-verify-report.json report/verify-report.sig
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload signed report
+        if: ${{ steps.sign.outputs.signed == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecommerce-verify-signature
+          path: |
+            report/.ecommerce-verify-report.json
+            report/verify-report.sig
+          include-hidden-files: true
+          if-no-files-found: error

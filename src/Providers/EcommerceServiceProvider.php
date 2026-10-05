@@ -211,6 +211,7 @@ use Rebing\GraphQL\GraphQL as RebingGraphQL;
 use Rebing\GraphQL\Support\ExecutionMiddleware\AddAuthUserContextValueMiddleware;
 use Rebing\GraphQL\Support\ExecutionMiddleware\AutomaticPersistedQueriesMiddleware;
 use Rebing\GraphQL\Support\ExecutionMiddleware\ValidateOperationParamsMiddleware;
+use Stripe\StripeClient;
 use Throwable;
 
 /**
@@ -223,6 +224,15 @@ use Throwable;
  */
 class EcommerceServiceProvider extends ServiceProvider
 {
+    /**
+     * Whether the "Stripe enabled but not installed" error was logged.
+     *
+     * @since 1.0.0
+     *
+     * @var bool
+     */
+    protected bool $stripeMissingLogged = false;
+
     /**
      * Registers any application services.
      *
@@ -746,7 +756,8 @@ class EcommerceServiceProvider extends ServiceProvider
      * Currently: Stripe (parent plan §7.5 + §8.1 + §8.5). The gateway is
      * only registered when `artisanpack.ecommerce.gateways.stripe.enabled`
      * is true, so a mis-configured environment can't accidentally route
-     * traffic through a provider whose secret key is unset.
+     * traffic through a provider whose secret key is unset, and only when
+     * the optional `stripe/stripe-php` package is installed.
      *
      * @since 1.0.0
      *
@@ -754,7 +765,7 @@ class EcommerceServiceProvider extends ServiceProvider
      */
     protected function registerCorePaymentGateways(): void
     {
-        if ( ! (bool) $this->app[ 'config' ]->get( 'artisanpack.ecommerce.gateways.stripe.enabled', false ) ) {
+        if ( ! $this->stripeAvailable() ) {
             return;
         }
 
@@ -799,7 +810,7 @@ class EcommerceServiceProvider extends ServiceProvider
             [ 'label' => __( 'Always approve (fraud gating disabled)' ) ],
         );
 
-        if ( (bool) $this->app[ 'config' ]->get( 'artisanpack.ecommerce.gateways.stripe.enabled', false ) ) {
+        if ( $this->stripeAvailable() ) {
             $this->app->bind( StripeRadarFraudProvider::class, function ( $app ): StripeRadarFraudProvider {
                 return new StripeRadarFraudProvider(
                     static fn () => $app->make( \ArtisanPackUI\Ecommerce\Gateways\Stripe\StripeClientFactory::class )->make(),
@@ -812,6 +823,35 @@ class EcommerceServiceProvider extends ServiceProvider
                 [ 'label' => __( 'Stripe Radar' ) ],
             );
         }
+    }
+
+    /**
+     * Whether the built-in Stripe gateway and Radar provider can be
+     * registered: the gateway is enabled and `stripe/stripe-php` (an
+     * optional dependency) is installed. An enabled gateway without the SDK
+     * logs an error once per boot instead of failing every request.
+     *
+     * @since 1.0.0
+     *
+     * @return bool
+     */
+    protected function stripeAvailable(): bool
+    {
+        if ( ! (bool) $this->app['config']->get( 'artisanpack.ecommerce.gateways.stripe.enabled', false ) ) {
+            return false;
+        }
+
+        if ( class_exists( StripeClient::class ) ) {
+            return true;
+        }
+
+        if ( ! $this->stripeMissingLogged ) {
+            $this->stripeMissingLogged = true;
+
+            Log::channel( 'ecommerce' )->error( 'The Stripe gateway is enabled (artisanpack.ecommerce.gateways.stripe.enabled) but stripe/stripe-php is not installed, so it was not registered. Run `composer require stripe/stripe-php`.' );
+        }
+
+        return false;
     }
 
     /**
@@ -1300,7 +1340,8 @@ class EcommerceServiceProvider extends ServiceProvider
     /**
      * Broadcasts GraphQL subscription events (engine spec §10.4) on the
      * `private-ecommerce.admin` channel when
-     * `artisanpack.ecommerce.graphql.subscriptions` is on. The channel is
+     * `artisanpack.ecommerce.graphql.subscriptions` is on and the optional
+     * `rebing/graphql-laravel` package is installed. The channel is
      * authorized by the `order`, `product`, and `webhookSubscription`
      * `viewAny` abilities together.
      *
@@ -1310,7 +1351,7 @@ class EcommerceServiceProvider extends ServiceProvider
      */
     protected function registerGraphQLSubscriptions(): void
     {
-        if ( ! (bool) $this->app['config']->get( 'artisanpack.ecommerce.graphql.subscriptions', false ) ) {
+        if ( ! class_exists( RebingGraphQL::class ) || ! (bool) $this->app['config']->get( 'artisanpack.ecommerce.graphql.subscriptions', false ) ) {
             return;
         }
 

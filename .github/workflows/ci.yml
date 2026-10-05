@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'release/**']
 
 permissions:
   contents: read
@@ -33,7 +33,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
-          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.json') }}
           restore-keys: ${{ runner.os }}-composer-
 
       - name: Install dependencies
@@ -43,18 +43,32 @@ jobs:
         run: ./vendor/bin/php-cs-fixer fix --dry-run --diff
 
       - name: Run PHPCS
-        continue-on-error: true
-        run: ./vendor/bin/phpcs src/ database/ tests/ config/
+        run: ./vendor/bin/phpcs
 
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    name: Test (PHP ${{ matrix.php }})
+    timeout-minutes: 20
+    name: Test (PHP ${{ matrix.php }}, Laravel ${{ matrix.laravel }}${{ matrix.stability == 'prefer-lowest' && ', lowest' || '' }})
 
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         php: ['8.2', '8.3', '8.4']
+        laravel: ['12.*', '13.*']
+        stability: ['prefer-stable']
+        include:
+          - laravel: '12.*'
+            testbench: '10.*'
+          - laravel: '13.*'
+            testbench: '11.*'
+          - php: '8.2'
+            laravel: '12.*'
+            testbench: '10.*'
+            stability: 'prefer-lowest'
+        exclude:
+          # Laravel 13 requires PHP 8.3.
+          - php: '8.2'
+            laravel: '13.*'
 
     steps:
       - uses: actions/checkout@v4
@@ -74,11 +88,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
-          key: ${{ runner.os }}-php${{ matrix.php }}-composer-${{ hashFiles('**/composer.json') }}
-          restore-keys: ${{ runner.os }}-php${{ matrix.php }}-composer-
+          key: ${{ runner.os }}-php${{ matrix.php }}-laravel${{ matrix.laravel }}-${{ matrix.stability }}-composer-${{ hashFiles('**/composer.json') }}
+          restore-keys: ${{ runner.os }}-php${{ matrix.php }}-laravel${{ matrix.laravel }}-${{ matrix.stability }}-composer-
+
+      - name: Pin Laravel and Testbench
+        run: composer require "laravel/framework:${{ matrix.laravel }}" "orchestra/testbench:${{ matrix.testbench }}" --dev --no-interaction --no-update
 
       - name: Install dependencies
-        run: composer update --no-interaction --prefer-dist
+        run: composer update --${{ matrix.stability }} --no-interaction --prefer-dist
+
+      - name: Show resolved versions
+        run: composer show laravel/framework orchestra/testbench pestphp/pest rebing/graphql-laravel stripe/stripe-php twig/twig
 
       - name: Run Unit tests
         env:
@@ -89,3 +109,59 @@ jobs:
         env:
           XDEBUG_MODE: off
         run: vendor/bin/pest tests/Feature --no-coverage
+
+  optional-dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: Without optional dependencies
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: dom, curl, libxml, mbstring, zip, pdo, sqlite, pdo_sqlite, intl
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      # stripe/stripe-php and rebing/graphql-laravel are suggested, not
+      # required: the engine must boot and serve REST without them.
+      - name: Remove the optional packages
+        run: |
+          composer remove --dev rebing/graphql-laravel stripe/stripe-php --no-interaction
+          sed -i '/Rebing/d' testbench.yaml
+
+      - name: Boot without them
+        run: vendor/bin/testbench route:list --path=api/ecommerce > /dev/null
+
+      - name: Run the optional-dependency tests
+        env:
+          XDEBUG_MODE: off
+        run: vendor/bin/pest --group=optional-dependencies --no-coverage
+
+  package-contents:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    name: Package contents
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The satellite contract test kit lives in src/Testing/Contracts and
+      # must ship in the Composer dist (audit A1).
+      - name: Contract test kit is exported
+        run: |
+          count=$(git archive HEAD | tar -t | grep -c 'src/Testing/Contracts/.*ContractTest.php' || true)
+          expected=$(find src/Testing/Contracts -name '*ContractTest.php' | wc -l)
+          echo "Exported $count of $expected contract test classes."
+          test "$count" -eq "$expected" && test "$count" -gt 0
+
+      - name: Development files are not exported
+        run: |
+          if git archive HEAD | tar -t | grep -E '^(tests/|docs/|\.github/|phpcs\.xml|\.php-cs-fixer\.dist\.php|testbench\.yaml|CONTRIBUTING\.md)'; then
+            echo "Development files leaked into the dist." && exit 1
+          fi

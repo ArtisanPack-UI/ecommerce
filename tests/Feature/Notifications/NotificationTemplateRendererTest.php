@@ -127,3 +127,30 @@ it( 'ships default copy that passes its own validation', function ( string $key 
     expect( trim( (string) $rendered['subject'] ) )->not->toBe( '' )
         ->and( $rendered['body'] )->not->toContain( '{{' );
 } )->with( array_values( ( new ReflectionClass( NotificationCatalog::class ) )->getConstants() ) );
+
+it( 'reduces objects a filter injects into plain data before rendering', function (): void {
+    $vars = [
+        'Order' => new ArrayObject( [ 'number' => 'A1', 'tags' => new ArrayObject( [ 'gift' ] ) ] ),
+        'When'  => new DateTimeImmutable( '2026-03-04 05:06:07', new DateTimeZone( 'UTC' ) ),
+        'Model' => new ArtisanPackUI\Ecommerce\Models\Product( [ 'name' => 'Mug' ] ),
+    ];
+
+    $rendered = renderer()->renderTemplate( 'test', null, '{{ Order.number }} {{ Order.tags|first }} {{ When }} {{ Model.name }}', $vars, 'database' );
+
+    expect( $rendered['body'] )->toBe( 'A1 gift 2026-03-04T05:06:07+00:00 Mug' )
+        ->and( renderer()->plainContext( $vars ) )->each->not->toBeObject();
+} );
+
+it( 'refuses objects it cannot reduce to plain data', function (): void {
+    renderer()->renderTemplate( 'test', null, '{{ Thing }}', [ 'Order' => [ 'thing' => new stdClass() ] ], 'database' );
+} )->throws( NotificationTemplateException::class, 'The notification variable Order.thing is a stdClass, which templates cannot read.' );
+
+it( 'never hands a model to the sandbox through the templateVariables filter', function (): void {
+    $product = ArtisanPackUI\Ecommerce\Models\Product::factory()->make( [ 'name' => 'Mug' ] );
+
+    // A method call on an object would be a sandbox SecurityError; on the
+    // plain array it is simply an undefined key.
+    $rendered = renderer()->renderTemplate( 'test', null, '{{ Product.name }}|{{ Product.getKey }}', [ 'Product' => $product ], 'database' );
+
+    expect( $rendered['body'] )->toBe( 'Mug|' );
+} );

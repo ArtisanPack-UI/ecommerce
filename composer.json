@@ -2,8 +2,7 @@
   "name": "artisanpack-ui/ecommerce",
   "description": "Ecommerce package for the ArtisanPack UI ecosystem.",
   "type": "library",
-  "license": "GPL-3.0-or-later",
-  "version": "1.0.0",
+  "license": "MIT",
   "autoload": {
     "psr-4": {
       "ArtisanPackUI\\Ecommerce\\": "src/"
@@ -39,28 +38,32 @@
     "laravel/sanctum": "^4.0",
     "artisanpack-ui/core": "^1.0",
     "artisanpack-ui/hooks": "^1.2",
-    "artisanpack-ui/security": "^1.0|^2.0",
+    "artisanpack-ui/security": "^1.0.3|^2.0",
     "nesbot/carbon": "^2.0|^3.0",
-    "moneyphp/money": "^4.0",
-    "stripe/stripe-php": "^13.0",
-    "rebing/graphql-laravel": "^9.0",
+    "moneyphp/money": "^4.1",
     "laravel/scout": "^10.0",
-    "twig/twig": "^3.10"
+    "twig/twig": "^3.20"
   },
   "require-dev": {
-    "pestphp/pest": "^3.8",
-    "pestphp/pest-plugin-laravel": "^3.2",
+    "pestphp/pest": "^3.8|^4.0",
+    "pestphp/pest-plugin-laravel": "^3.2|^4.0",
     "artisanpack-ui/code-style": "^1.1",
     "artisanpack-ui/code-style-pint": "^1.1",
     "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
     "laravel/pint": "^1.26",
-    "orchestra/testbench": "^10.2",
-    "friendsofphp/php-cs-fixer": "^3.75"
+    "orchestra/testbench": "^10.2|^11.0",
+    "friendsofphp/php-cs-fixer": "^3.75",
+    "stripe/stripe-php": "^13.0|^14.0|^15.0|^16.0|^17.0|^18.0|^19.0|^20.0|^21.0|^22.0",
+    "rebing/graphql-laravel": "^9.0|^10.0"
   },
   "suggest": {
+    "stripe/stripe-php": "Required for the built-in Stripe gateway and Stripe Radar fraud provider (^13.0 through ^22.0).",
+    "rebing/graphql-laravel": "Required for the GraphQL API (^9.0 on Laravel 12, ^10.0 on Laravel 13).",
+    "orchestra/testbench": "Required to run the satellite contract test kit (src/Testing/Contracts).",
+    "pestphp/pest": "Required to run the satellite contract test kit (src/Testing/Contracts).",
     "sentry/sentry-laravel": "Attaches EcommerceException context to the Sentry scope when installed.",
     "artisanpack-ui/cms-framework": "Registers the ecommerce abilities as RBAC permissions and a shop-manager role when present. Admin nav comes from the admin satellites.",
-    "artisanpack-ui/visual-editor": "Enables commerce blocks (product grid, single-product, add-to-cart, cart, checkout, price, gallery).",
+    "artisanpack-ui/visual-editor": "The commerce blocks (product grid, single product, add to cart, cart, checkout, price, gallery) ship in the storefront satellites, such as artisanpack-ui/ecommerce-storefront-livewire, which register them when visual-editor is installed.",
     "artisanpack-ui/media-library": "Product images via media-library; falls back to a nullable image_url on ProductImage.",
     "artisanpack-ui/forms": "Enables product-inquiry and quote-request form field types and draft-order spawning from submissions.",
     "artisanpack-ui/icons": "Icon slot on product categories and kanban columns.",

@@ -3,7 +3,7 @@
 /**
  * Ecommerce REST routes (`/api/ecommerce/v1`).
  *
- * Loaded by {@see \ArtisanPackUI\Ecommerce\Providers\EcommerceServiceProvider::registerRestRoutes()}
+ * Loaded by {@see ArtisanPackUI\Ecommerce\Providers\EcommerceServiceProvider::registerRestRoutes()}
  * inside a group carrying the prefix, `ecommerce.api.` name prefix, and the
  * `artisanpack.ecommerce.api.middleware` stack. Each route adds its own
  * auth / ability / rate-limit / idempotency middleware per engine spec §9:

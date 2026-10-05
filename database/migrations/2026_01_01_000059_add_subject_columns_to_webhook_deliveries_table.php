@@ -5,7 +5,7 @@
  * #142).
  *
  * The order and customer a delivery is about, taken from its payload when
- * the delivery is queued ({@see \ArtisanPackUI\Ecommerce\Services\WebhookDispatcher::subjectIds()}).
+ * the delivery is queued ({@see ArtisanPackUI\Ecommerce\Services\WebhookDispatcher::subjectIds()}).
  * Customer delete-and-anonymize uses them to find the deliveries to redact
  * through an index instead of decoding every payload. No foreign keys:
  * delivery history outlives the rows it describes.

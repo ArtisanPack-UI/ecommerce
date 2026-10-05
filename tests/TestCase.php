@@ -53,12 +53,14 @@ abstract class TestCase extends BaseTestCase
      */
     protected function getPackageProviders( $app ): array
     {
-        return [
+        // rebing/graphql-laravel is optional; the CI "optional dependencies"
+        // job removes it and runs the `optional-dependencies` group.
+        return array_values( array_filter( [
             SanctumServiceProvider::class,
             ScoutServiceProvider::class,
-            GraphQLServiceProvider::class,
+            class_exists( GraphQLServiceProvider::class ) ? GraphQLServiceProvider::class : null,
             EcommerceServiceProvider::class,
-        ];
+        ] ) );
     }
 
     /**
