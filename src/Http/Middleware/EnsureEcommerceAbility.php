@@ -27,7 +27,11 @@ namespace ArtisanPackUI\Ecommerce\Http\Middleware;
 use ArtisanPackUI\Ecommerce\Auth\EcommerceAuthorizer;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
 use Closure;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Exceptions\BackedEnumCaseNotFoundException;
+use Illuminate\Routing\Route;
+use Illuminate\Routing\Router;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -74,8 +78,26 @@ class EnsureEcommerceAbility
             return Problem::make( 401, 'unauthenticated', __( 'Unauthenticated' ), __( 'Authentication is required.' ), $request );
         }
 
+        // This runs before SubstituteBindings (auth sorts ahead of it), so
+        // bind the route's models now: the gate gets the model it guards.
+        $route = $request->route();
+
+        if ( $route instanceof Route ) {
+            $router = app( Router::class );
+
+            // A missing model isn't reported here: the ability is checked
+            // first (so ids can't be probed), and the binding pass after
+            // this middleware answers the 404.
+            try {
+                $router->substituteBindings( $route );
+                $router->substituteImplicitBindings( $route );
+            } catch ( ModelNotFoundException | BackedEnumCaseNotFoundException ) {
+                // Leave the parameters unbound.
+            }
+        }
+
         $ability = sprintf( 'ecommerce.%s.%s', $resource, $action );
-        $allowed = $this->authorizer->allows( $user, $resource, $action, $request, $request );
+        $allowed = $this->authorizer->allows( $user, $resource, $action, EcommerceAuthorizer::routeSubject( $request ), $request );
 
         if ( ! $allowed ) {
             return Problem::make( 403, 'forbidden', __( 'Forbidden' ), __( 'Missing ability :ability.', [ 'ability' => $ability ] ), $request );

@@ -117,3 +117,13 @@ it( 'allows storefront access only to storefront or admin tokens', function (): 
     Sanctum::actingAs( $shopper = ApiUser::make( 7 ), [ 'ecommerce:products.read' ] );
     expect( Gate::forUser( $shopper )->allows( 'view', $order ) )->toBeFalse();
 } );
+
+it( 'hands a gate the bound model, never the request (F12)', function (): void {
+    $first  = Order::factory()->create();
+    $second = Order::factory()->create();
+    Gate::define( 'ecommerce.order.view', fn ( $user, Order $order ): bool => $order->id === $first->id );
+    Sanctum::actingAs( ApiUser::make( 1 ), [ TokenAbilities::ADMIN ] );
+
+    $this->getJson( "/api/ecommerce/v1/orders/{$first->id}" )->assertOk();
+    $this->getJson( "/api/ecommerce/v1/orders/{$second->id}" )->assertForbidden();
+} );
