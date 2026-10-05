@@ -200,3 +200,15 @@ it( 'does not fire order.fulfilling for an order that can no longer be shipped',
     expect( fn () => $this->service->create( $this->order, 'flat-rate' ) )->toThrow( InvalidArgumentException::class );
     expect( $fired )->toBeFalse();
 } );
+
+it( 'does not fire order.fulfilling when the requested quantities are rejected', function (): void {
+    $fired = false;
+
+    addAction( 'ap.ecommerce.order.fulfilling', function () use ( &$fired ): void {
+        $fired = true;
+    } );
+
+    expect( fn () => $this->service->create( $this->order, 'flat-rate', [ $this->lineA->id => 99 ] ) )->toThrow( InvalidArgumentException::class );
+    expect( fn () => $this->service->create( $this->order, 'flat-rate', [], [ 'status' => 'teleported' ] ) )->toThrow( InvalidArgumentException::class );
+    expect( $fired )->toBeFalse();
+} );

@@ -565,3 +565,26 @@ it( 'drops payment.availableGateways entries that are not registered under their
 
     expect( array_keys( $available ) )->toBe( [ 'orch-fake' ] );
 } );
+
+it( 'still returns captured and dispatches PaymentSucceeded when a post-capture listener throws', function (): void {
+    Event::fake( [ PaymentSucceeded::class ] );
+    orchRegisterFraud( FraudDecision::approve() );
+    [ $order, $cart ] = orchMakeOrderAndCart();
+    $paidRan          = false;
+
+    addAction( 'ap.ecommerce.payment.succeeded', function (): void {
+        throw new RuntimeException( 'crm is down' );
+    } );
+    addAction( 'ap.ecommerce.order.paid', function () use ( &$paidRan ): void {
+        $paidRan = true;
+
+        throw new RuntimeException( 'erp is down' );
+    } );
+
+    $result = app( PaymentOrchestrator::class )->finalize( $order, $cart, orchShipping() );
+
+    expect( $result->isCaptured() )->toBeTrue();
+    expect( $paidRan )->toBeTrue();
+    expect( $order->fresh()->payment_status )->toBe( 'paid' );
+    Event::assertDispatched( PaymentSucceeded::class );
+} );

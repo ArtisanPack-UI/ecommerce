@@ -32,7 +32,7 @@ it( 'registers what each registered* filter returns into its registry', function
         } );
     }
 
-    addFilter( 'ap.ecommerce.payment.registeredGateways', fn ( array $entries ): array => $entries + [ 'stripe-eu' => StripeGateway::class ] );
+    addFilter( 'ap.ecommerce.payment.registeredGateways', fn ( array $entries ): array => $entries + [ StripeGateway::KEY => StripeGateway::class ] );
     $courier = new class implements ShippingMethodType {
         public function key(): string
         {
@@ -74,7 +74,7 @@ it( 'registers what each registered* filter returns into its registry', function
     $this->registrar->apply();
 
     expect( $received )->toBe( array_fill_keys( array_keys( RegistryHookRegistrar::FILTERS ), [] ) );
-    expect( app( PaymentGatewayRegistry::class )->has( 'stripe-eu' ) )->toBeTrue();
+    expect( app( PaymentGatewayRegistry::class )->get( StripeGateway::KEY ) )->toBeInstanceOf( StripeGateway::class );
     expect( app( ShippingMethodTypeRegistry::class )->get( 'courier' ) )->toBe( $courier );
     expect( app( ProductTypeRegistry::class )->has( 'gift-card' ) )->toBeTrue();
     expect( app( ProductTypeRegistry::class )->meta( 'gift-card' ) )->toBe( [ 'label' => 'Gift card' ] );

@@ -179,3 +179,27 @@ function sfHooksRateId( $test ): string
         ->first()
         ->id();
 }
+
+it( 'drops the shipping selection when the last line is removed', function (): void {
+    sfHooksFlatRate( 500 );
+    $item = $this->storefront->addItem( $this->cart, sfHooksProduct( 2_500 )->id, null, 1 );
+    $this->storefront->selectShippingMethod( $this->cart, $this->address, sfHooksRateId( $this ) );
+
+    $this->storefront->removeItem( $this->cart, $item );
+
+    expect( $this->cart->shipping_amount )->toBe( 0 );
+    expect( $this->cart->total_amount )->toBe( 0 );
+    expect( $this->cart->meta )->not->toHaveKey( StorefrontCartService::SHIPPING_RATE_META_KEY );
+} );
+
+it( 'keeps the shipping selection while the cart still has lines', function (): void {
+    sfHooksFlatRate( 500 );
+    $this->storefront->addItem( $this->cart, sfHooksProduct( 2_500 )->id, null, 1 );
+    $second = $this->storefront->addItem( $this->cart, sfHooksProduct( 1_000 )->id, null, 1 );
+    $this->storefront->selectShippingMethod( $this->cart, $this->address, sfHooksRateId( $this ) );
+
+    $this->storefront->removeItem( $this->cart, $second );
+
+    expect( $this->cart->shipping_amount )->toBe( 500 );
+    expect( $this->cart->total_amount )->toBe( 3_000 );
+} );

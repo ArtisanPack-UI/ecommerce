@@ -127,9 +127,21 @@ class WebhookController
         }
 
         if ( function_exists( 'doAction' ) ) {
-            doAction( 'ap.ecommerce.webhook_received', $provider, $result, $request );
-            doAction( sprintf( 'ap.ecommerce.gateway.%s.webhook_received', $provider ), $result, $request );
-            doAction( 'ap.ecommerce.payment.webhookReceived', $result->payload, $provider );
+            try {
+                doAction( 'ap.ecommerce.webhook_received', $provider, $result, $request );
+                doAction( sprintf( 'ap.ecommerce.gateway.%s.webhook_received', $provider ), $result, $request );
+                doAction( 'ap.ecommerce.payment.webhookReceived', $result->payload, $provider );
+            } catch ( Throwable $e ) {
+                // A listener failed part-way, so not every hook ran. Release
+                // the claim so the provider's retry dispatches again instead
+                // of being swallowed as a duplicate (at-least-once delivery),
+                // then let the error surface as a 5xx that triggers the retry.
+                if ( null !== $result->eventId ) {
+                    $this->releaseEvent( $provider, $result->eventId );
+                }
+
+                throw $e;
+            }
         }
 
         return new JsonResponse(
@@ -193,6 +205,36 @@ class WebhookController
             ] );
 
             return true;
+        }
+    }
+
+    /**
+     * Releases a claim taken by {@see self::claimEvent()} after dispatch
+     * failed, so the provider's redelivery of `$eventId` is dispatched
+     * again. A storage error is logged; the redelivery is then treated as
+     * a duplicate, which is the behaviour before this release existed.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $provider  Gateway registry key.
+     * @param  string  $eventId   Provider event id.
+     *
+     * @return void
+     */
+    private function releaseEvent( string $provider, string $eventId ): void
+    {
+        try {
+            IdempotencyRecord::query()
+                ->where( 'actor_scope', 'gateway.' . $provider )
+                ->where( 'endpoint_key', 'webhook.' . $provider )
+                ->where( 'idempotency_key', $eventId )
+                ->delete();
+        } catch ( Throwable $e ) {
+            Log::channel( 'ecommerce' )->error( 'Failed to release inbound webhook event id after a dispatch failure.', [
+                'provider' => $provider,
+                'event_id' => $eventId,
+                'error'    => $e->getMessage(),
+            ] );
         }
     }
 

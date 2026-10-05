@@ -17,6 +17,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use LogicException;
 use Money\Money;
+use RuntimeException;
 use Tests\TestCase;
 
 final class WebhookControllerTest extends TestCase
@@ -136,6 +137,46 @@ final class WebhookControllerTest extends TestCase
             'error_code'      => 'signature_mismatch',
             'response_status' => 400,
         ] );
+    }
+
+    /**
+     * @return void
+     */
+    public function test_a_failed_dispatch_releases_the_claim_so_the_provider_retry_reaches_every_hook(): void
+    {
+        $this->registerFakeGateway( 'fake' );
+
+        $failNext = true;
+        $received = 0;
+        addAction( 'ap.ecommerce.gateway.fake.webhook_received', function () use ( &$failNext ): void {
+            if ( $failNext ) {
+                $failNext = false;
+
+                throw new RuntimeException( 'listener crashed' );
+            }
+        } );
+        addAction( 'ap.ecommerce.payment.webhookReceived', function () use ( &$received ): void {
+            $received++;
+        } );
+
+        $payload = [ 'id' => 'evt_retry', 'type' => 'payment.captured' ];
+
+        $this->withoutExceptionHandling();
+
+        try {
+            $this->postJson( '/ecommerce/webhooks/fake', $payload );
+            $this->fail( 'The listener failure should surface so the provider retries.' );
+        } catch ( RuntimeException $e ) {
+            $this->assertSame( 'listener crashed', $e->getMessage() );
+        }
+
+        $this->assertSame( 0, $received );
+        $this->assertDatabaseMissing( 'idempotency_records', [ 'idempotency_key' => 'evt_retry' ] );
+
+        $this->postJson( '/ecommerce/webhooks/fake', $payload )->assertOk()->assertJsonMissing( [ 'duplicate' => true ] );
+        $this->postJson( '/ecommerce/webhooks/fake', $payload )->assertOk()->assertJsonPath( 'duplicate', true );
+
+        $this->assertSame( 1, $received );
     }
 
     /**

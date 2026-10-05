@@ -329,11 +329,9 @@ class StorefrontCartService
         return $this->mutate( $cart, function ( Cart $locked ) use ( $reason ): Cart {
             $cleared = $this->carts->clear( $locked, $reason );
 
+            // The totals refresh that follows drops the shipping selection,
+            // since the cart is now empty.
             $locked->setRawAttributes( $cleared->getAttributes(), true );
-
-            $meta = (array) ( $locked->meta ?? [] );
-            unset( $meta[ self::SHIPPING_RATE_META_KEY ] );
-            $locked->meta = $meta;
 
             return $locked;
         } );
@@ -408,6 +406,9 @@ class StorefrontCartService
      * applying (expired, usage exhausted, cart no longer eligible) is
      * dropped from the cart.
      *
+     * A cart with no lines loses its selected shipping rate and its
+     * shipping amount.
+     *
      * The subtotal runs through `ap.ecommerce.pricing.subtotal` and the
      * total through `ap.ecommerce.pricing.total` (filters). A return that
      * isn't a non-negative {@see Money} in the cart's currency is ignored.
@@ -433,6 +434,13 @@ class StorefrontCartService
             unset( $meta[ self::UNSELLABLE_META_KEY ] );
         } else {
             $meta[ self::UNSELLABLE_META_KEY ] = $unsellable;
+        }
+
+        // An empty cart is never quoted shipping, so a selection made before
+        // the last line was removed no longer applies.
+        if ( $cart->items->isEmpty() ) {
+            unset( $meta[ self::SHIPPING_RATE_META_KEY ] );
+            $cart->shipping_amount = 0;
         }
 
         $cart->meta = $meta;
