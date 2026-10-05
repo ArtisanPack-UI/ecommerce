@@ -42,11 +42,13 @@ namespace ArtisanPackUI\Ecommerce\Support;
 use ArtisanPackUI\Ecommerce\Contracts\ReplayableResult;
 use ArtisanPackUI\Ecommerce\Exceptions\IdempotencyConflictException;
 use ArtisanPackUI\Ecommerce\Models\IdempotencyRecord;
+use DateTimeInterface;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use InvalidArgumentException;
+use JsonSerializable;
 use Throwable;
 
 /**
@@ -206,6 +208,9 @@ class IdempotentAction
             $value instanceof EloquentCollection   => [ '__collection' => array_map( fn ( mixed $item ): mixed => $this->encode( $item ), $value->all() ) ],
             $value instanceof ReplayableResult     => [ '__replayable' => $value::class, 'data' => $this->encode( $value->toReplay() ) ],
             is_array( $value )                     => [ '__array' => array_map( fn ( mixed $item ): mixed => $this->encode( $item ), $value ) ],
+            // Dates and other JSON values replay in their serialized form.
+            $value instanceof DateTimeInterface    => Carbon::instance( $value )->toIso8601String(),
+            $value instanceof JsonSerializable     => $this->encode( $value->jsonSerialize() ),
             default                                => throw new InvalidArgumentException( sprintf( 'An idempotent action cannot store a %s result.', get_debug_type( $value ) ) ),
         };
     }

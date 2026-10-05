@@ -54,12 +54,14 @@ namespace ArtisanPackUI\Ecommerce\GraphQL\Fields;
 use ArtisanPackUI\Ecommerce\Exceptions\CartCurrencyMismatchException;
 use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
 use ArtisanPackUI\Ecommerce\Exceptions\CheckoutException;
+use ArtisanPackUI\Ecommerce\Exceptions\IdempotencyConflictException;
 use ArtisanPackUI\Ecommerce\Exceptions\NotificationTemplateException;
 use ArtisanPackUI\Ecommerce\Exceptions\OrderNotCancellableException;
 use ArtisanPackUI\Ecommerce\Exceptions\OrderSubstatusWriteException;
 use ArtisanPackUI\Ecommerce\Exceptions\ProductWriteException;
 use ArtisanPackUI\Ecommerce\Exceptions\RefundNotAllowedException;
 use ArtisanPackUI\Ecommerce\GraphQL\GraphQLError;
+use ArtisanPackUI\Ecommerce\GraphQL\PayloadError;
 use ArtisanPackUI\Ecommerce\GraphQL\Support\Resolvers;
 use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\AddCartItemRequest;
@@ -118,6 +120,7 @@ use ArtisanPackUI\Ecommerce\Services\RefundService;
 use ArtisanPackUI\Ecommerce\Services\StorefrontCartService;
 use ArtisanPackUI\Ecommerce\Services\WebhookSubscriptionService;
 use ArtisanPackUI\Ecommerce\Support\ClientPaymentConfig;
+use ArtisanPackUI\Ecommerce\Support\IdempotentAction;
 use ArtisanPackUI\Ecommerce\Support\ReturnUrl;
 use ArtisanPackUI\Ecommerce\ValueObjects\Address;
 use ArtisanPackUI\Ecommerce\ValueObjects\CartMergeResolution;
@@ -569,6 +572,7 @@ class Mutations
 
                 $actor = $user->getAuthIdentifier();
 
+                return $this->idempotent( 'issueRefund', $input, function () use ( $order, $input, $actor, $info ): array {
                 try {
                     $refund = app( RefundService::class )->issue(
                         $order,
@@ -589,6 +593,7 @@ class Mutations
                     'order'  => $this->r->present( $order->fresh(), 'Order', $this->r->selection( $info, 'order' ), true ),
                     'refund' => $this->r->present( $refund, 'Refund', $this->r->selection( $info, 'refund' ), true ),
                 ];
+                } );
             } ),
 
             'cancelOrder' => $this->mutation( 'CancelOrder', function ( array $input, ResolveInfo $info ): array {
@@ -604,13 +609,15 @@ class Mutations
 
                 $actor = $user->getAuthIdentifier();
 
-                try {
-                    $summary = app( OrderCancellationService::class )->cancel( $order, (string) $input['reason'], is_numeric( $actor ) ? (int) $actor : null );
-                } catch ( InvalidArgumentException $exception ) {
-                    throw new OrderNotCancellableException( $exception->getMessage(), [], 0, $exception );
-                }
+                return $this->idempotent( 'cancelOrder', $input, function () use ( $order, $input, $actor, $info ): array {
+                    try {
+                        $summary = app( OrderCancellationService::class )->cancel( $order, (string) $input['reason'], is_numeric( $actor ) ? (int) $actor : null );
+                    } catch ( InvalidArgumentException $exception ) {
+                        throw new OrderNotCancellableException( $exception->getMessage(), [], 0, $exception );
+                    }
 
-                return [ 'order' => $this->r->present( $summary->order, 'Order', $this->r->selection( $info, 'order' ), true ) ];
+                    return [ 'order' => $this->r->present( $summary->order, 'Order', $this->r->selection( $info, 'order' ), true ) ];
+                } );
             } ),
 
             'addOrderNote' => $this->mutation( 'AddOrderNote', function ( array $input, ResolveInfo $info ): array {
@@ -912,9 +919,11 @@ class Mutations
                 $item = InventoryItem::query()->find( $input['inventory_item_id'] ) ?? throw GraphQLError::notFound();
                 $this->validate( $input, AdjustInventoryRequest::baseRules() );
 
-                $item = app( InventoryService::class )->adjust( $item, (int) $input['delta'], trim( (string) $input['reason'] ) );
+                return $this->idempotent( 'adjustInventory', $input, function () use ( $item, $input, $info ): array {
+                    $item = app( InventoryService::class )->adjust( $item, (int) $input['delta'], trim( (string) $input['reason'] ) );
 
-                return [ 'inventory_item' => $this->r->present( $item, 'InventoryItem', $this->r->selection( $info, 'inventory_item' ), true ) ];
+                    return [ 'inventory_item' => $this->r->present( $item, 'InventoryItem', $this->r->selection( $info, 'inventory_item' ), true ) ];
+                } );
             } ),
         ];
     }
@@ -944,6 +953,10 @@ class Mutations
                     $payload = [ 'errors' => $this->validationErrors( $exception ) ];
                 } catch ( CartOperationException $exception ) {
                     $payload = [ 'errors' => [ [ 'field' => $exception->field, 'code' => $exception->errorCode, 'message' => $exception->getMessage() ] ] ];
+                } catch ( PayloadError $exception ) {
+                    $payload = [ 'errors' => [ [ 'field' => $exception->field, 'code' => $exception->errorCode, 'message' => $exception->getMessage() ] ] ];
+                } catch ( IdempotencyConflictException $exception ) {
+                    $payload = [ 'errors' => [ [ 'field' => null, 'code' => 'idempotency-conflict', 'message' => $exception->getMessage() ] ] ];
                 } catch ( RefundNotAllowedException $exception ) {
                     $payload = [ 'errors' => [ [ 'field' => null, 'code' => 'refund-not-allowed', 'message' => $exception->getMessage() ] ] ];
                 } catch ( OrderNotCancellableException $exception ) {
@@ -959,6 +972,39 @@ class Mutations
                 return $payload + [ 'errors' => [], 'clientMutationId' => $input['clientMutationId'] ?? null ];
             },
         ];
+    }
+
+    /**
+     * Runs a money- or stock-moving mutation once per `Idempotency-Key`
+     * (audit F9): without the header it is refused with a
+     * `idempotency-key-required` payload error; a retry with the same key
+     * and input gets the first result back; the same key with other input
+     * is an `idempotency-conflict`. Keys are scoped to the acting user.
+     *
+     * @since 1.0.0
+     *
+     * @param  string                $operation  Mutation name.
+     * @param  array<string, mixed>  $input      Mutation input (the fingerprint).
+     * @param  callable(): array<string, mixed>  $call  The mutation body.
+     *
+     * @throws PayloadError When the header is missing.
+     *
+     * @return array<string, mixed>
+     */
+    protected function idempotent( string $operation, array $input, callable $call ): array
+    {
+        $key = request()->header( 'Idempotency-Key' );
+
+        if ( ! is_string( $key ) || '' === trim( $key ) ) {
+            throw new PayloadError( null, 'idempotency-key-required', __( 'This mutation needs an Idempotency-Key header.' ) );
+        }
+
+        $user  = $this->r->user();
+        $scope = sprintf( 'graphql.%s:user:%s', $operation, null === $user ? 'guest' : (string) $user->getAuthIdentifier() );
+
+        unset( $input['clientMutationId'] );
+
+        return app( IdempotentAction::class )->run( $scope, trim( $key ), $call, (string) json_encode( $input ) );
     }
 
     /**

@@ -546,6 +546,7 @@
     "This endpoint does not support that HTTP method.": "Este endpoint no admite ese método HTTP.",
     "This file can only be streamed.": "Este archivo solo se puede reproducir en streaming.",
     "This idempotency key was already used for a different request.": "Esta clave de idempotencia ya se usó para una solicitud diferente.",
+    "This mutation needs an Idempotency-Key header.": "Esta mutación necesita un encabezado Idempotency-Key.",
     "This order can no longer be paid.": "Este pedido ya no se puede pagar.",
     "This order needs no payment. Place it directly.": "Este pedido no requiere pago. Realízalo directamente.",
     "This product already has an attribute with that key.": "Este producto ya tiene un atributo con esa clave.",
