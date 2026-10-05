@@ -45,7 +45,8 @@ use Money\Money;
  *   - a {@see Money} instance
  *   - a `[int $amount, string $currency]` tuple
  *   - an `['amount' => int, 'currency' => string]` array
- *   - null (to clear both columns)
+ *   - null (to clear both columns; only the amount when the currency column
+ *     is shared with other money attributes)
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -144,19 +145,52 @@ final class MoneyCast implements CastsAttributes
     {
         [ $amountColumn, $currencyColumn ] = $this->columns( $key );
 
+        $shared = $this->sharesCurrency( $key );
+
         if ( null === $value ) {
-            return [
-                $amountColumn   => null,
-                $currencyColumn => null,
-            ];
+            // A currency column other money attributes also use stays put.
+            return $shared
+                ? [ $amountColumn => null ]
+                : [ $amountColumn => null, $currencyColumn => null ];
         }
 
         [ $amount, $currency ] = self::extractPair( $value );
+
+        $stored = $attributes[ $currencyColumn ] ?? null;
+
+        if ( $shared && null !== $stored && '' !== (string) $stored && strtoupper( (string) $stored ) !== strtoupper( (string) $currency ) ) {
+            throw new InvalidArgumentException( sprintf(
+                'Cannot set "%s" in %s: it shares the "%s" column, which is %s for this row.',
+                $key,
+                $currency,
+                $currencyColumn,
+                strtoupper( (string) $stored ),
+            ) );
+        }
 
         return [
             $amountColumn   => $amount,
             $currencyColumn => $currency,
         ];
+    }
+
+    /**
+     * Whether the attribute's currency column is shared with other money
+     * attributes — an explicit currency column not named `{key}_currency`
+     * (e.g. `ProductPrice`'s `price`, `compare_at`, and `cost` all use
+     * `currency`). Clearing one such amount leaves the currency alone, and
+     * an amount in a different currency than the row's is refused (audit
+     * D14).
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $key  The cast attribute name.
+     *
+     * @return bool
+     */
+    private function sharesCurrency( string $key ): bool
+    {
+        return null !== $this->currencyColumn && $key . '_currency' !== $this->currencyColumn;
     }
 
     /**
