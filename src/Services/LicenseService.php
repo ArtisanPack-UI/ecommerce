@@ -144,15 +144,9 @@ class LicenseService
     {
         $normalized  = LicenseKey::normalize( $key );
         $fingerprint = self::normalizeFingerprint( $fingerprint );
-        $license     = LicenseKey::query()->with( 'orderItem' )->where( 'key', $normalized )->first();
+        $license     = $this->findByKey( $normalized );
 
-        // The indexed lookup decides the match; hash_equals() re-checks the
-        // exact bytes (the column may use a case-insensitive collation).
-        // Guessing is infeasible anyway: 25 characters from 32 is ~125 bits,
-        // and validation is rate-limited per key and per IP.
-        $matches = hash_equals( $license?->key ?? str_repeat( "\0", strlen( $normalized ) ), $normalized );
-
-        if ( null === $license || ! $matches ) {
+        if ( null === $license ) {
             return $this->result( $key, $fingerprint, null, false, 'not-found' );
         }
 
@@ -200,6 +194,36 @@ class LicenseService
         }
 
         return $this->result( $key, $fingerprint, $license->refresh(), null === $reason, $reason );
+    }
+
+    /**
+     * Finds a license by its key, through `key_hash` (keys are stored
+     * encrypted). A key hashed under a previous app key is found too and
+     * re-hashed under the current one.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $key  Key, as typed.
+     *
+     * @return LicenseKey|null
+     */
+    public function findByKey( string $key ): ?LicenseKey
+    {
+        $normalized = LicenseKey::normalize( $key );
+        $license    = LicenseKey::query()->with( 'orderItem' )->whereIn( 'key_hash', LicenseKey::hashCandidates( $normalized ) )->first();
+
+        // The hash decides the match; hash_equals() re-checks the decrypted
+        // key in constant time. Guessing is infeasible anyway (25 characters
+        // from 32 is ~125 bits) and validation is rate-limited.
+        if ( null === $license || ! hash_equals( (string) $license->key, $normalized ) ) {
+            return null;
+        }
+
+        if ( LicenseKey::hashFor( $normalized ) !== $license->key_hash ) {
+            $license->forceFill( [ 'key_hash' => LicenseKey::hashFor( $normalized ) ] )->saveQuietly();
+        }
+
+        return $license;
     }
 
     /**
@@ -285,7 +309,7 @@ class LicenseService
         for ( $attempt = 0; $attempt < 5; $attempt++ ) {
             $key = $this->generateKey();
 
-            if ( ! LicenseKey::query()->where( 'key', $key )->exists() ) {
+            if ( ! LicenseKey::query()->whereIn( 'key_hash', LicenseKey::hashCandidates( $key ) )->exists() ) {
                 return $key;
             }
         }

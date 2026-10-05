@@ -72,3 +72,23 @@ it( 'reports the installed version or dev', function (): void {
     expect( Ecommerce::version() )->toBeString()->not->toBeEmpty()
         ->and( ecommerce()::version() )->toBe( Ecommerce::version() );
 } );
+
+it( 'indexes every foreign-key column', function (): void {
+    $unindexed = [];
+
+    foreach ( Schema::getTables() as $table ) {
+        if ( ! str_starts_with( $table['name'], 'ecommerce_' ) ) {
+            continue;
+        }
+
+        $leading = array_map( static fn ( array $index ): string => $index['columns'][0], Schema::getIndexes( $table['name'] ) );
+
+        foreach ( Schema::getForeignKeys( $table['name'] ) as $foreign ) {
+            if ( ! in_array( $foreign['columns'][0], $leading, true ) ) {
+                $unindexed[] = $table['name'] . '.' . $foreign['columns'][0];
+            }
+        }
+    }
+
+    expect( $unindexed )->toBe( [] );
+} );

@@ -18,6 +18,8 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Resources;
 
+use ArtisanPackUI\Ecommerce\Models\ProductVariant;
+use ArtisanPackUI\Ecommerce\Support\MorphType;
 use Illuminate\Http\Request;
 
 /**
@@ -47,7 +49,7 @@ class InventoryItemResource extends EcommerceResource
     protected function fields( Request $request ): array
     {
         return [
-            'stockable_type'      => 'ProductVariant' === class_basename( (string) $this->resource->stockable_type ) ? 'variant' : 'product',
+            'stockable_type'      => MorphType::is( $this->resource->stockable_type, ProductVariant::class ) ? 'variant' : 'product',
             'stockable_id'        => $this->resource->stockable_id,
             'track_inventory'     => $this->resource->track_inventory,
             'quantity_on_hand'    => $this->resource->quantity_on_hand,

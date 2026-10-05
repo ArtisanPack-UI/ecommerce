@@ -592,6 +592,7 @@ class ProductService
         }
 
         return DB::transaction( function () use ( $priceable, $normalized ): Collection {
+            $this->lockPriceOwner( $priceable );
             $priceable->prices()->delete();
 
             foreach ( $normalized as $row ) {
@@ -619,19 +620,16 @@ class ProductService
         $this->assertOwnerEditable( $priceable );
 
         $clean = $this->normalizePrice( $row, null );
+        $key   = $this->windowKey( $clean['currency'], $clean['starts_at'], $clean['ends_at'] );
 
-        $query = $priceable->prices()->where( 'currency', $clean['currency'] );
+        return DB::transaction( function () use ( $priceable, $clean, $key ): ProductPrice {
+            $this->lockPriceOwner( $priceable );
 
-        foreach ( [ 'starts_at', 'ends_at' ] as $column ) {
-            null === $clean[ $column ]
-                ? $query->whereNull( $column )
-                : $query->where( $column, $clean[ $column ] );
-        }
+            $price = $priceable->prices()->where( 'window_key', $key )->first() ?? $priceable->prices()->make();
+            $price->fill( $clean )->save();
 
-        $price = $query->first() ?? $priceable->prices()->make();
-        $price->fill( $clean )->save();
-
-        return $price;
+            return $price;
+        } );
     }
 
     /**
@@ -663,21 +661,28 @@ class ProductService
             'ends_at'           => $price->ends_at,
         ], $row ), null );
 
-        $key   = $this->windowKey( $clean['currency'], $clean['starts_at'], $clean['ends_at'] );
-        $clash = ProductPrice::query()
-            ->where( 'priceable_type', $price->priceable_type )
-            ->where( 'priceable_id', $price->priceable_id )
-            ->whereKeyNot( $price->id )
-            ->get()
-            ->contains( fn ( ProductPrice $other ): bool => $this->windowKey( $other->currency, $other->starts_at, $other->ends_at ) === $key );
+        $key = $this->windowKey( $clean['currency'], $clean['starts_at'], $clean['ends_at'] );
 
-        if ( $clash ) {
-            throw ProductWriteException::field( 'currency', 'duplicate-price', __( 'Two prices share this currency and schedule.' ) );
-        }
+        return DB::transaction( function () use ( $price, $owner, $clean, $key ): ProductPrice {
+            if ( $owner instanceof Product || $owner instanceof ProductVariant ) {
+                $this->lockPriceOwner( $owner );
+            }
 
-        $price->fill( $clean )->save();
+            $clash = ProductPrice::query()
+                ->where( 'priceable_type', $price->priceable_type )
+                ->where( 'priceable_id', $price->priceable_id )
+                ->where( 'window_key', $key )
+                ->whereKeyNot( $price->id )
+                ->exists();
 
-        return $price;
+            if ( $clash ) {
+                throw ProductWriteException::field( 'currency', 'duplicate-price', __( 'Two prices share this currency and schedule.' ) );
+            }
+
+            $price->fill( $clean )->save();
+
+            return $price;
+        } );
     }
 
     /**
@@ -1121,11 +1126,17 @@ class ProductService
      */
     public function inventoryItemFor( Product|ProductVariant $stockable ): InventoryItem
     {
-        return InventoryItem::query()->firstOrCreate( [
+        $key = [
             'stockable_type' => $stockable->getMorphClass(),
             'stockable_id'   => $stockable->getKey(),
-            'warehouse_id'   => null,
-        ] );
+            'warehouse_id'   => InventoryItem::DEFAULT_WAREHOUSE,
+        ];
+
+        // Read first so the common case never attempts an insert; when the
+        // row is missing, createOrFirst() lets the unique index settle a race
+        // between two first-time callers instead of creating a second row.
+        return InventoryItem::query()->where( $key )->first()
+            ?? InventoryItem::query()->createOrFirst( $key );
     }
 
     /**
@@ -1168,6 +1179,22 @@ class ProductService
         if ( $product->typeIsMissing() ) {
             throw ProductWriteException::field( 'type', 'type-missing', (string) $product->typeWarning() );
         }
+    }
+
+    /**
+     * Locks the price owner's row so concurrent price writes for the same
+     * product or variant run one at a time. The unique window index stays
+     * the backstop.
+     *
+     * @since 1.0.0
+     *
+     * @param  Product|ProductVariant  $priceable  Owner.
+     *
+     * @return void
+     */
+    protected function lockPriceOwner( Product|ProductVariant $priceable ): void
+    {
+        $priceable->newQuery()->whereKey( $priceable->getKey() )->lockForUpdate()->first();
     }
 
     /**
@@ -1766,7 +1793,7 @@ class ProductService
      */
     protected function windowKey( string $currency, ?DateTimeInterface $starts, ?DateTimeInterface $ends ): string
     {
-        return $currency . '|' . ( $starts?->getTimestamp() ?? '' ) . '|' . ( $ends?->getTimestamp() ?? '' );
+        return ProductPrice::windowKeyFor( $currency, $starts, $ends );
     }
 
     /**

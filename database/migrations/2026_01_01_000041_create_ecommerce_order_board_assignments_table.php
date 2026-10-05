@@ -42,6 +42,8 @@ return new class extends Migration {
 
             $table->unique( [ 'order_id', 'board_id' ], 'ecommerce_order_board_assignments_uk' );
             $table->index( [ 'board_id', 'substatus_id' ], 'ecommerce_order_board_assignments_board_substatus_idx' );
+            $table->index( 'substatus_id', 'ecommerce_order_board_assignments_substatus_idx' );
+
             $table->foreign( 'order_id', 'ecommerce_order_board_assignments_order_fk' )
                 ->references( 'id' )
                 ->on( 'ecommerce_orders' )

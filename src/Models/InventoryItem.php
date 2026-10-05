@@ -43,12 +43,22 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  * @property int                                                                    $quantity_reserved
  * @property bool                                                                   $allow_backorder
  * @property int|null                                                               $low_stock_threshold
- * @property int|null                                                               $warehouse_id
+ * @property int                                                                    $warehouse_id
  * @property \Illuminate\Database\Eloquent\Collection<int, InventoryReservation>    $reservations
  */
 class InventoryItem extends Model
 {
     use HasFactory;
+
+    /**
+     * `warehouse_id` of the default warehouse. Multi-warehouse satellites
+     * use their own ids; the engine itself stocks only this one.
+     *
+     * @since 1.0.0
+     *
+     * @var int
+     */
+    public const DEFAULT_WAREHOUSE = 0;
 
     /**
      * @since 1.0.0
@@ -83,6 +93,7 @@ class InventoryItem extends Model
         'quantity_on_hand'  => 0,
         'quantity_reserved' => 0,
         'allow_backorder'   => false,
+        'warehouse_id'      => self::DEFAULT_WAREHOUSE,
     ];
 
     /**
@@ -134,6 +145,7 @@ class InventoryItem extends Model
             'quantity_reserved'   => 'integer',
             'allow_backorder'     => 'boolean',
             'low_stock_threshold' => 'integer',
+            'warehouse_id'        => 'integer',
         ];
     }
 

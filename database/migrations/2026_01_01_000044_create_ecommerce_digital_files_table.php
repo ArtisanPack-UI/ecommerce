@@ -41,6 +41,8 @@ return new class extends Migration {
             $table->string( 'version', 60 )->nullable();
             $table->boolean( 'is_streaming_only' )->default( false );
             $table->char( 'checksum_sha256', 64 )->nullable();
+            // Retired: issues no new entitlements; existing ones keep working.
+            $table->timestamp( 'archived_at' )->nullable();
             $table->timestamps();
 
             $table->index( 'product_id', 'ecommerce_digital_files_product_idx' );

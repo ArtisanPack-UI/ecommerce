@@ -21,6 +21,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Models;
 
 use ArtisanPackUI\Ecommerce\Database\Factories\OrderFactory;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -265,6 +266,21 @@ class Order extends Model
     public function boardAssignments(): HasMany
     {
         return $this->hasMany( OrderBoardAssignment::class );
+    }
+
+    /**
+     * Stores the email trimmed and lowercased, so lookups can use the
+     * index with a plain comparison.
+     *
+     * @since 1.0.0
+     *
+     * @return Attribute<string|null, string|null>
+     */
+    protected function email(): Attribute
+    {
+        return Attribute::make(
+            set: static fn ( ?string $value ): ?string => null === $value ? null : mb_strtolower( trim( $value ) ),
+        );
     }
 
     /**

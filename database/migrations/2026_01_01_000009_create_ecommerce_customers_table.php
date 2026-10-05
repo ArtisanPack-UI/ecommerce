@@ -41,8 +41,10 @@ return new class extends Migration {
             $table->json( 'meta' )->nullable();
             $table->timestamps();
 
-            $table->index( 'email', 'ecommerce_customers_email_idx' );
-            $table->index( 'user_id', 'ecommerce_customers_user_idx' );
+            // One customer per (lowercased) email and per linked user. A
+            // unique index allows any number of NULL user_ids (guests).
+            $table->unique( 'email', 'ecommerce_customers_email_uk' );
+            $table->unique( 'user_id', 'ecommerce_customers_user_uk' );
         } );
     }
 

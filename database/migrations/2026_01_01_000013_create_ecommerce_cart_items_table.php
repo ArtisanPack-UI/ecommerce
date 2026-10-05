@@ -47,6 +47,8 @@ return new class extends Migration {
                 [ 'cart_id', 'product_id', 'product_variant_id', 'options_hash' ],
                 'ecommerce_cart_items_dedupe_idx',
             );
+            $table->index( 'product_id', 'ecommerce_cart_items_product_idx' );
+            $table->index( 'product_variant_id', 'ecommerce_cart_items_product_variant_idx' );
 
             $table->foreign( 'cart_id', 'ecommerce_cart_items_cart_fk' )
                 ->references( 'id' )

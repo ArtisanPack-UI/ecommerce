@@ -131,7 +131,8 @@ class DigitalDownloadService
 
     /**
      * The digital files an order line unlocks: its variant's files plus the
-     * product's product-wide (variant-less) files.
+     * product's product-wide (variant-less) files. Archived files issue
+     * nothing new.
      *
      * @since 1.0.0
      *
@@ -146,6 +147,7 @@ class DigitalDownloadService
         }
 
         return DigitalFile::query()
+            ->whereNull( 'archived_at' )
             ->where( function ( Builder $query ) use ( $item ): void {
                 if ( null !== $item->product_variant_id ) {
                     $query->orWhere( 'product_variant_id', $item->product_variant_id );

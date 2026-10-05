@@ -48,6 +48,7 @@ return new class extends Migration {
 
             $table->index( 'order_id', 'ecommerce_order_items_order_idx' );
             $table->index( 'product_id', 'ecommerce_order_items_product_idx' );
+            $table->index( 'product_variant_id', 'ecommerce_order_items_product_variant_idx' );
 
             $table->foreign( 'order_id', 'ecommerce_order_items_order_fk' )
                 ->references( 'id' )

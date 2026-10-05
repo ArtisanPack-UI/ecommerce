@@ -35,10 +35,14 @@ return new class extends Migration {
             $table->bigInteger( 'cost_amount' )->nullable();
             $table->timestamp( 'starts_at' )->nullable();
             $table->timestamp( 'ends_at' )->nullable();
+            // `{currency}|{starts unix}|{ends unix}`, written by ProductPrice on
+            // save. The unique index can't use the nullable window columns
+            // themselves (NULLs are distinct), so it uses this instead.
+            $table->string( 'window_key', 40 );
             $table->timestamps();
 
             $table->unique(
-                [ 'priceable_type', 'priceable_id', 'currency', 'starts_at', 'ends_at' ],
+                [ 'priceable_type', 'priceable_id', 'window_key' ],
                 'ecommerce_product_prices_window_uk',
             );
             $table->index( [ 'priceable_type', 'priceable_id' ], 'ecommerce_product_prices_priceable_idx' );

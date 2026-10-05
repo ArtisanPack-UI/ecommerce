@@ -128,6 +128,6 @@ class WebhookTrigger extends AbstractKanbanAutomationTrigger
             'to_column_id'  => (int) $automation->to_column_id,
             'occurred_at'   => Carbon::now()->format( DATE_ATOM ),
             'order'         => $payloads->serialize( $order ),
-        ], $this->optionalString( $config, 'secret' ) ) );
+        ], (int) $automation->id ) );
     }
 }

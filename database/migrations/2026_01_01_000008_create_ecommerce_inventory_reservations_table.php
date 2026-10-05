@@ -39,6 +39,7 @@ return new class extends Migration {
                 [ 'reservable_type', 'reservable_id' ],
                 'ecommerce_inventory_reservations_reservable_idx',
             );
+            $table->index( 'inventory_item_id', 'ecommerce_inventory_reservations_inventory_item_idx' );
 
             $table->foreign( 'inventory_item_id', 'ecommerce_inventory_reservations_item_fk' )
                 ->references( 'id' )

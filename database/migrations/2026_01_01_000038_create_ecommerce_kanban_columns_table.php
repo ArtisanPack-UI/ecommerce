@@ -44,6 +44,8 @@ return new class extends Migration {
 
             $table->unique( [ 'board_id', 'substatus_id' ], 'ecommerce_kanban_columns_board_substatus_uk' );
             $table->index( 'board_id', 'ecommerce_kanban_columns_board_idx' );
+            $table->index( 'substatus_id', 'ecommerce_kanban_columns_substatus_idx' );
+
             $table->foreign( 'board_id', 'ecommerce_kanban_columns_board_fk' )
                 ->references( 'id' )
                 ->on( 'ecommerce_kanban_boards' )

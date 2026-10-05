@@ -32,10 +32,14 @@ namespace ArtisanPackUI\Ecommerce\Services;
 
 use ArtisanPackUI\Ecommerce\Events\OrderEdited;
 use ArtisanPackUI\Ecommerce\Exceptions\OrderNotEditableException;
+use ArtisanPackUI\Ecommerce\Models\DigitalDownload;
+use ArtisanPackUI\Ecommerce\Models\LicenseKey;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderEdit;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
 use ArtisanPackUI\Ecommerce\Models\OrderTimelineEntry;
+use ArtisanPackUI\Ecommerce\Models\RefundItem;
+use ArtisanPackUI\Ecommerce\Models\ShipmentItem;
 use ArtisanPackUI\Ecommerce\ValueObjects\OrderEditResult;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -89,6 +93,16 @@ class OrderEditService
      * @var int
      */
     protected const MAX_ITEMS_PER_DIRECTIVE = 200;
+
+    /**
+     * System statuses in which an order can't be edited (or rolled back):
+     * its money and stock have already been settled.
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    protected const LOCKED_STATUSES = [ 'cancelled', 'refunded', 'failed' ];
 
     /**
      * Applies an edit to `$order`.
@@ -204,6 +218,10 @@ class OrderEditService
             $order->load( 'items' );
             $snapshot = $this->snapshotOrder( $order );
 
+            // A rollback is an edit: the same lifecycle rules apply to the
+            // fields and lines it would put back.
+            $this->guardEditability( $order, $this->rollbackKeys( $snapshot, (array) $target ) );
+
             $this->restoreFromSnapshot( $order, $target );
 
             $order->save();
@@ -294,6 +312,13 @@ class OrderEditService
      */
     protected function guardEditability( Order $order, array $edit ): void
     {
+        if ( in_array( (string) $order->system_status, self::LOCKED_STATUSES, true ) ) {
+            throw new OrderNotEditableException( __( 'Order :order is :status and can no longer be edited.', [
+                'order'  => $order->id,
+                'status' => (string) $order->system_status,
+            ] ) );
+        }
+
         $fulfillment = (string) $order->fulfillment_status;
 
         if ( 'unfulfilled' === $fulfillment ) {
@@ -362,6 +387,7 @@ class OrderEditService
 
         if ( ! empty( $items['remove'] ) ) {
             $ids = array_map( 'intval', (array) $items['remove'] );
+            $this->guardRemovable( $order, $ids );
             OrderItem::query()
                 ->where( 'order_id', $order->id )
                 ->whereIn( 'id', $ids )
@@ -385,6 +411,10 @@ class OrderEditService
 
                 $changes = (array) $changes;
                 $this->assertChangeBounds( (int) $id, $changes );
+
+                if ( array_key_exists( 'quantity', $changes ) ) {
+                    $this->guardQuantity( $order, $item, (int) $changes['quantity'] );
+                }
 
                 foreach ( [ 'quantity', 'unit_price_amount', 'tax_amount', 'shipping_amount', 'discount_amount' ] as $field ) {
                     if ( array_key_exists( $field, $changes ) ) {
@@ -613,6 +643,14 @@ class OrderEditService
         $targetItems = (array) ( $snapshot['items'] ?? [] );
         $targetIds   = array_map( 'intval', array_keys( $targetItems ) );
 
+        $this->guardRemovable( $order, $order->items->pluck( 'id' )->map( 'intval' )->diff( $targetIds )->values()->all() );
+
+        foreach ( $order->items as $current ) {
+            if ( isset( $targetItems[ $current->id ]['quantity'] ) ) {
+                $this->guardQuantity( $order, $current, (int) $targetItems[ $current->id ]['quantity'] );
+            }
+        }
+
         OrderItem::query()
             ->where( 'order_id', $order->id )
             ->when(
@@ -817,6 +855,107 @@ class OrderEditService
             $paymentActionRequired,
             $refundDelta,
         );
+    }
+
+    /**
+     * Refuses to remove lines that have history: refunds, shipments,
+     * license keys, or download entitlements reference them, and deleting
+     * the line would delete (or orphan) that record of what happened.
+     *
+     * @since 1.0.0
+     *
+     * @param  Order           $order  The locked order.
+     * @param  array<int, int> $ids    Ids of the lines to remove.
+     *
+     * @throws OrderNotEditableException When a line has history.
+     *
+     * @return void
+     */
+    protected function guardRemovable( Order $order, array $ids ): void
+    {
+        if ( [] === $ids ) {
+            return;
+        }
+
+        $history = [
+            'refunds'       => RefundItem::query()->whereIn( 'order_item_id', $ids )->pluck( 'order_item_id' ),
+            'shipments'     => ShipmentItem::query()->whereIn( 'order_item_id', $ids )->pluck( 'order_item_id' ),
+            'license keys'  => LicenseKey::query()->whereIn( 'order_item_id', $ids )->pluck( 'order_item_id' ),
+            'downloads'     => DigitalDownload::query()->whereIn( 'order_item_id', $ids )->pluck( 'order_item_id' ),
+        ];
+
+        foreach ( $history as $kind => $itemIds ) {
+            if ( $itemIds->isNotEmpty() ) {
+                throw new OrderNotEditableException( __( 'Line :item on order :order has :history and can\'t be removed.', [
+                    'item'    => (int) $itemIds->first(),
+                    'order'   => $order->id,
+                    'history' => match ( $kind ) {
+                        'refunds'      => __( 'refunds' ),
+                        'shipments'    => __( 'shipments' ),
+                        'license keys' => __( 'license keys' ),
+                        default        => __( 'download entitlements' ),
+                    },
+                ] ) );
+            }
+        }
+    }
+
+    /**
+     * Refuses to set a line's quantity below what has already been refunded
+     * or shipped from it.
+     *
+     * @since 1.0.0
+     *
+     * @param  Order      $order     The locked order.
+     * @param  OrderItem  $item      The line.
+     * @param  int        $quantity  The new quantity.
+     *
+     * @throws OrderNotEditableException When the quantity is too low.
+     *
+     * @return void
+     */
+    protected function guardQuantity( Order $order, OrderItem $item, int $quantity ): void
+    {
+        $refunded = (int) RefundItem::query()->where( 'order_item_id', $item->id )->sum( 'quantity' );
+        $shipped  = (int) ShipmentItem::query()->where( 'order_item_id', $item->id )->sum( 'quantity' );
+        $floor    = max( $refunded, $shipped );
+
+        if ( $quantity < $floor ) {
+            throw new OrderNotEditableException( __( 'Line :item on order :order can\'t go below :floor: that many units were already refunded or shipped.', [
+                'item'  => $item->id,
+                'order' => $order->id,
+                'floor' => $floor,
+            ] ) );
+        }
+    }
+
+    /**
+     * The edit keys a rollback from `$current` back to `$target` amounts to,
+     * for {@see self::guardEditability()}.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<string, mixed>  $current  Snapshot of the order now.
+     * @param  array<string, mixed>  $target   Snapshot the rollback restores.
+     *
+     * @return array<string, true>
+     */
+    protected function rollbackKeys( array $current, array $target ): array
+    {
+        $diff = $this->buildDiff( $current, $target );
+        $keys = array_fill_keys( array_keys( $diff['fields'] ), true );
+
+        if ( [] !== $diff['items']['added'] || [] !== $diff['items']['removed'] || [] !== $diff['items']['changed'] ) {
+            $keys['items'] = true;
+        }
+
+        foreach ( [ 'shipping_amount', 'tax_amount', 'discount_amount' ] as $field ) {
+            if ( ( $diff['totals']['before'][ $field ] ?? null ) !== ( $diff['totals']['after'][ $field ] ?? null ) ) {
+                $keys[ $field ] = true;
+            }
+        }
+
+        return $keys;
     }
 
     /**

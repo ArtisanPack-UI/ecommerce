@@ -33,7 +33,11 @@ return new class extends Migration {
             $table->bigIncrements( 'id' );
             $table->unsignedBigInteger( 'order_item_id' );
             $table->unsignedBigInteger( 'digital_file_id' )->nullable();
-            $table->string( 'key', 255 );
+            // The key itself, encrypted (shown to admins and the owner).
+            $table->text( 'key' );
+            // HMAC-SHA256 of the normalized key under the app key: the lookup
+            // column, so plaintext keys never sit in the table.
+            $table->char( 'key_hash', 64 );
             $table->unsignedInteger( 'activations_limit' )->nullable();
             $table->unsignedInteger( 'activations_count' )->default( 0 );
             $table->timestamp( 'expires_at' )->nullable();
@@ -42,13 +46,14 @@ return new class extends Migration {
             $table->json( 'meta' );
             $table->timestamps();
 
-            $table->unique( 'key', 'ecommerce_license_keys_key_uk' );
+            $table->unique( 'key_hash', 'ecommerce_license_keys_key_hash_uk' );
             $table->index( 'order_item_id', 'ecommerce_license_keys_order_item_idx' );
+            $table->index( 'digital_file_id', 'ecommerce_license_keys_digital_file_idx' );
 
             $table->foreign( 'order_item_id', 'ecommerce_license_keys_order_item_fk' )
                 ->references( 'id' )
                 ->on( 'ecommerce_order_items' )
-                ->cascadeOnDelete();
+                ->restrictOnDelete();
 
             $table->foreign( 'digital_file_id', 'ecommerce_license_keys_file_fk' )
                 ->references( 'id' )

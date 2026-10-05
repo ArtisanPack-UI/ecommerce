@@ -70,6 +70,7 @@ return new class extends Migration {
             $table->index( 'payment_status', 'ecommerce_orders_payment_status_idx' );
             $table->index( 'fulfillment_status', 'ecommerce_orders_fulfillment_status_idx' );
             $table->index( 'placed_at', 'ecommerce_orders_placed_at_idx' );
+            $table->index( 'substatus_id', 'ecommerce_orders_substatus_idx' );
 
             $table->foreign( 'customer_id', 'ecommerce_orders_customer_fk' )
                 ->references( 'id' )

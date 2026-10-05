@@ -57,6 +57,7 @@ class DigitalFileResource extends EcommerceResource
             'version'            => $this->resource->version,
             'is_streaming_only'  => $this->resource->is_streaming_only,
             'checksum_sha256'    => $this->resource->checksum_sha256,
+            'archived_at'        => $this->resource->archived_at,
             'created_at'         => $this->resource->created_at,
             'updated_at'         => $this->resource->updated_at,
         ];

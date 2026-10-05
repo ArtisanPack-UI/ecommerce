@@ -171,9 +171,10 @@ class CustomerClaimService
         $needle = $this->normalizePostal( $postalCode );
 
         $candidates = Order::query()
-            ->whereRaw( 'LOWER(email) = ?', [ strtolower( $customer->email ) ] )
+            ->where( 'email', mb_strtolower( (string) $customer->email ) )
             ->where( 'order_number', $orderNumber )
             ->where( 'is_claimed', false )
+            ->whereNull( 'customer_id' )
             ->get();
 
         foreach ( $candidates as $candidate ) {
@@ -217,8 +218,9 @@ class CustomerClaimService
         }
 
         $orders = Order::query()
-            ->whereRaw( 'LOWER(email) = ?', [ strtolower( $customer->email ) ] )
+            ->where( 'email', mb_strtolower( (string) $customer->email ) )
             ->where( 'is_claimed', false )
+            ->whereNull( 'customer_id' )
             ->lockForUpdate()
             ->get();
 

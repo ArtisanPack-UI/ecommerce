@@ -681,6 +681,7 @@ final class ResourceSchemas
                 'version'            => 'String',
                 'is_streaming_only'  => 'Boolean!',
                 'checksum_sha256'    => 'String',
+                'archived_at'        => 'DateTime',
             ] + $timestamps ),
 
             'DigitalDownload' => self::schema( Resources\DigitalDownloadResource::class, Models\DigitalDownload::class, 'A download entitlement for one order line and file.', [

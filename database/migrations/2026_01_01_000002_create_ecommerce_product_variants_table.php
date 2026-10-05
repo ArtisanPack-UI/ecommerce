@@ -43,6 +43,8 @@ return new class extends Migration {
             $table->unsignedInteger( 'position' )->default( 0 );
             $table->json( 'meta' )->nullable();
             $table->timestamps();
+
+            $table->index( 'product_id', 'ecommerce_product_variants_product_idx' );
         } );
     }
 

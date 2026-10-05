@@ -181,3 +181,51 @@ it( 'lets admins find and revoke keys', function (): void {
         ->assertJsonPath( 'data.revoked', true )
         ->assertJsonPath( 'data.valid', false );
 } );
+
+it( 'stores keys encrypted and looks them up by hash', function (): void {
+    $license = app( LicenseService::class )->issue( OrderItem::factory()->create() );
+    $row     = Illuminate\Support\Facades\DB::table( 'ecommerce_license_keys' )->where( 'id', $license->id )->first();
+
+    expect( $row->key )->not->toBe( $license->key )
+        ->and( $row->key )->not->toContain( $license->key )
+        ->and( $row->key_hash )->toBe( LicenseKey::hashFor( $license->key ) )
+        ->and( $license->toArray() )->not->toHaveKey( 'key_hash' );
+
+    expect( app( LicenseService::class )->validate( strtolower( " {$license->key} " ), 'machine-1' )['valid'] )->toBeTrue()
+        ->and( app( LicenseService::class )->validate( 'AAAAA-BBBBB-CCCCC-DDDDD-EEEEE', 'machine-1' )['reason'] )->toBe( 'not-found' );
+} );
+
+it( 'keeps validating keys after an app key rotation', function (): void {
+    $license = app( LicenseService::class )->issue( OrderItem::factory()->create() );
+    $oldKey  = config( 'app.key' );
+    $oldHash = $license->key_hash;
+
+    // Rotate: the old key moves to previous_keys, as Laravel documents.
+    config()->set( 'app.previous_keys', [ $oldKey ] );
+    config()->set( 'app.key', 'base64:' . base64_encode( random_bytes( 32 ) ) );
+    app()->forgetInstance( 'encrypter' );
+    Illuminate\Support\Facades\Crypt::clearResolvedInstance( 'encrypter' );
+
+    expect( app( LicenseService::class )->validate( $license->key, 'machine-1' )['valid'] )->toBeTrue()
+        ->and( $license->fresh()->key_hash )->not->toBe( $oldHash )
+        ->and( $license->fresh()->key_hash )->toBe( LicenseKey::hashFor( $license->key ) );
+} );
+
+it( 'never stores a validation response for replay', function (): void {
+    $license = app( LicenseService::class )->issue( OrderItem::factory()->create() );
+
+    $this->postJson( LICENSE_API . '/license/validate', [ 'key' => $license->key, 'fingerprint' => 'a' ], idem() )->assertOk();
+
+    expect( (string) ArtisanPackUI\Ecommerce\Models\IdempotencyRecord::query()->value( 'response_body' ) )->not->toContain( 'valid' );
+} );
+
+it( 'filters admin listings by the plain key', function (): void {
+    $license = app( LicenseService::class )->issue( OrderItem::factory()->create() );
+    app( LicenseService::class )->issue( OrderItem::factory()->create() );
+
+    $this->actingAs( ecommerceAdmin(), 'sanctum' )
+        ->getJson( LICENSE_API . '/admin/license-keys?filter[key]=' . strtolower( $license->key ) )
+        ->assertOk()
+        ->assertJsonCount( 1, 'data' )
+        ->assertJsonPath( 'data.0.key', $license->key );
+} );

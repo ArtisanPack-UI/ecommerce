@@ -37,6 +37,7 @@ return new class extends Migration {
                 [ 'product_variant_id', 'product_attribute_id' ],
                 'ecommerce_product_variant_option_values_uk',
             );
+            $table->index( 'product_attribute_id', 'ecommerce_product_variant_option_values_attribute_idx' );
             $table->index(
                 'product_attribute_value_id',
                 'ecommerce_product_variant_option_values_value_idx',

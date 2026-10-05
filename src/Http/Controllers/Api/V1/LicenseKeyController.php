@@ -25,6 +25,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\RevokeLicenseRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ValidateLicenseRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\LicenseKeyResource;
@@ -62,6 +63,11 @@ class LicenseKeyController extends ApiController
     #[ApiOperation( summary: 'Validate a license key', description: 'Returns { valid, expires_at, product, revoked, reason }. A fingerprint the key has not seen before is activated when a slot is free.' )]
     public function validateKey( ValidateLicenseRequest $request ): JsonResponse
     {
+        // A stored replay would keep what a key unlocks next to the
+        // idempotency key, so it is withheld. (Set on the base request: the
+        // form request carries its own copy of the attributes.)
+        request()->attributes->set( IdempotencyMiddleware::REDACT_ATTRIBUTE, [ IdempotencyMiddleware::REDACT_ALL ] );
+
         return new JsonResponse( [
             'data' => $this->licenses->validate( (string) $request->validated( 'key' ), (string) $request->validated( 'fingerprint' ), $request->ip() ),
         ] );
@@ -82,7 +88,7 @@ class LicenseKeyController extends ApiController
             $request,
             LicenseKeyResource::class,
             [
-                'key'           => static fn ( Builder $query, string $value ) => $query->where( 'key', LicenseKey::normalize( $value ) ),
+                'key'           => static fn ( Builder $query, string $value ) => $query->whereIn( 'key_hash', LicenseKey::hashCandidates( $value ) ),
                 'order_item_id' => [ 'order_item_id', 'int' ],
                 'is_revoked'    => [ 'is_revoked', 'bool' ],
             ],

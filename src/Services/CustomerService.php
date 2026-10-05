@@ -196,23 +196,22 @@ class CustomerService
     {
         $normalized = $this->normalizeEmail( $email );
 
-        return DB::transaction( function () use ( $normalized, $attributes ): Customer {
-            $existing = Customer::query()
-                ->whereRaw( 'LOWER(email) = ?', [ $normalized ] )
-                ->lockForUpdate()
-                ->first();
+        // Emails are stored lowercased, so this uses the unique index.
+        $existing = Customer::query()->where( 'email', $normalized )->first();
 
-            if ( null !== $existing ) {
-                return $existing;
-            }
+        if ( null !== $existing ) {
+            return $existing;
+        }
 
-            $customer = new Customer( array_merge( $attributes, [ 'email' => $normalized ] ) );
-            $customer->save();
+        // Two first-time callers race on the unique index: one creates the
+        // row, the other gets it back.
+        $customer = Customer::query()->createOrFirst( [ 'email' => $normalized ], $attributes );
 
+        if ( $customer->wasRecentlyCreated ) {
             doAction( 'ap.ecommerce.customer.registered', $customer );
+        }
 
-            return $customer;
-        } );
+        return $customer;
     }
 
     /**
@@ -240,7 +239,16 @@ class CustomerService
             return null;
         }
 
-        $userId   = (int) $user->getAuthIdentifier();
+        $userId = (int) $user->getAuthIdentifier();
+
+        // A user has at most one customer row. One linked under an earlier
+        // email stays the user's customer.
+        $linked = Customer::query()->where( 'user_id', $userId )->first();
+
+        if ( null !== $linked ) {
+            return $linked;
+        }
+
         $customer = $this->findOrCreateForEmail( $email );
 
         return DB::transaction( function () use ( $customer, $userId, $user ): ?Customer {
@@ -713,7 +721,7 @@ class CustomerService
      */
     protected function normalizeEmail( string $email ): string
     {
-        return strtolower( trim( $email ) );
+        return mb_strtolower( trim( $email ) );
     }
 
     /**

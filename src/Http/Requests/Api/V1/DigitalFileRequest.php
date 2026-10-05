@@ -59,6 +59,7 @@ class DigitalFileRequest extends ApiFormRequest
             'version'            => [ 'nullable', 'string', 'max:60' ],
             'is_streaming_only'  => [ 'boolean' ],
             'checksum_sha256'    => [ 'nullable', 'string', 'regex:/^[a-f0-9]{64}$/' ],
+            'is_archived'        => [ 'boolean' ],
         ], [ 'label' ] );
 
         if ( ! $this->isUpdate() ) {

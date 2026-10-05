@@ -147,3 +147,33 @@ function makeStubAuthUser( int $id, string $email ): Authenticatable
         }
     };
 }
+
+it( 'keeps one customer per email whatever its case', function (): void {
+    $first  = $this->service->findOrCreateForEmail( 'A@x.com' );
+    $second = $this->service->findOrCreateForEmail( 'a@x.com' );
+
+    expect( $second->id )->toBe( $first->id )
+        ->and( Customer::query()->count() )->toBe( 1 )
+        ->and( Customer::factory()->create( [ 'email' => '  Mixed@Case.TEST ' ] )->email )->toBe( 'mixed@case.test' );
+} );
+
+it( 'refuses a duplicate email or linked user at the database', function (): void {
+    Customer::factory()->create( [ 'email' => 'dup@example.com', 'user_id' => 5 ] );
+
+    expect( fn () => Customer::factory()->create( [ 'email' => 'dup@example.com' ] ) )->toThrow( Illuminate\Database\UniqueConstraintViolationException::class )
+        ->and( fn () => Customer::factory()->create( [ 'email' => 'other@example.com', 'user_id' => 5 ] ) )->toThrow( Illuminate\Database\UniqueConstraintViolationException::class );
+
+    // Any number of guests (no user) is fine.
+    Customer::factory()->guest()->count( 2 )->create();
+
+    expect( Customer::query()->whereNull( 'user_id' )->count() )->toBe( 2 );
+} );
+
+it( 'keeps a user on their existing customer when they verify a new email', function (): void {
+    $original = Customer::factory()->create( [ 'email' => 'old@example.com', 'user_id' => 42 ] );
+
+    $linked = $this->service->linkUser( makeStubAuthUser( 42, 'new@example.com' ) );
+
+    expect( $linked->id )->toBe( $original->id )
+        ->and( Customer::query()->where( 'user_id', 42 )->count() )->toBe( 1 );
+} );

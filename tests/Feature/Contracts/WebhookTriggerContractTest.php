@@ -54,7 +54,7 @@ final class WebhookTriggerContractTest extends KanbanAutomationTriggerContractTe
     protected function assertFired( Order $order, KanbanAutomation $automation ): void
     {
         Bus::assertDispatched( SendKanbanAutomationWebhookJob::class, fn ( SendKanbanAutomationWebhookJob $job ): bool => 'https://hooks.example.test/kanban' === $job->url
-            && 'shh' === $job->secret
+            && $job->automationId === $automation->id
             && $job->payload['order']['id'] === $order->id
             && $job->payload['automation_id'] === $automation->id );
     }

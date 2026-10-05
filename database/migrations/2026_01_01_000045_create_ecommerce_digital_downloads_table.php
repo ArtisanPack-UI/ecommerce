@@ -45,16 +45,17 @@ return new class extends Migration {
 
             $table->unique( 'token', 'ecommerce_digital_downloads_token_uk' );
             $table->index( 'order_item_id', 'ecommerce_digital_downloads_order_item_idx' );
+            $table->index( 'digital_file_id', 'ecommerce_digital_downloads_digital_file_idx' );
 
             $table->foreign( 'order_item_id', 'ecommerce_digital_downloads_order_item_fk' )
                 ->references( 'id' )
                 ->on( 'ecommerce_order_items' )
-                ->cascadeOnDelete();
+                ->restrictOnDelete();
 
             $table->foreign( 'digital_file_id', 'ecommerce_digital_downloads_file_fk' )
                 ->references( 'id' )
                 ->on( 'ecommerce_digital_files' )
-                ->cascadeOnDelete();
+                ->restrictOnDelete();
         } );
     }
 

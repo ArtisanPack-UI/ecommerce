@@ -173,3 +173,26 @@ it( 'ignores attempts older than the rate window', function (): void {
 
     expect( $claimed )->toHaveCount( 1 );
 } );
+
+it( 'never moves an order already linked to another customer', function (): void {
+    $customer = Customer::factory()->create( [ 'email' => 'buyer@example.com', 'user_id' => 10 ] );
+    $other    = Customer::factory()->create();
+
+    Order::factory()->guest()->create( [
+        'order_number'     => 'AP-2001',
+        'email'            => 'Buyer@Example.com',
+        'shipping_address' => [ 'postal_code' => '90210' ],
+    ] );
+    $linked = Order::factory()->create( [
+        'order_number'     => 'AP-2002',
+        'email'            => 'buyer@example.com',
+        'customer_id'      => $other->id,
+        'is_claimed'       => false,
+        'shipping_address' => [ 'postal_code' => '90210' ],
+    ] );
+
+    $claimed = $this->service->claim( $customer, 'AP-2001', '90210' );
+
+    expect( $claimed->pluck( 'order_number' )->all() )->toBe( [ 'AP-2001' ] )
+        ->and( $linked->fresh()->customer_id )->toBe( $other->id );
+} );

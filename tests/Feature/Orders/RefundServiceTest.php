@@ -215,7 +215,7 @@ it( 'restocks inventory when restock=true and leaves it alone when restock=false
     $order     = makeRefundableOrder( [ [ 'qty' => 2, 'unit' => 1_000, 'product' => $product ] ] );
     $item      = $order->items->first();
     $inventory = InventoryItem::factory()->create( [
-        'stockable_type'   => Product::class,
+        'stockable_type'   => ( new Product() )->getMorphClass(),
         'stockable_id'     => $product->id,
         'quantity_on_hand' => 5,
     ] );
@@ -233,7 +233,7 @@ it( 'does not restock when restock flag is omitted or false', function (): void 
     $order     = makeRefundableOrder( [ [ 'qty' => 2, 'unit' => 1_000, 'product' => $product ] ] );
     $item      = $order->items->first();
     $inventory = InventoryItem::factory()->create( [
-        'stockable_type'   => Product::class,
+        'stockable_type'   => ( new Product() )->getMorphClass(),
         'stockable_id'     => $product->id,
         'quantity_on_hand' => 5,
     ] );
@@ -499,3 +499,26 @@ it( 'refuses to restock an amount-only line', function (): void {
         [ 'order_item_id' => $item->id, 'quantity' => 0, 'amount' => 100, 'restock' => true ],
     ] );
 } )->throws( InvalidArgumentException::class, 'cannot restock' );
+
+it( 'restocks under a host that enforces a morph map', function (): void {
+    // A host with `Relation::enforceMorphMap([...])` of its own.
+    Illuminate\Database\Eloquent\Relations\Relation::enforceMorphMap( [] );
+
+    try {
+        $product = Product::factory()->create();
+        $price   = app( ArtisanPackUI\Ecommerce\Services\ProductService::class )->upsertPrice( $product, [ 'currency' => 'USD', 'price_amount' => 1_000 ] );
+        $stock   = app( ArtisanPackUI\Ecommerce\Services\ProductService::class )->inventoryItemFor( $product );
+        $stock->update( [ 'quantity_on_hand' => 5 ] );
+
+        $order = makeRefundableOrder( [ [ 'qty' => 2, 'unit' => 1_000, 'product' => $product ] ] );
+
+        $this->service->issue( $order, [ [ 'order_item_id' => $order->items->first()->id, 'quantity' => 2, 'amount' => 2_000, 'restock' => true ] ] );
+
+        expect( $stock->fresh()->quantity_on_hand )->toBe( 7 )
+            ->and( $price->fresh()->priceable_type )->toBe( 'ecommerce.product' )
+            ->and( $stock->fresh()->stockable_type )->toBe( 'ecommerce.product' )
+            ->and( $stock->fresh()->stockable->is( $product ) )->toBeTrue();
+    } finally {
+        Illuminate\Database\Eloquent\Relations\Relation::requireMorphMap( false );
+    }
+} );

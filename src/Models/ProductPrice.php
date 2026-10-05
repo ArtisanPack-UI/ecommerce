@@ -71,6 +71,24 @@ class ProductPrice extends Model
     ];
 
     /**
+     * The identity of a price row within its owner: currency plus schedule
+     * window. Stored in `window_key`, which the unique index uses because
+     * the nullable window columns can't enforce uniqueness themselves.
+     *
+     * @since 1.0.0
+     *
+     * @param  string                  $currency  Currency code.
+     * @param  DateTimeInterface|null  $starts    Window start.
+     * @param  DateTimeInterface|null  $ends      Window end.
+     *
+     * @return string
+     */
+    public static function windowKeyFor( string $currency, ?DateTimeInterface $starts, ?DateTimeInterface $ends ): string
+    {
+        return strtoupper( $currency ) . '|' . ( $starts?->getTimestamp() ?? '' ) . '|' . ( $ends?->getTimestamp() ?? '' );
+    }
+
+    /**
      * The Product or ProductVariant this row prices.
      *
      * @since 1.0.0
@@ -118,6 +136,20 @@ class ProductPrice extends Model
             'starts_at'  => 'datetime',
             'ends_at'    => 'datetime',
         ];
+    }
+
+    /**
+     * Keeps `window_key` in step with the currency and window.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected static function booted(): void
+    {
+        static::saving( static function ( ProductPrice $price ): void {
+            $price->window_key = static::windowKeyFor( (string) $price->currency, $price->starts_at, $price->ends_at );
+        } );
     }
 
     /**

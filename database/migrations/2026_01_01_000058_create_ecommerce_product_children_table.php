@@ -41,6 +41,7 @@ return new class extends Migration {
 
             $table->index( 'parent_product_id', 'ecommerce_product_children_parent_idx' );
             $table->index( 'child_product_id', 'ecommerce_product_children_child_idx' );
+            $table->index( 'child_variant_id', 'ecommerce_product_children_child_variant_idx' );
 
             $table->foreign( 'parent_product_id', 'ecommerce_product_children_parent_fk' )
                 ->references( 'id' )

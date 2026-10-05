@@ -23,12 +23,14 @@ namespace ArtisanPackUI\Ecommerce\Demo;
 
 use ArtisanPackUI\Ecommerce\Kanban\Triggers\SendEmailTrigger;
 use ArtisanPackUI\Ecommerce\Kanban\Triggers\UpdateOrderFieldTrigger;
+use ArtisanPackUI\Ecommerce\Models\LicenseKey;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\Models\ProductVariant;
 use ArtisanPackUI\Ecommerce\ProductTypes\DigitalProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType;
 use ArtisanPackUI\Ecommerce\Registries\SubStatusRegistry;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -1261,10 +1263,13 @@ class DemoSeeder
 
             $issuedAt = $placedAt->copy()->addMinutes( 3 );
 
+            $key = implode( '-', str_split( strtoupper( bin2hex( $this->random->getBytes( 8 ) ) ), 4 ) );
+
             DB::table( 'ecommerce_license_keys' )->insert( [
                 'order_item_id'     => $line['id'],
                 'digital_file_id'   => $line['sellable']['file_id'],
-                'key'               => implode( '-', str_split( strtoupper( bin2hex( $this->random->getBytes( 8 ) ) ), 4 ) ),
+                'key'               => Crypt::encryptString( $key ),
+                'key_hash'          => LicenseKey::hashFor( $key ),
                 'activations_limit' => 3 * $line['qty'],
                 'activations_count' => $this->random->getInt( 0, 2 ),
                 'expires_at'        => $issuedAt->copy()->addDays( 365 ),
@@ -1412,7 +1417,7 @@ class DemoSeeder
                 'from_column_id' => null === $from ? null : $columns[ $from ],
                 'to_column_id'   => $columns[ $to ],
                 'trigger_key'    => $trigger,
-                'trigger_config' => json_encode( $config ),
+                'trigger_config' => Crypt::encryptString( (string) json_encode( $config ) ),
                 'conditions'     => json_encode( [] ),
                 'is_active'      => true,
             ] ) );
@@ -1650,6 +1655,7 @@ class DemoSeeder
                 'priceable_type'    => $morph,
                 'priceable_id'      => $id,
                 'currency'          => $this->baseCurrency,
+                'window_key'        => $this->baseCurrency . '||',
                 'price_amount'      => $amount,
                 'compare_at_amount' => $onSale ? $this->roundPrice( (int) ( $amount * 1.25 ) ) : null,
                 'cost_amount'       => intdiv( $amount * 45, 100 ),
@@ -1661,6 +1667,7 @@ class DemoSeeder
                 'priceable_type'    => $morph,
                 'priceable_id'      => $id,
                 'currency'          => $this->secondaryCurrency,
+                'window_key'        => $this->secondaryCurrency . '||',
                 'price_amount'      => $this->roundPrice( intdiv( $amount * self::SECONDARY_RATE_E8, 100_000_000 ) ),
                 'compare_at_amount' => null,
                 'cost_amount'       => null,

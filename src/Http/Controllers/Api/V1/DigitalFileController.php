@@ -19,8 +19,10 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Exceptions\DigitalFileInUseException;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\DigitalFileRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\DigitalFileResource;
+use ArtisanPackUI\Ecommerce\Http\Support\Problem;
 use ArtisanPackUI\Ecommerce\Models\DigitalFile;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use ArtisanPackUI\Ecommerce\Services\DigitalFileService;
@@ -95,7 +97,8 @@ class DigitalFileController extends ApiController
     }
 
     /**
-     * Deletes the file record (its download entitlements cascade).
+     * Deletes a file no customer holds an entitlement for; a file that has
+     * been sold answers 409 `digital-file-in-use` (archive it instead).
      *
      * @since 1.0.0
      *
@@ -107,7 +110,11 @@ class DigitalFileController extends ApiController
     #[ApiOperation( summary: 'Delete a digital file', resource: DigitalFileResource::class )]
     public function destroy( Request $request, DigitalFile $file ): JsonResponse
     {
-        $file->delete();
+        try {
+            $this->files->delete( $file );
+        } catch ( DigitalFileInUseException $exception ) {
+            return Problem::make( 409, 'digital-file-in-use', __( 'Digital file in use' ), $exception->getMessage(), $request );
+        }
 
         return $this->resourceResponse( $file, $request, DigitalFileResource::class );
     }

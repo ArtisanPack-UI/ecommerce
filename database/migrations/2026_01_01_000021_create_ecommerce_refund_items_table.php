@@ -45,7 +45,7 @@ return new class extends Migration {
             $table->foreign( 'order_item_id', 'ecommerce_refund_items_order_item_fk' )
                 ->references( 'id' )
                 ->on( 'ecommerce_order_items' )
-                ->cascadeOnDelete();
+                ->restrictOnDelete();
         } );
     }
 

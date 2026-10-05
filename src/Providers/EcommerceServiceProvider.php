@@ -188,6 +188,7 @@ use ArtisanPackUI\Ecommerce\Shipping\Methods\FreeShippingMethod;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\LocalPickupMethod;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\PriceBasedMethod;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\WeightBasedMethod;
+use ArtisanPackUI\Ecommerce\Support\MorphType;
 use ArtisanPackUI\Ecommerce\Support\RateLimitPolicyRegistrar;
 use ArtisanPackUI\Ecommerce\Support\RegionalJsonFallbackLoader;
 use ArtisanPackUI\Ecommerce\Support\RegistryHookRegistrar;
@@ -324,6 +325,7 @@ class EcommerceServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        MorphType::register();
         $this->registerMigrations();
         $this->registerTranslations();
         $this->registerCoreSettings();

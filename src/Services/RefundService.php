@@ -512,8 +512,8 @@ class RefundService
         }
 
         [ $stockableType, $stockableId ] = null !== $item->product_variant_id
-            ? [ ProductVariant::class, (int) $item->product_variant_id ]
-            : [ Product::class, (int) $item->product_id ];
+            ? [ ( new ProductVariant() )->getMorphClass(), (int) $item->product_variant_id ]
+            : [ ( new Product() )->getMorphClass(), (int) $item->product_id ];
 
         if ( null === $stockableId ) {
             return;

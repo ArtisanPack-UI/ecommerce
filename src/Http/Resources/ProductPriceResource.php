@@ -18,6 +18,8 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Resources;
 
+use ArtisanPackUI\Ecommerce\Models\ProductVariant;
+use ArtisanPackUI\Ecommerce\Support\MorphType;
 use Illuminate\Http\Request;
 
 /**
@@ -47,7 +49,7 @@ class ProductPriceResource extends EcommerceResource
     protected function fields( Request $request ): array
     {
         return [
-            'priceable_type' => 'ProductVariant' === class_basename( (string) $this->resource->priceable_type ) ? 'variant' : 'product',
+            'priceable_type' => MorphType::is( $this->resource->priceable_type, ProductVariant::class ) ? 'variant' : 'product',
             'priceable_id'   => $this->resource->priceable_id,
             'currency'       => $this->resource->currency,
             'price'          => $this->money( 'price_amount', 'currency' ),

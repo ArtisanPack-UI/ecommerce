@@ -42,6 +42,7 @@ return new class extends Migration {
             $table->index( 'promotion_id', 'ecommerce_promotion_usages_promotion_idx' );
             $table->index( [ 'promotion_id', 'customer_id' ], 'ecommerce_promotion_usages_promotion_customer_idx' );
             $table->unique( [ 'promotion_id', 'order_id' ], 'ecommerce_promotion_usages_promotion_order_uk' );
+            $table->index( 'order_id', 'ecommerce_promotion_usages_order_idx' );
 
             $table->foreign( 'promotion_id', 'ecommerce_promotion_usages_promotion_fk' )
                 ->references( 'id' )

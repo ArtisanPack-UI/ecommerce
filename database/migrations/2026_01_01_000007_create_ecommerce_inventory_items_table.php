@@ -34,7 +34,10 @@ return new class extends Migration {
             $table->unsignedInteger( 'quantity_reserved' )->default( 0 );
             $table->boolean( 'allow_backorder' )->default( false );
             $table->unsignedInteger( 'low_stock_threshold' )->nullable();
-            $table->unsignedBigInteger( 'warehouse_id' )->nullable();
+            // 0 is the default warehouse. Never NULL: NULLs are distinct in a
+            // unique index, so a nullable column would let two rows track the
+            // same stockable and split its stock.
+            $table->unsignedBigInteger( 'warehouse_id' )->default( 0 );
             $table->timestamps();
 
             $table->unique(

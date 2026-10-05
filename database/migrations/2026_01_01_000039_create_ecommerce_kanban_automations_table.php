@@ -36,13 +36,16 @@ return new class extends Migration {
             $table->unsignedBigInteger( 'from_column_id' )->nullable();
             $table->unsignedBigInteger( 'to_column_id' );
             $table->string( 'trigger_key', 120 );
-            $table->json( 'trigger_config' );
+            // Encrypted JSON (it can hold webhook signing secrets), so text, not json.
+            $table->text( 'trigger_config' );
             $table->json( 'conditions' );
             $table->boolean( 'is_active' )->default( true );
             $table->timestamps();
 
             $table->index( 'board_id', 'ecommerce_kanban_automations_board_idx' );
             $table->index( [ 'from_column_id', 'to_column_id' ], 'ecommerce_kanban_automations_move_idx' );
+            $table->index( 'to_column_id', 'ecommerce_kanban_automations_to_column_idx' );
+
             $table->foreign( 'board_id', 'ecommerce_kanban_automations_board_fk' )
                 ->references( 'id' )
                 ->on( 'ecommerce_kanban_boards' )
