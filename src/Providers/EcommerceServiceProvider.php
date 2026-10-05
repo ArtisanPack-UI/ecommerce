@@ -56,6 +56,7 @@ use ArtisanPackUI\Ecommerce\GraphQL\Execution\GuardOperations;
 use ArtisanPackUI\Ecommerce\GraphQL\Fields\Subscriptions;
 use ArtisanPackUI\Ecommerce\Http\Controllers\WebhookController;
 use ArtisanPackUI\Ecommerce\Http\Middleware\AuthenticateOptionally;
+use ArtisanPackUI\Ecommerce\Http\Middleware\CacheHeaders;
 use ArtisanPackUI\Ecommerce\Http\Middleware\EnsureEcommerceAbility;
 use ArtisanPackUI\Ecommerce\Http\Middleware\ForceJsonResponse;
 use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
@@ -663,6 +664,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $router = $this->app->make( Router::class );
 
         $router->aliasMiddleware( 'ecommerce.idempotency', IdempotencyMiddleware::class );
+        $router->aliasMiddleware( 'ecommerce.cache', CacheHeaders::class );
     }
 
     /**

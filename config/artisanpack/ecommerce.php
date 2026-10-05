@@ -579,6 +579,9 @@ return [
     | `signature_tolerance_seconds` — Maximum clock skew accepted on a
     |                      signed request's `Date` header (default 300s).
     |
+    | `catalog_max_age` — Seconds clients and CDNs may cache public catalog
+    |                      reads (they also get an ETag; carts never cache).
+    |
     | `signature_cache_store` — Cache store that remembers used signatures
     |                      (replay protection). Must be shared across servers
     |                      (Redis, database, Memcached); defaults to the
@@ -597,6 +600,7 @@ return [
 
         'signature_tolerance_seconds' => (int) env( 'ECOMMERCE_SERVICE_SIGNATURE_TOLERANCE', 300 ),
         'signature_cache_store'       => env( 'ECOMMERCE_SERVICE_SIGNATURE_CACHE_STORE' ),
+        'catalog_max_age'             => (int) env( 'ECOMMERCE_API_CATALOG_MAX_AGE', 60 ),
     ],
 
     /*

@@ -81,3 +81,19 @@ it( 'writes timestamps as RFC 3339 UTC in REST, GraphQL, and webhooks (F15)', fu
 
     expect( $payload['at'] )->toBe( '2026-03-02T15:04:05Z' );
 } );
+
+it( 'caches public catalog reads with an ETag and never caches carts (F16)', function (): void {
+    ArtisanPackUI\Ecommerce\Models\Product::factory()->create();
+
+    $first = $this->getJson( '/api/ecommerce/v1/products' )->assertOk();
+    $etag  = $first->headers->get( 'ETag' );
+
+    expect( $etag )->toStartWith( 'W/"' )
+        ->and( $first->headers->get( 'Cache-Control' ) )->toContain( 'public' )->toContain( 'max-age=60' );
+
+    $this->getJson( '/api/ecommerce/v1/products', [ 'If-None-Match' => $etag ] )->assertStatus( 304 );
+
+    $cart = ArtisanPackUI\Ecommerce\Models\Cart::factory()->create();
+
+    expect( $this->getJson( "/api/ecommerce/v1/carts/{$cart->token}" )->headers->get( 'Cache-Control' ) )->toContain( 'no-store' )->toContain( 'private' );
+} );

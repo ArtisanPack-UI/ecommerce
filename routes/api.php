@@ -93,7 +93,7 @@ $admin = static fn ( string $resource, string $action, bool $mutates = false ): 
 );
 
 // Catalog (public).
-Route::middleware( 'ecommerce.rate-limit:ecommerce.catalog.read' )->group( function (): void {
+Route::middleware( [ 'ecommerce.rate-limit:ecommerce.catalog.read', 'ecommerce.cache:public' ] )->group( function (): void {
     Route::get( 'products', [ ProductController::class, 'index' ] )->name( 'products.index' );
     Route::get( 'products/{product}', [ ProductController::class, 'show' ] )->whereNumber( 'product' )->name( 'products.show' );
     Route::get( 'products/{product}/variants', [ ProductController::class, 'variants' ] )->whereNumber( 'product' )->name( 'products.variants' );
@@ -130,7 +130,7 @@ Route::post( 'carts', [ CartController::class, 'store' ] )
 
 // A guest cart's token is its credential; an account's cart also needs that
 // account's session or Sanctum token, so these routes resolve the user.
-Route::where( [ 'cart' => '[A-Za-z0-9]{40}', 'item' => '[0-9]+' ] )->middleware( 'ecommerce.optional-auth' )->group( function (): void {
+Route::where( [ 'cart' => '[A-Za-z0-9]{40}', 'item' => '[0-9]+' ] )->middleware( [ 'ecommerce.optional-auth', 'ecommerce.cache:private' ] )->group( function (): void {
     Route::get( 'carts/{cart}', [ CartController::class, 'show' ] )
         ->middleware( 'ecommerce.rate-limit:ecommerce.cart.mutate' )
         ->name( 'carts.show' );
@@ -156,7 +156,7 @@ Route::where( [ 'cart' => '[A-Za-z0-9]{40}', 'item' => '[0-9]+' ] )->middleware(
 
 // Checkout (engine spec §9.2): the cart token is the credential for a guest
 // cart; an account's cart also needs that account's session.
-Route::where( [ 'cart' => '[A-Za-z0-9]{40}' ] )->middleware( 'ecommerce.optional-auth' )->group( function (): void {
+Route::where( [ 'cart' => '[A-Za-z0-9]{40}' ] )->middleware( [ 'ecommerce.optional-auth', 'ecommerce.cache:private' ] )->group( function (): void {
     Route::get( 'checkout/{cart}', [ CheckoutController::class, 'show' ] )
         ->middleware( 'ecommerce.rate-limit:ecommerce.cart.mutate' )
         ->name( 'checkout.show' );
