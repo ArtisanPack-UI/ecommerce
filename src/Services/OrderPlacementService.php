@@ -51,7 +51,6 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Services;
 
 use ArtisanPackUI\Ecommerce\Checkout\CheckoutReservations;
-use ArtisanPackUI\Ecommerce\Contracts\FulfillmentAllocationStrategy;
 use ArtisanPackUI\Ecommerce\Contracts\OrderNumberGenerator;
 use ArtisanPackUI\Ecommerce\Events\CartCompleted;
 use ArtisanPackUI\Ecommerce\Events\CouponRedeemed;
@@ -59,13 +58,13 @@ use ArtisanPackUI\Ecommerce\Events\OrderPlaced;
 use ArtisanPackUI\Ecommerce\Events\PromotionApplied;
 use ArtisanPackUI\Ecommerce\Exceptions\OrderPlacementException;
 use ArtisanPackUI\Ecommerce\Exceptions\PromotionUsageLimitReachedException;
+use ArtisanPackUI\Ecommerce\Fulfillment\LineAllocator;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
 use ArtisanPackUI\Ecommerce\Models\Coupon;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
 use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
-use ArtisanPackUI\Ecommerce\Registries\FulfillmentAllocationStrategyRegistry;
 use ArtisanPackUI\Ecommerce\Support\AfterCommit;
 use ArtisanPackUI\Ecommerce\ValueObjects\PromotionResult;
 use Illuminate\Support\Carbon;
@@ -104,7 +103,7 @@ class OrderPlacementService
      * @param  PromotionEngine                        $promotions    Usage recording.
      * @param  OrderPlacementHooks                    $hooks         `order.placing` / `order.placed`.
      * @param  OrderNumberGenerator                   $numbers       Order numbers.
-     * @param  FulfillmentAllocationStrategyRegistry  $allocations   Per-line split of shipping and tax.
+     * @param  LineAllocator                          $lines         Per-line split of shipping and tax.
      * @param  CurrencyRateProviderRegistry           $rates         FX snapshot.
      * @param  StoreCurrencies                        $currencies    Base currency.
      */
@@ -116,7 +115,7 @@ class OrderPlacementService
         protected PromotionEngine $promotions,
         protected OrderPlacementHooks $hooks,
         protected OrderNumberGenerator $numbers,
-        protected FulfillmentAllocationStrategyRegistry $allocations,
+        protected LineAllocator $lines,
         protected CurrencyRateProviderRegistry $rates,
         protected StoreCurrencies $currencies,
     ) {
@@ -381,9 +380,7 @@ class OrderPlacementService
 
     /**
      * Splits shipping, and the tax not already on a line (tax on shipping),
-     * across the order's lines through the configured strategy, then sets
-     * each line's total: `unit × qty − discount + shipping + tax` (tax only
-     * when prices don't already include it).
+     * across the order's lines ({@see LineAllocator}).
      *
      * @since 1.0.0
      *
@@ -393,40 +390,14 @@ class OrderPlacementService
      */
     protected function allocate( Order $order ): void
     {
-        $items     = $order->items()->orderBy( 'id' )->get();
-        $lineTax   = (int) $items->sum( 'tax_amount' );
-        $inclusive = (bool) ( $order->meta['prices_include_tax'] ?? false );
+        $items = $order->items()->get();
 
-        // The strategy splits whatever is on the order it's handed: here the
-        // shipping and the tax left over once each line's own tax is counted.
-        $probe             = $order->replicate();
-        $probe->tax_amount = max( 0, (int) $order->tax_amount - $lineTax );
-
-        $shares = $this->strategy()->allocate( $probe, $items );
-
-        foreach ( $items as $item ) {
-            $share    = $shares[ (int) $item->id ] ?? null;
-            $shipping = null === $share ? 0 : (int) $share['shipping']->getAmount();
-            $tax      = (int) $item->tax_amount + ( null === $share ? 0 : (int) $share['tax']->getAmount() );
-
-            $item->forceFill( [
-                'shipping_amount' => $shipping,
-                'tax_amount'      => $tax,
-                'total_amount'    => (int) $item->unit_price_amount * (int) $item->quantity - (int) $item->discount_amount + $shipping + ( $inclusive ? 0 : $tax ),
-            ] )->save();
-        }
-    }
-
-    /**
-     * The configured allocation strategy.
-     *
-     * @since 1.0.0
-     *
-     * @return FulfillmentAllocationStrategy
-     */
-    protected function strategy(): FulfillmentAllocationStrategy
-    {
-        return $this->allocations->active();
+        $this->lines->allocate(
+            $order,
+            $items,
+            $items->mapWithKeys( static fn ( OrderItem $item ): array => [ (int) $item->id => (int) $item->tax_amount ] )->all(),
+            (bool) ( $order->meta['prices_include_tax'] ?? false ),
+        );
     }
 
     /**

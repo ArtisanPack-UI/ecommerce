@@ -13,10 +13,12 @@
  * `paymentActionRequired` / `refundDelta` fields describe what has to happen
  * downstream; payment satellites listen on {@see OrderEdited} and act.
  *
- * Tax and shipping recompute go through the same hook seam the placement
- * pipeline will use — `ap.ecommerce.order.recomputingTotals` — so once a
- * `TaxProvider` / `ShippingRateProvider` is wired in, both code paths pick it
- * up without further changes here.
+ * When an edit changes the lines, the shipping amount, or the shipping
+ * address (and doesn't set the tax itself), tax is recalculated through the
+ * active tax provider and shipping re-split across the lines, as at
+ * placement (audit D8). The totals then run through
+ * `ap.ecommerce.order.recomputingTotals`. Added lines must be priced in the
+ * order's currency.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -32,6 +34,9 @@ namespace ArtisanPackUI\Ecommerce\Services;
 
 use ArtisanPackUI\Ecommerce\Events\OrderEdited;
 use ArtisanPackUI\Ecommerce\Exceptions\OrderNotEditableException;
+use ArtisanPackUI\Ecommerce\Fulfillment\LineAllocator;
+use ArtisanPackUI\Ecommerce\Models\Cart;
+use ArtisanPackUI\Ecommerce\Models\CartItem;
 use ArtisanPackUI\Ecommerce\Models\DigitalDownload;
 use ArtisanPackUI\Ecommerce\Models\LicenseKey;
 use ArtisanPackUI\Ecommerce\Models\Order;
@@ -41,7 +46,9 @@ use ArtisanPackUI\Ecommerce\Models\OrderTimelineEntry;
 use ArtisanPackUI\Ecommerce\Models\RefundItem;
 use ArtisanPackUI\Ecommerce\Models\ShipmentItem;
 use ArtisanPackUI\Ecommerce\Support\AfterCommit;
+use ArtisanPackUI\Ecommerce\ValueObjects\Address;
 use ArtisanPackUI\Ecommerce\ValueObjects\OrderEditResult;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use InvalidArgumentException;
@@ -104,6 +111,18 @@ class OrderEditService
      * @var array<int, string>
      */
     protected const LOCKED_STATUSES = [ 'cancelled', 'refunded', 'failed' ];
+
+    /**
+     * @since 1.0.0
+     *
+     * @param  TaxService     $taxes  Recalculates tax after line or shipping changes.
+     * @param  LineAllocator  $lines  Splits shipping and shipping tax across the lines.
+     */
+    public function __construct(
+        protected TaxService $taxes,
+        protected LineAllocator $lines,
+    ) {
+    }
 
     /**
      * Applies an edit to `$order`.
@@ -268,6 +287,11 @@ class OrderEditService
         $this->applyItemChanges( $locked, $filtered );
 
         $this->applyTotalOverrides( $locked, $filtered );
+
+        if ( $this->changesTaxBasis( $filtered ) ) {
+            $this->recomputeTax( $locked );
+        }
+
         $this->recomputeItemTotals( $locked );
         $this->recomputeOrderTotals( $locked );
 
@@ -435,7 +459,15 @@ class OrderEditService
             foreach ( (array) $items['add'] as $line ) {
                 $this->validateNewLine( (array) $line );
 
-                $currency = (string) $line['unit_price_currency'];
+                $currency = strtoupper( (string) $line['unit_price_currency'] );
+
+                if ( $currency !== strtoupper( (string) $order->currency ) ) {
+                    throw new InvalidArgumentException( sprintf(
+                        'Order edit items.add line is priced in %s; the order is in %s.',
+                        $currency,
+                        $order->currency,
+                    ) );
+                }
 
                 OrderItem::query()->create( [
                     'order_id'            => $order->id,
@@ -494,7 +526,140 @@ class OrderEditService
     }
 
     /**
-     * Rewrites each line's `total_amount` as `unit * qty + tax + shipping - discount`.
+     * Whether an edit changes what tax is charged on: the lines, the
+     * shipping amount, or the shipping address — and doesn't set the tax
+     * itself (an order-level `tax_amount`, or a line's `tax_amount`).
+     *
+     * @since 1.0.0
+     *
+     * @param  array<string, mixed>  $edit  Filtered edit.
+     *
+     * @return bool
+     */
+    protected function changesTaxBasis( array $edit ): bool
+    {
+        if ( array_key_exists( 'tax_amount', $edit ) ) {
+            return false;
+        }
+
+        $items = (array) ( $edit['items'] ?? [] );
+
+        foreach ( (array) ( $items['change'] ?? [] ) as $changes ) {
+            if ( is_array( $changes ) && array_key_exists( 'tax_amount', $changes ) ) {
+                return false;
+            }
+        }
+
+        foreach ( (array) ( $items['add'] ?? [] ) as $line ) {
+            if ( is_array( $line ) && array_key_exists( 'tax_amount', $line ) ) {
+                return false;
+            }
+        }
+
+        return [] !== array_filter( [ $items['add'] ?? null, $items['remove'] ?? null, $items['change'] ?? null ] )
+            || array_key_exists( 'shipping_amount', $edit )
+            || array_key_exists( 'shipping_address', $edit );
+    }
+
+    /**
+     * Recalculates the order's tax through the active tax provider for its
+     * edited lines and address (audit D8), then splits shipping and
+     * shipping tax across the lines. The provider sees a transient cart
+     * built from the order (it isn't saved). An order with no address keeps
+     * its tax.
+     *
+     * @since 1.0.0
+     *
+     * @param  Order  $order  Locked order with its items.
+     *
+     * @return void
+     */
+    protected function recomputeTax( Order $order ): void
+    {
+        $address = $order->shipping_address ?? $order->billing_address;
+
+        if ( ! is_array( $address ) || 2 !== strlen( (string) ( $address['country_code'] ?? '' ) ) ) {
+            return;
+        }
+
+        $order->load( 'items.product' );
+
+        $currency = strtoupper( (string) $order->currency );
+        $cart     = new Cart( [ 'currency' => $currency ] );
+        $cart->forceFill( [
+            'currency'        => $currency,
+            'discount_amount' => (int) $order->discount_amount,
+            'shipping_amount' => (int) $order->shipping_amount,
+        ] );
+
+        $lines = $order->items->map( static function ( OrderItem $item ) use ( $currency ): CartItem {
+            $line = new CartItem();
+            $line->forceFill( [
+                'id'                  => $item->id,
+                'product_id'          => $item->product_id,
+                'product_variant_id'  => $item->product_variant_id,
+                'quantity'            => (int) $item->quantity,
+                'unit_price_amount'   => (int) $item->unit_price_amount,
+                'unit_price_currency' => $currency,
+                'line_total_amount'   => (int) $item->unit_price_amount * (int) $item->quantity,
+                'discount_amount'     => (int) $item->discount_amount,
+            ] );
+            $line->setRelation( 'product', $item->product );
+
+            return $line;
+        } );
+
+        $cart->setRelation( 'items', new EloquentCollection( $lines->all() ) );
+
+        $result = $this->taxes->calculate(
+            $cart,
+            Address::fromArray( $address ),
+            $order->items->mapWithKeys( static fn ( OrderItem $item ): array => [ (int) $item->id => (int) $item->discount_amount ] )->all(),
+        );
+
+        $order->tax_amount = (int) $result->total->getAmount();
+
+        $meta                  = (array) ( $order->meta ?? [] );
+        $meta['tax_breakdown'] = array_values( array_map( static fn ( array $row ): array => [
+            'label'        => $row['label'],
+            'rate_ubps'    => $row['rate_ubps'],
+            'amount'       => (int) $row['amount']->getAmount(),
+            'is_compound'  => $row['is_compound'],
+            'country_code' => strtoupper( (string) $address['country_code'] ),
+            'region_code'  => $address['region_code'] ?? null,
+        ], $result->breakdown ) );
+        $order->meta = $meta;
+
+        $this->lines->allocate(
+            $order,
+            $order->items,
+            array_map( static fn ( $money ): int => (int) $money->getAmount(), $result->perLine ),
+            $this->pricesIncludeTax( $order ),
+        );
+
+        $order->load( 'items' );
+    }
+
+    /**
+     * Whether the order's prices include tax (recorded at placement; the
+     * store setting for orders placed before it was recorded).
+     *
+     * @since 1.0.0
+     *
+     * @param  Order  $order  Order.
+     *
+     * @return bool
+     */
+    protected function pricesIncludeTax( Order $order ): bool
+    {
+        $recorded = ( (array) ( $order->meta ?? [] ) )['prices_include_tax'] ?? null;
+
+        return null === $recorded ? (bool) config( 'artisanpack.ecommerce.tax.prices_include_tax', false ) : (bool) $recorded;
+    }
+
+    /**
+     * Rewrites each line's `total_amount` as `unit * qty - discount +
+     * shipping + tax` (without the tax when prices include it).
      *
      * @since 1.0.0
      *
@@ -504,10 +669,12 @@ class OrderEditService
      */
     protected function recomputeItemTotals( Order $order ): void
     {
+        $inclusive = $this->pricesIncludeTax( $order );
+
         foreach ( $order->items as $item ) {
             $lineSubtotal       = $item->unit_price_amount * $item->quantity;
             $item->total_amount = $lineSubtotal
-                + (int) $item->tax_amount
+                + ( $inclusive ? 0 : (int) $item->tax_amount )
                 + (int) $item->shipping_amount
                 - (int) $item->discount_amount;
             $item->save();
@@ -554,7 +721,7 @@ class OrderEditService
 
         $order->total_amount = (int) $order->subtotal_amount
             + (int) $order->shipping_amount
-            + (int) $order->tax_amount
+            + ( $this->pricesIncludeTax( $order ) ? 0 : (int) $order->tax_amount )
             - (int) $order->discount_amount;
     }
 
