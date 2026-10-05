@@ -26,6 +26,7 @@ namespace ArtisanPackUI\Ecommerce\Services;
 
 use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\CustomerNotificationPreference;
+use Illuminate\Support\Facades\URL;
 
 /**
  * @package    ArtisanPack_UI
@@ -71,6 +72,82 @@ class NotificationPreferenceService
             ->first();
 
         return $preference?->is_enabled ?? $this->default( $customer, $category );
+    }
+
+    /**
+     * Whether mail sent straight to `$email` (a guest order's address) may
+     * carry a `$category` notification on `$channel`: the preferences of
+     * the customer record with that email, if there is one. Guests who
+     * unsubscribe get such a record ({@see self::unsubscribe()}).
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $email     Address.
+     * @param  string  $channel   Channel.
+     * @param  string  $category  Category.
+     *
+     * @return bool
+     */
+    public function allowsEmail( string $email, string $channel, string $category ): bool
+    {
+        if ( CustomerNotificationPreference::CATEGORY_TRANSACTIONAL === $category ) {
+            return true;
+        }
+
+        $customer = Customer::query()->where( 'email', mb_strtolower( trim( $email ) ) )->first();
+
+        return null === $customer || $this->allows( $customer, $channel, $category );
+    }
+
+    /**
+     * Turns `$category` off on `$channel` for whoever has `$email`, creating
+     * a customer record for a guest so the choice sticks. Transactional
+     * mail can't be turned off.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $email     Address.
+     * @param  string  $channel   Channel.
+     * @param  string  $category  Category.
+     *
+     * @return bool Whether anything was turned off.
+     */
+    public function unsubscribe( string $email, string $channel, string $category ): bool
+    {
+        if ( CustomerNotificationPreference::CATEGORY_TRANSACTIONAL === $category || ! in_array( $category, CustomerNotificationPreference::CATEGORIES, true ) || ! in_array( $channel, $this->channels(), true ) ) {
+            return false;
+        }
+
+        $customer = app( CustomerService::class )->findOrCreateForEmail( $email );
+
+        $this->update( $customer, [ [ 'channel' => $channel, 'category' => $category, 'is_enabled' => false ] ] );
+
+        return true;
+    }
+
+    /**
+     * A signed, non-expiring link that turns `$category` off for `$email`
+     * (null for transactional mail, which can't be turned off).
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $email     Address.
+     * @param  string  $channel   Channel.
+     * @param  string  $category  Category.
+     *
+     * @return string|null
+     */
+    public function unsubscribeUrl( string $email, string $channel, string $category ): ?string
+    {
+        if ( CustomerNotificationPreference::CATEGORY_TRANSACTIONAL === $category || '' === trim( $email ) ) {
+            return null;
+        }
+
+        return URL::signedRoute( 'ecommerce.notifications.unsubscribe', [
+            'email'    => mb_strtolower( trim( $email ) ),
+            'channel'  => $channel,
+            'category' => $category,
+        ] );
     }
 
     /**

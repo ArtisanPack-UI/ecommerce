@@ -108,6 +108,11 @@ class NotificationDispatcher
                 continue;
             }
 
+            // A guest address that unsubscribed through an email link.
+            if ( $recipient instanceof AnonymousNotifiable && is_string( $recipient->routes[ $definition->channel() ] ?? null ) && ! $this->preferences->allowsEmail( $recipient->routes[ $definition->channel() ], $definition->channel(), $definition->category() ) ) {
+                continue;
+            }
+
             // Queued only once the change it reports has committed.
             $notification = ( new EcommerceNotification( $templateKey, $definition->channel(), $variables ) )->afterCommit();
 

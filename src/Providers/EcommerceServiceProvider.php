@@ -55,6 +55,7 @@ use ArtisanPackUI\Ecommerce\Gateways\Stripe\StripeGateway;
 use ArtisanPackUI\Ecommerce\GraphQL\EcommerceSchema;
 use ArtisanPackUI\Ecommerce\GraphQL\Execution\GuardOperations;
 use ArtisanPackUI\Ecommerce\GraphQL\Fields\Subscriptions;
+use ArtisanPackUI\Ecommerce\Http\Controllers\NotificationUnsubscribeController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\WebhookController;
 use ArtisanPackUI\Ecommerce\Http\Middleware\AuthenticateOptionally;
 use ArtisanPackUI\Ecommerce\Http\Middleware\CacheHeaders;
@@ -1230,7 +1231,8 @@ class EcommerceServiceProvider extends ServiceProvider
     }
 
     /**
-     * Registers the generic inbound-webhook route.
+     * Registers the generic inbound-webhook route and the signed
+     * notification unsubscribe routes.
      *
      * `POST /ecommerce/webhooks/{provider}` dispatches to whatever gateway
      * is registered under `{provider}` in {@see PaymentGatewayRegistry}.
@@ -1250,6 +1252,16 @@ class EcommerceServiceProvider extends ServiceProvider
             ->where( 'provider', '[A-Za-z0-9_.-]+' )
             ->middleware( [ 'api', 'ecommerce.request-id', 'ecommerce.rate-limit:ecommerce.webhook.inbound' ] )
             ->name( 'ecommerce.webhooks' );
+
+        // Signed unsubscribe links in opt-out notification mail (H3).
+        $unsubscribe = [ 'ecommerce.request-id', 'ecommerce.locale', 'ecommerce.rate-limit:ecommerce.notifications.unsubscribe', 'signed' ];
+
+        $router->get( 'ecommerce/notifications/unsubscribe', [ NotificationUnsubscribeController::class, 'show' ] )
+            ->middleware( $unsubscribe )
+            ->name( 'ecommerce.notifications.unsubscribe' );
+        $router->post( 'ecommerce/notifications/unsubscribe', [ NotificationUnsubscribeController::class, 'store' ] )
+            ->middleware( $unsubscribe )
+            ->name( 'ecommerce.notifications.unsubscribe.store' );
     }
 
     /**

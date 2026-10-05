@@ -136,7 +136,7 @@ final class NotificationCatalog
      */
     public static function definitions(): array
     {
-        $store = [ 'Store.name', 'Store.url', 'Store.support_email' ];
+        $store = [ 'Store.name', 'Store.url', 'Store.support_email', 'Store.preferences_url' ];
         $order = [
             'Order.number',
             'Order.status',
@@ -176,7 +176,7 @@ final class NotificationCatalog
                 $pick( 'Store', 'Order' ),
                 static fn ( ?string $locale ): string => __( 'Your :store order :number', [ 'store' => '{{ Store.name }}', 'number' => '{{ Order.number }}' ], $locale ),
                 static fn ( ?string $locale ): string => __( '<p>Hi {{ Order.customer.first_name|default(Order.customer.name) }},</p><p>Thanks for your order! Here is your summary.</p>', [], $locale )
-                    . '<table>' . $orderTable . '</table>'
+                    . '<table role="presentation">' . $orderTable . '</table>'
                     . __( '<p>Subtotal: {{ Order.subtotal }}<br>Shipping: {{ Order.shipping }}<br>{{ Order.tax_label }}: {{ Order.tax }}<br>Total: <strong>{{ Order.total }}</strong></p><p>We will let you know when it ships.</p>', [], $locale ),
             ),
             new CatalogNotificationTemplate(
@@ -187,7 +187,7 @@ final class NotificationCatalog
                 $pick( 'Store', 'Order' ),
                 static fn ( ?string $locale ): string => __( 'Order :number paid (:total)', [ 'number' => '{{ Order.number }}', 'total' => '{{ Order.total }}' ], $locale ),
                 static fn ( ?string $locale ): string => __( '<p>Order <strong>{{ Order.number }}</strong> from {{ Order.customer.name }} ({{ Order.email }}) has been paid.</p>', [], $locale )
-                    . '<table>' . $orderTable . '</table>'
+                    . '<table role="presentation">' . $orderTable . '</table>'
                     . __( '<p>Total: <strong>{{ Order.total }}</strong></p>', [], $locale ),
             ),
             new CatalogNotificationTemplate(
@@ -322,7 +322,7 @@ final class NotificationCatalog
     public static function sampleContext(): array
     {
         return [
-            'Store'         => [ 'name' => 'Acme Store', 'url' => 'https://shop.example.com', 'support_email' => 'support@example.com' ],
+            'Store'         => [ 'name' => 'Acme Store', 'url' => 'https://shop.example.com', 'support_email' => 'support@example.com', 'preferences_url' => 'https://shop.example.com/account/notifications' ],
             'Order'         => [
                 'number'           => 'K7QM2XW9',
                 'status'           => 'processing',

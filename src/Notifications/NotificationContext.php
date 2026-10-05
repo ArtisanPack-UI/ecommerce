@@ -58,9 +58,12 @@ class NotificationContext
     public function store(): array
     {
         return [
-            'name'          => (string) ( config( 'artisanpack.ecommerce.notifications.store_name' ) ?? config( 'app.name', '' ) ),
-            'url'           => (string) config( 'app.url', '' ),
-            'support_email' => config( 'artisanpack.ecommerce.notifications.support_email' ) ?? config( 'mail.from.address' ),
+            'name'            => (string) ( config( 'artisanpack.ecommerce.notifications.store_name' ) ?? config( 'app.name', '' ) ),
+            'url'             => (string) config( 'app.url', '' ),
+            'support_email'   => config( 'artisanpack.ecommerce.notifications.support_email' ) ?? config( 'mail.from.address' ),
+            // Per recipient at delivery: their unsubscribe link (opt-out
+            // categories), else this store-wide preferences page.
+            'preferences_url' => config( 'artisanpack.ecommerce.notifications.preferences_url' ),
         ];
     }
 

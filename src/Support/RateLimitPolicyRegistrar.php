@@ -58,6 +58,8 @@ class RateLimitPolicyRegistrar
         'ecommerce.claim.attempt',
         'ecommerce.license.validate',
         'ecommerce.webhook.inbound',
+        'ecommerce.webhook.verified',
+        'ecommerce.notifications.unsubscribe',
         'ecommerce.admin.mutate',
     ];
 
@@ -191,6 +193,13 @@ class RateLimitPolicyRegistrar
             return [
                 Limit::perMinute( self::limit( 'webhook.inbound.per_provider', 1_000 ) )
                     ->by( 'ecommerce:webhook:provider:' . sha1( is_string( $provider ) ? $provider : '' ) ),
+            ];
+        } );
+
+        RateLimiter::for( 'ecommerce.notifications.unsubscribe', function ( Request $request ): array {
+            return [
+                Limit::perMinute( self::limit( 'notifications.unsubscribe.per_ip', 30 ) )
+                    ->by( 'ecommerce:unsubscribe:ip:' . sha1( (string) $request->ip() ) ),
             ];
         } );
 

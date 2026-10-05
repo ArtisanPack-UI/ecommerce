@@ -378,6 +378,10 @@ return [
             'per_provider' => (int) env( 'ECOMMERCE_RATE_WEBHOOK_INBOUND_PER_PROVIDER', 1_000 ),
         ],
 
+        'notifications.unsubscribe' => [
+            'per_ip' => (int) env( 'ECOMMERCE_RATE_UNSUBSCRIBE_PER_IP', 30 ),
+        ],
+
         'admin.mutate' => [
             'per_user' => (int) env( 'ECOMMERCE_RATE_ADMIN_MUTATE_PER_USER', 120 ),
         ],
@@ -846,6 +850,12 @@ return [
     | `review_request_delay_days` — Days after delivery to ask for a review
     |                               (0 = immediately; needs a queue worker
     |                               for any delay).
+    | `preferences_url`           — The storefront's notification settings
+    |                               page, offered as `Store.preferences_url`.
+    |                               Mail in a category the recipient can turn
+    |                               off links to a signed one-click
+    |                               unsubscribe instead, and carries
+    |                               `List-Unsubscribe` headers.
     |
     */
 
@@ -857,6 +867,7 @@ return [
         'default_locale'            => env( 'ECOMMERCE_NOTIFICATIONS_DEFAULT_LOCALE' ),
         'preference_channels'       => [ 'mail' ],
         'review_request_delay_days' => (int) env( 'ECOMMERCE_REVIEW_REQUEST_DELAY_DAYS', 7 ),
+        'preferences_url'           => env( 'ECOMMERCE_NOTIFICATIONS_PREFERENCES_URL' ),
     ],
 
     /*
