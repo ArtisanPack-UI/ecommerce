@@ -62,7 +62,7 @@ class TaxRate extends Model
      *
      * @var string
      */
-    protected $table = 'tax_rates';
+    protected $table = 'ecommerce_tax_rates';
 
     /**
      * @since 1.0.0

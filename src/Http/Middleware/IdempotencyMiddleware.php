@@ -519,7 +519,7 @@ class IdempotencyMiddleware
 
         // Use raw DB update so append-only-adjacent event guards on other models
         // stay out of the way and no observers rewrite the row.
-        DB::table( 'idempotency_records' )
+        DB::table( 'ecommerce_idempotency_records' )
             ->where( 'id', $record->id )
             ->update( [
                 'response_status'  => $response->getStatusCode(),

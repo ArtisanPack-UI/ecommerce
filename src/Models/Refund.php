@@ -65,7 +65,7 @@ class Refund extends Model
      *
      * @var string
      */
-    protected $table = 'refunds';
+    protected $table = 'ecommerce_refunds';
 
     /**
      * @since 1.0.0

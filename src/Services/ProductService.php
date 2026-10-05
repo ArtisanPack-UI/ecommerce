@@ -141,6 +141,24 @@ class ProductService
     public const STATUSES = [ 'draft', 'active', 'archived' ];
 
     /**
+     * Weight units for products and variants.
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    public const WEIGHT_UNITS = [ 'g', 'kg', 'oz', 'lb' ];
+
+    /**
+     * Dimension units for products and variants.
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    public const DIMENSION_UNITS = [ 'mm', 'cm', 'in' ];
+
+    /**
      * htmLawed config for product rich text: safe mode drops `<script>`,
      * embeds, event-handler attributes, and `javascript:` URLs, which
      * `kses()`'s default config keeps.
@@ -1280,6 +1298,8 @@ class ProductService
             }
         }
 
+        $this->assertUnits( $values );
+
         if ( array_key_exists( 'meta', $values ) ) {
             // Each top-level meta key is replaced as a whole (not merged deeply).
             $values['meta'] = array_replace( (array) ( $product->meta ?? [] ), (array) $values['meta'] );
@@ -1422,6 +1442,8 @@ class ProductService
                 $values[ $column ] = $this->blankToNull( $values[ $column ] );
             }
         }
+
+        $this->assertUnits( $values );
 
         if ( array_key_exists( 'meta', $values ) ) {
             $values['meta'] = array_replace( (array) ( $variant->meta ?? [] ), (array) $values['meta'] );
@@ -1957,6 +1979,30 @@ class ProductService
             ->where( 'sku', $sku )
             ->when( null !== $ignoreVariantId, static fn ( $query ) => $query->whereKeyNot( $ignoreVariantId ) )
             ->exists();
+    }
+
+    /**
+     * Refuses a weight or dimension unit outside {@see self::WEIGHT_UNITS}
+     * and {@see self::DIMENSION_UNITS}. The columns are plain strings, so
+     * this is the only check in-process callers get.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<string, mixed>  $values  Normalized product or variant values.
+     *
+     * @throws ProductWriteException When a unit isn't allowed.
+     *
+     * @return void
+     */
+    protected function assertUnits( array $values ): void
+    {
+        if ( null !== ( $values['weight_unit'] ?? null ) && ! in_array( $values['weight_unit'], self::WEIGHT_UNITS, true ) ) {
+            throw ProductWriteException::field( 'weight_unit', 'invalid-weight-unit', __( 'Choose a weight unit: :units.', [ 'units' => implode( ', ', self::WEIGHT_UNITS ) ] ) );
+        }
+
+        if ( null !== ( $values['dim_unit'] ?? null ) && ! in_array( $values['dim_unit'], self::DIMENSION_UNITS, true ) ) {
+            throw ProductWriteException::field( 'dim_unit', 'invalid-dimension-unit', __( 'Choose a dimension unit: :units.', [ 'units' => implode( ', ', self::DIMENSION_UNITS ) ] ) );
+        }
     }
 
     /**

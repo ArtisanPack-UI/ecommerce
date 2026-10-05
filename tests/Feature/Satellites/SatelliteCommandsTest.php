@@ -61,7 +61,7 @@ PHP );
             'version'         => '1.0.0',
             'migration_paths' => [ $this->migrations ],
             'tables'          => [ 'acme_subscriptions' ],
-            'columns'         => [ 'carts' => [ 'currency' ] ],
+            'columns'         => [ 'ecommerce_carts' => [ 'currency' ] ],
             'uninstaller'     => RecordingSatelliteUninstaller::class,
         ] );
     };
@@ -145,16 +145,16 @@ it( 'audits orphaned tables and columns from removed satellites', function (): v
     Satellite::factory()->uninstalled()->create( [
         'package_name'  => 'acme/ecommerce-subscriptions',
         'owned_tables'  => [ 'acme_subscriptions', 'acme_gone' ],
-        'owned_columns' => [ 'carts' => [ 'currency', 'no_such_column' ] ],
+        'owned_columns' => [ 'ecommerce_carts' => [ 'currency', 'no_such_column' ] ],
     ] );
     Satellite::factory()->create( [
         'package_name' => 'acme/ecommerce-removed',
-        'owned_tables' => [ 'orders' ],
+        'owned_tables' => [ 'ecommerce_orders' ],
     ] );
     app( SatelliteRegistry::class )->register( [
         'package_name' => 'acme/ecommerce-active',
         'version'      => '1.0.0',
-        'tables'       => [ 'orders' ],
+        'tables'       => [ 'ecommerce_orders' ],
     ] );
 
     expect( Artisan::call( 'ecommerce:satellite:audit', [ '--json' => true ] ) )->toBe( 0 );
@@ -163,7 +163,7 @@ it( 'audits orphaned tables and columns from removed satellites', function (): v
 
     expect( $report['orphans'] )->toBe( [
         [ 'package' => 'acme/ecommerce-subscriptions', 'reason' => 'uninstalled', 'kind' => 'table', 'table' => 'acme_subscriptions', 'column' => null ],
-        [ 'package' => 'acme/ecommerce-subscriptions', 'reason' => 'uninstalled', 'kind' => 'column', 'table' => 'carts', 'column' => 'currency' ],
+        [ 'package' => 'acme/ecommerce-subscriptions', 'reason' => 'uninstalled', 'kind' => 'column', 'table' => 'ecommerce_carts', 'column' => 'currency' ],
     ] )
         ->and( collect( $report['satellites'] )->pluck( 'status', 'package' )->all() )->toBe( [
             'acme/ecommerce-active'        => 'active',

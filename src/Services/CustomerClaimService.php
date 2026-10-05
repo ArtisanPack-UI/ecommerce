@@ -164,7 +164,7 @@ class CustomerClaimService
         string $orderNumber,
         string $postalCode,
     ): ?Order {
-        if ( ! Schema::hasTable( 'orders' ) ) {
+        if ( ! Schema::hasTable( 'ecommerce_orders' ) ) {
             return null;
         }
 
@@ -212,7 +212,7 @@ class CustomerClaimService
      */
     protected function markGuestOrdersClaimed( Customer $customer ): Collection
     {
-        if ( ! Schema::hasTable( 'orders' ) ) {
+        if ( ! Schema::hasTable( 'ecommerce_orders' ) ) {
             return new Collection();
         }
 

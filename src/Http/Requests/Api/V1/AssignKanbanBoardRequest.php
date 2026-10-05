@@ -19,6 +19,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
 
 use ArtisanPackUI\Ecommerce\Models\KanbanBoard;
+use ArtisanPackUI\Ecommerce\Models\KanbanColumn;
 use Illuminate\Validation\Rule;
 
 /**
@@ -39,7 +40,7 @@ class AssignKanbanBoardRequest extends ApiFormRequest
         $board = $this->route( 'board' );
 
         return [
-            'column_id' => [ 'nullable', 'integer', Rule::exists( 'kanban_columns', 'id' )->where( 'board_id', $board instanceof KanbanBoard ? $board->id : null ) ],
+            'column_id' => [ 'nullable', 'integer', Rule::exists( KanbanColumn::class, 'id' )->where( 'board_id', $board instanceof KanbanBoard ? $board->id : null ) ],
         ];
     }
 }

@@ -90,7 +90,7 @@ class Order extends Model
      *
      * @var string
      */
-    protected $table = 'orders';
+    protected $table = 'ecommerce_orders';
 
     /**
      * @since 1.0.0

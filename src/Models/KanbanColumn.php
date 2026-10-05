@@ -54,7 +54,7 @@ class KanbanColumn extends Model
      *
      * @var string
      */
-    protected $table = 'kanban_columns';
+    protected $table = 'ecommerce_kanban_columns';
 
     /**
      * @since 1.0.0

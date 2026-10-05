@@ -207,8 +207,8 @@ class SendCatalogNotifications
         $orders = Order::query()
             ->whereIn( 'id', DigitalDownload::query()
                 ->where( 'digital_file_id', $event->file->id )
-                ->join( 'order_items', 'order_items.id', '=', 'digital_downloads.order_item_id' )
-                ->select( 'order_items.order_id' ) )
+                ->join( 'ecommerce_order_items', 'ecommerce_order_items.id', '=', 'ecommerce_digital_downloads.order_item_id' )
+                ->select( 'ecommerce_order_items.order_id' ) )
             ->with( 'customer' )
             ->get()
             ->unique( fn ( Order $order ): string => null !== $order->customer_id ? 'c' . $order->customer_id : 'e' . strtolower( (string) $order->email ) );

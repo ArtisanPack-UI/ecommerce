@@ -38,7 +38,7 @@ class CouponRequest extends ApiFormRequest
     public function rules(): array
     {
         return [
-            'code' => [ 'required', 'string', 'max:80', Rule::unique( 'coupons', 'code' )->ignore( $this->route( 'coupon' ) ) ],
+            'code' => [ 'required', 'string', 'max:80', Rule::unique( Coupon::class, 'code' )->ignore( $this->route( 'coupon' ) ) ],
         ];
     }
 

@@ -60,7 +60,7 @@ class LicenseKey extends Model
      *
      * @var string
      */
-    protected $table = 'license_keys';
+    protected $table = 'ecommerce_license_keys';
 
     /**
      * @since 1.0.0

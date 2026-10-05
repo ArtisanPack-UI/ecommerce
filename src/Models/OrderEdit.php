@@ -64,7 +64,7 @@ class OrderEdit extends Model
      *
      * @var string
      */
-    protected $table = 'order_edits';
+    protected $table = 'ecommerce_order_edits';
 
     /**
      * @since 1.0.0

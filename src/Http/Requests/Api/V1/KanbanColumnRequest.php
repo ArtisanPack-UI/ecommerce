@@ -21,6 +21,7 @@ namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
 
 use ArtisanPackUI\Ecommerce\Models\KanbanBoard;
 use ArtisanPackUI\Ecommerce\Models\KanbanColumn;
+use ArtisanPackUI\Ecommerce\Models\OrderSubstatus;
 use ArtisanPackUI\Ecommerce\Registries\KanbanCardWidgetRegistry;
 use Illuminate\Validation\Rule;
 
@@ -46,8 +47,8 @@ class KanbanColumnRequest extends ApiFormRequest
         return $this->sometimes( [
             'substatus_id'   => [
                 'integer',
-                Rule::exists( 'order_substatuses', 'id' ),
-                Rule::unique( 'kanban_columns', 'substatus_id' )
+                Rule::exists( OrderSubstatus::class, 'id' ),
+                Rule::unique( KanbanColumn::class, 'substatus_id' )
                     ->where( 'board_id', $boardId )
                     ->ignore( $column instanceof KanbanColumn ? $column->id : null ),
             ],

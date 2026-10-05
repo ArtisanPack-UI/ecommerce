@@ -37,10 +37,6 @@ return new class extends Migration {
      */
     public function up(): void
     {
-        if ( Schema::hasTable( 'ecommerce_satellites' ) ) {
-            return;
-        }
-
         Schema::create( 'ecommerce_satellites', function ( Blueprint $table ): void {
             $table->bigIncrements( 'id' );
             $table->string( 'package_name', 191 );

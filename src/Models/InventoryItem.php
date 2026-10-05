@@ -55,7 +55,7 @@ class InventoryItem extends Model
      *
      * @var string
      */
-    protected $table = 'inventory_items';
+    protected $table = 'ecommerce_inventory_items';
 
     /**
      * @since 1.0.0

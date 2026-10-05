@@ -59,7 +59,7 @@ class LicenseActivation extends Model
      *
      * @var string
      */
-    protected $table = 'license_activations';
+    protected $table = 'ecommerce_license_activations';
 
     /**
      * @since 1.0.0

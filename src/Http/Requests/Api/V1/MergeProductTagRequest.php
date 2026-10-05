@@ -17,6 +17,9 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Models\ProductTag;
+use Illuminate\Validation\Rule;
+
 /**
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -35,7 +38,7 @@ class MergeProductTagRequest extends ApiFormRequest
     public static function baseRules(): array
     {
         return [
-            'target_id' => [ 'required', 'integer', 'exists:product_tags,id' ],
+            'target_id' => [ 'required', 'integer', Rule::exists( ProductTag::class, 'id' ) ],
         ];
     }
 

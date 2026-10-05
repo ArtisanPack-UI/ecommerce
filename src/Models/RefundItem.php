@@ -70,7 +70,7 @@ class RefundItem extends Model
      *
      * @var string
      */
-    protected $table = 'refund_items';
+    protected $table = 'ecommerce_refund_items';
 
     /**
      * @since 1.0.0

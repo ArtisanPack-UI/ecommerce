@@ -40,7 +40,7 @@ class CategoryRevenueReport extends LineItemReport
      *
      * @var string
      */
-    protected const PIVOT = 'product_category_product';
+    protected const PIVOT = 'ecommerce_product_category_product';
 
     /**
      * {@inheritDoc}

@@ -62,7 +62,7 @@ class CartItem extends Model
      *
      * @var string
      */
-    protected $table = 'cart_items';
+    protected $table = 'ecommerce_cart_items';
 
     /**
      * @since 1.0.0

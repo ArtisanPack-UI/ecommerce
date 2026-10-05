@@ -58,7 +58,7 @@ class PromotionAction extends Model
      *
      * @var string
      */
-    protected $table = 'promotion_actions';
+    protected $table = 'ecommerce_promotion_actions';
 
     /**
      * @since 1.0.0

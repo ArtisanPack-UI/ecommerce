@@ -67,7 +67,7 @@ class ShippingMethod extends Model
      *
      * @var string
      */
-    protected $table = 'shipping_methods';
+    protected $table = 'ecommerce_shipping_methods';
 
     /**
      * @since 1.0.0

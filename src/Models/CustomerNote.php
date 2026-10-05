@@ -51,7 +51,7 @@ class CustomerNote extends Model
      *
      * @var string
      */
-    protected $table = 'customer_notes';
+    protected $table = 'ecommerce_customer_notes';
 
     /**
      * @since 1.0.0

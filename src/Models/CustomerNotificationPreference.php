@@ -85,7 +85,7 @@ class CustomerNotificationPreference extends Model
      *
      * @var string
      */
-    protected $table = 'customer_notification_preferences';
+    protected $table = 'ecommerce_customer_notification_preferences';
 
     /**
      * @since 1.0.0

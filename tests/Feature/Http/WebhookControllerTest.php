@@ -37,7 +37,7 @@ final class WebhookControllerTest extends TestCase
         $response->assertNotFound();
         $response->assertJsonPath( 'code', 'gateway_not_registered' );
 
-        $this->assertDatabaseHas( 'inbound_webhook_deliveries', [
+        $this->assertDatabaseHas( 'ecommerce_inbound_webhook_deliveries', [
             'provider'        => 'paypal',
             'verified'        => false,
             'error_code'      => 'gateway_not_registered',
@@ -76,7 +76,7 @@ final class WebhookControllerTest extends TestCase
         $this->assertSame( 1, $genericCalls );
         $this->assertSame( 1, $providerCalls );
 
-        $this->assertDatabaseHas( 'inbound_webhook_deliveries', [
+        $this->assertDatabaseHas( 'ecommerce_inbound_webhook_deliveries', [
             'provider'        => 'fake',
             'event_id'        => 'evt_fake_1',
             'event_type'      => 'payment.captured',
@@ -131,7 +131,7 @@ final class WebhookControllerTest extends TestCase
         $response->assertJsonPath( 'code', 'signature_mismatch' );
 
         $this->assertFalse( $dispatched );
-        $this->assertDatabaseHas( 'inbound_webhook_deliveries', [
+        $this->assertDatabaseHas( 'ecommerce_inbound_webhook_deliveries', [
             'provider'        => 'fake',
             'verified'        => false,
             'error_code'      => 'signature_mismatch',
@@ -171,7 +171,7 @@ final class WebhookControllerTest extends TestCase
         }
 
         $this->assertSame( 0, $received );
-        $this->assertDatabaseMissing( 'idempotency_records', [ 'idempotency_key' => 'evt_retry' ] );
+        $this->assertDatabaseMissing( 'ecommerce_idempotency_records', [ 'idempotency_key' => 'evt_retry' ] );
 
         $this->postJson( '/ecommerce/webhooks/fake', $payload )->assertOk()->assertJsonMissing( [ 'duplicate' => true ] );
         $this->postJson( '/ecommerce/webhooks/fake', $payload )->assertOk()->assertJsonPath( 'duplicate', true );

@@ -53,7 +53,7 @@ class ProductChild extends Model
      *
      * @var string
      */
-    protected $table = 'product_children';
+    protected $table = 'ecommerce_product_children';
 
     /**
      * Mass-assignable attributes.

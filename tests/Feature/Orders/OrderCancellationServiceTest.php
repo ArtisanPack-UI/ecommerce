@@ -165,7 +165,7 @@ it( 'does not mark a payment captured during the cancel as voided', function ():
     $order = Order::factory()->create( [ 'payment_gateway_key' => 'fake', 'payment_status' => 'pending', 'total_amount' => 5_000 ] );
 
     // The capture lands after the caller loaded the order but before the cancel locks it.
-    Illuminate\Support\Facades\DB::table( 'orders' )->where( 'id', $order->id )->update( [ 'payment_status' => 'paid' ] );
+    Illuminate\Support\Facades\DB::table( 'ecommerce_orders' )->where( 'id', $order->id )->update( [ 'payment_status' => 'paid' ] );
 
     $this->gateway->shouldNotReceive( 'voidPendingPayment' );
 

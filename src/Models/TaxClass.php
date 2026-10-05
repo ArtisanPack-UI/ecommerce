@@ -59,7 +59,7 @@ class TaxClass extends Model
      *
      * @var string
      */
-    protected $table = 'tax_classes';
+    protected $table = 'ecommerce_tax_classes';
 
     /**
      * @since 1.0.0

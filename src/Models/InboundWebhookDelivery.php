@@ -55,7 +55,7 @@ class InboundWebhookDelivery extends Model
      *
      * @var string
      */
-    protected $table = 'inbound_webhook_deliveries';
+    protected $table = 'ecommerce_inbound_webhook_deliveries';
 
     /**
      * @since 1.0.0

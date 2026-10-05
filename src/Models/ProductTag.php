@@ -47,7 +47,7 @@ class ProductTag extends Model
      *
      * @var string
      */
-    protected $table = 'product_tags';
+    protected $table = 'ecommerce_product_tags';
 
     /**
      * Mass-assignable attributes.
@@ -70,7 +70,7 @@ class ProductTag extends Model
      */
     public function products(): BelongsToMany
     {
-        return $this->belongsToMany( Product::class, 'product_tag_product', 'product_tag_id', 'product_id' );
+        return $this->belongsToMany( Product::class, 'ecommerce_product_tag_product', 'product_tag_id', 'product_id' );
     }
 
     /**

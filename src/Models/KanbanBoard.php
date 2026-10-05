@@ -54,7 +54,7 @@ class KanbanBoard extends Model
      *
      * @var string
      */
-    protected $table = 'kanban_boards';
+    protected $table = 'ecommerce_kanban_boards';
 
     /**
      * @since 1.0.0

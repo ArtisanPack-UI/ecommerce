@@ -63,7 +63,7 @@ class Customer extends Model
      *
      * @var string
      */
-    protected $table = 'customers';
+    protected $table = 'ecommerce_customers';
 
     /**
      * @since 1.0.0

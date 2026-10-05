@@ -59,7 +59,7 @@ class CustomerClaimAttempt extends Model
      *
      * @var string
      */
-    protected $table = 'customer_claim_attempts';
+    protected $table = 'ecommerce_customer_claim_attempts';
 
     /**
      * @since 1.0.0

@@ -57,7 +57,7 @@ class ShipmentItem extends Model
      *
      * @var string
      */
-    protected $table = 'shipment_items';
+    protected $table = 'ecommerce_shipment_items';
 
     /**
      * @since 1.0.0

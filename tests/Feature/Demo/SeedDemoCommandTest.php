@@ -35,10 +35,10 @@ it( 'seeds the requested number of products and orders', function (): void {
     expect( Product::query()->count() )->toBe( 12 )
         ->and( Order::query()->count() )->toBe( 30 )
         ->and( Customer::query()->count() )->toBeGreaterThanOrEqual( 4 )
-        ->and( DB::table( 'customer_addresses' )->count() )->toBeGreaterThanOrEqual( Customer::query()->count() )
-        ->and( DB::table( 'tax_rates' )->count() )->toBeGreaterThan( 0 )
-        ->and( DB::table( 'shipping_methods' )->count() )->toBeGreaterThan( 0 )
-        ->and( DB::table( 'coupons' )->count() )->toBeGreaterThan( 0 );
+        ->and( DB::table( 'ecommerce_customer_addresses' )->count() )->toBeGreaterThanOrEqual( Customer::query()->count() )
+        ->and( DB::table( 'ecommerce_tax_rates' )->count() )->toBeGreaterThan( 0 )
+        ->and( DB::table( 'ecommerce_shipping_methods' )->count() )->toBeGreaterThan( 0 )
+        ->and( DB::table( 'ecommerce_coupons' )->count() )->toBeGreaterThan( 0 );
 } );
 
 it( 'covers simple, variable, and digital products with categories in meta', function (): void {
@@ -48,9 +48,9 @@ it( 'covers simple, variable, and digital products with categories in meta', fun
 
     expect( $kinds )->toBe( [ 'digital', 'simple', 'variable' ] )
         ->and( Product::query()->where( 'type', 'digital' )->count() )->toBeGreaterThan( 0 )
-        ->and( DB::table( 'product_variants' )->count() )->toBeGreaterThan( 0 )
-        ->and( DB::table( 'product_variant_option_values' )->count() )->toBe( DB::table( 'product_variants' )->count() * 2 )
-        ->and( DB::table( 'digital_files' )->count() )->toBe( Product::query()->where( 'type', 'digital' )->count() )
+        ->and( DB::table( 'ecommerce_product_variants' )->count() )->toBeGreaterThan( 0 )
+        ->and( DB::table( 'ecommerce_product_variant_option_values' )->count() )->toBe( DB::table( 'ecommerce_product_variants' )->count() * 2 )
+        ->and( DB::table( 'ecommerce_digital_files' )->count() )->toBe( Product::query()->where( 'type', 'digital' )->count() )
         ->and( Product::query()->get()->every( fn ( Product $product ): bool => [] !== ( $product->meta['categories'] ?? [] ) ) )->toBeTrue();
 } );
 
@@ -76,8 +76,8 @@ it( 'writes order totals that add up', function (): void {
     } );
 
     expect( Order::query()->where( 'system_status', 'refunded' )->whereColumn( 'total_refunded_amount', '!=', 'total_amount' )->exists() )->toBeFalse()
-        ->and( DB::table( 'refunds' )->count() )->toBeGreaterThan( 0 )
-        ->and( DB::table( 'shipments' )->count() )->toBeGreaterThan( 0 );
+        ->and( DB::table( 'ecommerce_refunds' )->count() )->toBeGreaterThan( 0 )
+        ->and( DB::table( 'ecommerce_shipments' )->count() )->toBeGreaterThan( 0 );
 } );
 
 it( 'pre-populates the kanban boards with columns, automations, and cards', function (): void {
@@ -85,18 +85,18 @@ it( 'pre-populates the kanban boards with columns, automations, and cards', func
 
     $triggers = app( KanbanAutomationRegistry::class );
 
-    expect( DB::table( 'kanban_boards' )->count() )->toBe( 2 )
-        ->and( DB::table( 'kanban_columns' )->count() )->toBeGreaterThan( 2 )
-        ->and( DB::table( 'kanban_automations' )->count() )->toBeGreaterThan( 0 )
-        ->and( DB::table( 'order_board_assignments' )->count() )->toBeGreaterThan( 0 )
-        ->and( DB::table( 'kanban_automations' )->pluck( 'trigger_key' )->every( fn ( string $key ): bool => $triggers->has( $key ) ) )->toBeTrue();
+    expect( DB::table( 'ecommerce_kanban_boards' )->count() )->toBe( 2 )
+        ->and( DB::table( 'ecommerce_kanban_columns' )->count() )->toBeGreaterThan( 2 )
+        ->and( DB::table( 'ecommerce_kanban_automations' )->count() )->toBeGreaterThan( 0 )
+        ->and( DB::table( 'ecommerce_order_board_assignments' )->count() )->toBeGreaterThan( 0 )
+        ->and( DB::table( 'ecommerce_kanban_automations' )->pluck( 'trigger_key' )->every( fn ( string $key ): bool => $triggers->has( $key ) ) )->toBeTrue();
 
     // Each card sits in a column of its board, and the board's routing
     // rules agree the order belongs there.
     $routing = app( KanbanRoutingService::class );
 
-    DB::table( 'order_board_assignments' )->get()->each( function ( object $card ) use ( $routing ): void {
-        expect( DB::table( 'kanban_columns' )->where( 'board_id', $card->board_id )->where( 'substatus_id', $card->substatus_id )->exists() )->toBeTrue()
+    DB::table( 'ecommerce_order_board_assignments' )->get()->each( function ( object $card ) use ( $routing ): void {
+        expect( DB::table( 'ecommerce_kanban_columns' )->where( 'board_id', $card->board_id )->where( 'substatus_id', $card->substatus_id )->exists() )->toBeTrue()
             ->and( $routing->matchingBoardIds( Order::query()->findOrFail( $card->order_id ) ) )->toContain( (int) $card->board_id );
     } );
 } );
@@ -110,7 +110,7 @@ it( 'draws content from all four locales', function (): void {
 
     expect( $productLocales )->toBe( $expected )
         ->and( $customerLocales )->toBe( $expected )
-        ->and( DB::table( 'customer_addresses' )->distinct()->pluck( 'country_code' )->intersect( [ 'ES', 'FR', 'DE' ] )->count() )->toBe( 3 );
+        ->and( DB::table( 'ecommerce_customer_addresses' )->distinct()->pluck( 'country_code' )->intersect( [ 'ES', 'FR', 'DE' ] )->count() )->toBe( 3 );
 } );
 
 it( 'produces the same store twice for the same seed', function (): void {
@@ -123,7 +123,7 @@ it( 'produces the same store twice for the same seed', function (): void {
     $second = [ app( DemoSeeder::class )->counts(), Order::query()->orderBy( 'id' )->pluck( 'total_amount' )->all() ];
 
     expect( $second )->toBe( $first )
-        ->and( DB::table( 'order_substatuses' )->where( 'key', 'packed' )->count() )->toBe( 1 );
+        ->and( DB::table( 'ecommerce_order_substatuses' )->where( 'key', 'packed' )->count() )->toBe( 1 );
 } );
 
 it( 'refuses to seed a store that already has data without --fresh', function (): void {
@@ -153,7 +153,7 @@ it( 'rolls the wipe back when a delete fails part-way through', function (): voi
 
     // Fail on a table late in the wipe order, after earlier tables were emptied.
     DB::listen( static function ( $query ): void {
-        if ( str_starts_with( strtolower( $query->sql ), 'delete from "products"' ) ) {
+        if ( str_starts_with( strtolower( $query->sql ), 'delete from "ecommerce_products"' ) ) {
             throw new RuntimeException( 'blocked by a foreign key' );
         }
     } );
@@ -194,5 +194,5 @@ it( 'seeds the default demo size', function (): void {
 
     expect( Product::query()->count() )->toBe( 50 )
         ->and( Order::query()->count() )->toBe( 200 )
-        ->and( DB::table( 'order_board_assignments' )->count() )->toBeGreaterThan( 50 );
+        ->and( DB::table( 'ecommerce_order_board_assignments' )->count() )->toBeGreaterThan( 50 );
 } );

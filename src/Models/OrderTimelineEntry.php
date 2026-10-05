@@ -62,7 +62,7 @@ class OrderTimelineEntry extends Model
      *
      * @var string
      */
-    protected $table = 'order_timeline_entries';
+    protected $table = 'ecommerce_order_timeline_entries';
 
     /**
      * @since 1.0.0

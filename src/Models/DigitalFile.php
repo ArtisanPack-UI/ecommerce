@@ -70,7 +70,7 @@ class DigitalFile extends Model
      *
      * @var string
      */
-    protected $table = 'digital_files';
+    protected $table = 'ecommerce_digital_files';
 
     /**
      * @since 1.0.0

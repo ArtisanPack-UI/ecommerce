@@ -51,7 +51,7 @@ class ProductAttributeValue extends Model
     /**
      * @var string
      */
-    protected $table = 'product_attribute_values';
+    protected $table = 'ecommerce_product_attribute_values';
 
     /**
      * @var array<int, string>

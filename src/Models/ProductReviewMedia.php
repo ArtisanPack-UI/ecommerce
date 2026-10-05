@@ -55,7 +55,7 @@ class ProductReviewMedia extends Model
      *
      * @var string
      */
-    protected $table = 'product_review_media';
+    protected $table = 'ecommerce_product_review_media';
 
     /**
      * @since 1.0.0

@@ -20,6 +20,9 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Services\ProductService;
+use Illuminate\Validation\Rule;
+
 /**
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -52,11 +55,11 @@ class ProductRequest extends ApiFormRequest
                 'is_taxable'              => [ 'boolean' ],
                 'tax_class_key'           => [ 'nullable', 'string', 'max:60' ],
                 'weight'                  => [ 'nullable', 'numeric', 'min:0' ],
-                'weight_unit'             => [ 'nullable', 'string', 'in:g,kg,oz,lb' ],
+                'weight_unit'             => [ 'nullable', 'string', Rule::in( ProductService::WEIGHT_UNITS ) ],
                 'length'                  => [ 'nullable', 'numeric', 'min:0' ],
                 'width'                   => [ 'nullable', 'numeric', 'min:0' ],
                 'height'                  => [ 'nullable', 'numeric', 'min:0' ],
-                'dim_unit'                => [ 'nullable', 'string', 'in:mm,cm,in' ],
+                'dim_unit'                => [ 'nullable', 'string', Rule::in( ProductService::DIMENSION_UNITS ) ],
                 'meta'                    => [ 'nullable', 'array', 'max:50' ],
                 'published_at'            => [ 'nullable', 'date' ],
                 'category_ids'            => [ 'array', 'max:200' ],

@@ -66,7 +66,7 @@ class PromotionUsage extends Model
      *
      * @var string
      */
-    protected $table = 'promotion_usages';
+    protected $table = 'ecommerce_promotion_usages';
 
     /**
      * @since 1.0.0

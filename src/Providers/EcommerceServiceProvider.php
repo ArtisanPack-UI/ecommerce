@@ -324,8 +324,7 @@ class EcommerceServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        $this->loadMigrationsFrom( __DIR__ . '/../../database/migrations' );
-
+        $this->registerMigrations();
         $this->registerTranslations();
         $this->registerCoreSettings();
         $this->registerRequestIdMiddleware();
@@ -443,6 +442,21 @@ class EcommerceServiceProvider extends ServiceProvider
                 Log::channel( 'ecommerce' )->warning( 'Could not sync ecommerce permissions into cms-framework.', [ 'error' => $exception->getMessage() ] );
             }
         } );
+    }
+
+    /**
+     * Loads the engine's migrations unless the host called
+     * {@see Ecommerce::ignoreMigrations()} to run published copies instead.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerMigrations(): void
+    {
+        if ( Ecommerce::shouldRunMigrations() ) {
+            $this->loadMigrationsFrom( __DIR__ . '/../../database/migrations' );
+        }
     }
 
     /**

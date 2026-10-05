@@ -52,7 +52,7 @@ class OrderSubstatus extends Model
      *
      * @var string
      */
-    protected $table = 'order_substatuses';
+    protected $table = 'ecommerce_order_substatuses';
 
     /**
      * @since 1.0.0

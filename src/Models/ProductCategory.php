@@ -56,7 +56,7 @@ class ProductCategory extends Model
      *
      * @var string
      */
-    protected $table = 'product_categories';
+    protected $table = 'ecommerce_product_categories';
 
     /**
      * Mass-assignable attributes.
@@ -119,7 +119,7 @@ class ProductCategory extends Model
      */
     public function products(): BelongsToMany
     {
-        return $this->belongsToMany( Product::class, 'product_category_product', 'product_category_id', 'product_id' );
+        return $this->belongsToMany( Product::class, 'ecommerce_product_category_product', 'product_category_id', 'product_id' );
     }
 
     /**

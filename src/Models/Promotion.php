@@ -85,7 +85,7 @@ class Promotion extends Model
      *
      * @var string
      */
-    protected $table = 'promotions';
+    protected $table = 'ecommerce_promotions';
 
     /**
      * @since 1.0.0

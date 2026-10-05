@@ -228,7 +228,7 @@ it( 'does not load payloads or response bodies for the deliveries listing', func
         ->assertOk()
         ->assertJsonPath( 'data.0.event', 'order.refunded' );
 
-    $sql = collect( DB::getQueryLog() )->pluck( 'query' )->first( fn ( string $query ): bool => str_contains( $query, 'from "webhook_deliveries"' ) );
+    $sql = collect( DB::getQueryLog() )->pluck( 'query' )->first( fn ( string $query ): bool => str_contains( $query, 'from "ecommerce_webhook_deliveries"' ) );
 
     expect( $sql )->not->toBeNull()
         ->and( $sql )->not->toContain( '"payload",' )

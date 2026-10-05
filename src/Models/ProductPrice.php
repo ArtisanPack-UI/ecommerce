@@ -54,7 +54,7 @@ class ProductPrice extends Model
     /**
      * @var string
      */
-    protected $table = 'product_prices';
+    protected $table = 'ecommerce_product_prices';
 
     /**
      * @var array<int, string>

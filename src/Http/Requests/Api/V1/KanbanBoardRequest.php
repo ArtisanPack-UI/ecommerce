@@ -44,7 +44,7 @@ class KanbanBoardRequest extends ApiFormRequest
         $board = $this->route( 'board' );
 
         return $this->sometimes( [
-            'key'                     => [ 'string', 'max:120', 'regex:/^(?:[a-z0-9]+(?:-[a-z0-9]+)*:)?[a-z0-9]+(?:-[a-z0-9]+)*$/', Rule::unique( 'kanban_boards', 'key' )->ignore( $board instanceof KanbanBoard ? $board->id : null ) ],
+            'key'                     => [ 'string', 'max:120', 'regex:/^(?:[a-z0-9]+(?:-[a-z0-9]+)*:)?[a-z0-9]+(?:-[a-z0-9]+)*$/', Rule::unique( KanbanBoard::class, 'key' )->ignore( $board instanceof KanbanBoard ? $board->id : null ) ],
             'name'                    => [ 'string', 'max:255' ],
             'description'             => [ 'nullable', 'string' ],
             'routing_rules'           => [ 'array', self::conditionTree() ],

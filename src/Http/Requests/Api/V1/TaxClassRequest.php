@@ -17,6 +17,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Models\TaxClass;
 use Illuminate\Validation\Rule;
 
 /**
@@ -35,7 +36,7 @@ class TaxClassRequest extends ApiFormRequest
     public function rules(): array
     {
         return [
-            'key'   => [ 'required', 'string', 'max:60', 'regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/', Rule::unique( 'tax_classes', 'key' ) ],
+            'key'   => [ 'required', 'string', 'max:60', 'regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/', Rule::unique( TaxClass::class, 'key' ) ],
             'label' => [ 'required', 'string', 'max:120' ],
         ];
     }

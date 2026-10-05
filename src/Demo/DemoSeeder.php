@@ -63,53 +63,53 @@ class DemoSeeder
      * @var array<int, string>
      */
     public const ENGINE_TABLES = [
-        'order_board_assignments',
-        'kanban_automations',
-        'kanban_columns',
-        'kanban_boards',
-        'kanban_card_widgets',
-        'license_activations',
-        'license_keys',
-        'digital_download_events',
-        'digital_downloads',
-        'digital_files',
-        'product_review_media',
-        'product_reviews',
-        'promotion_usages',
-        'coupons',
-        'promotion_actions',
-        'promotion_conditions',
-        'promotions',
-        'shipment_items',
-        'shipments',
-        'refund_items',
-        'refunds',
-        'order_edits',
-        'order_timeline_entries',
-        'order_notes',
-        'order_items',
-        'webhook_deliveries',
-        'webhook_subscriptions',
-        'inbound_webhook_deliveries',
-        'idempotency_records',
-        'orders',
-        'cart_items',
-        'carts',
-        'inventory_reservations',
-        'inventory_items',
-        'customer_notification_preferences',
-        'customer_claim_attempts',
-        'customer_addresses',
-        'customers',
-        'shipping_methods',
-        'shipping_zones',
-        'tax_rates',
-        'product_variant_option_values',
-        'product_attribute_values',
-        'product_attributes',
-        'product_prices',
-        'product_variants',
-        'products',
+        'ecommerce_order_board_assignments',
+        'ecommerce_kanban_automations',
+        'ecommerce_kanban_columns',
+        'ecommerce_kanban_boards',
+        'ecommerce_kanban_card_widgets',
+        'ecommerce_license_activations',
+        'ecommerce_license_keys',
+        'ecommerce_digital_download_events',
+        'ecommerce_digital_downloads',
+        'ecommerce_digital_files',
+        'ecommerce_product_review_media',
+        'ecommerce_product_reviews',
+        'ecommerce_promotion_usages',
+        'ecommerce_coupons',
+        'ecommerce_promotion_actions',
+        'ecommerce_promotion_conditions',
+        'ecommerce_promotions',
+        'ecommerce_shipment_items',
+        'ecommerce_shipments',
+        'ecommerce_refund_items',
+        'ecommerce_refunds',
+        'ecommerce_order_edits',
+        'ecommerce_order_timeline_entries',
+        'ecommerce_order_notes',
+        'ecommerce_order_items',
+        'ecommerce_webhook_deliveries',
+        'ecommerce_webhook_subscriptions',
+        'ecommerce_inbound_webhook_deliveries',
+        'ecommerce_idempotency_records',
+        'ecommerce_orders',
+        'ecommerce_cart_items',
+        'ecommerce_carts',
+        'ecommerce_inventory_reservations',
+        'ecommerce_inventory_items',
+        'ecommerce_customer_notification_preferences',
+        'ecommerce_customer_claim_attempts',
+        'ecommerce_customer_addresses',
+        'ecommerce_customers',
+        'ecommerce_shipping_methods',
+        'ecommerce_shipping_zones',
+        'ecommerce_tax_rates',
+        'ecommerce_product_variant_option_values',
+        'ecommerce_product_attribute_values',
+        'ecommerce_product_attributes',
+        'ecommerce_product_prices',
+        'ecommerce_product_variants',
+        'ecommerce_products',
     ];
 
     /**
@@ -149,14 +149,14 @@ class DemoSeeder
      * @var array<int, string>
      */
     public const STORE_TABLES = [
-        'products',
-        'orders',
-        'customers',
-        'tax_rates',
-        'shipping_zones',
-        'promotions',
-        'coupons',
-        'kanban_boards',
+        'ecommerce_products',
+        'ecommerce_orders',
+        'ecommerce_customers',
+        'ecommerce_tax_rates',
+        'ecommerce_shipping_zones',
+        'ecommerce_promotions',
+        'ecommerce_coupons',
+        'ecommerce_kanban_boards',
     ];
 
     /**
@@ -306,11 +306,11 @@ class DemoSeeder
                     }
                 }
 
-                DB::table( 'order_substatuses' )
+                DB::table( 'ecommerce_order_substatuses' )
                     ->get( [ 'id', 'system_status', 'key' ] )
                     ->reject( static fn ( object $row ): bool => ( self::DEFAULT_SUBSTATUSES[ $row->system_status ] ?? null ) === $row->key )
                     ->each( static function ( object $row ): void {
-                        DB::table( 'order_substatuses' )->where( 'id', $row->id )->delete();
+                        DB::table( 'ecommerce_order_substatuses' )->where( 'id', $row->id )->delete();
                     } );
             } );
         } finally {
@@ -368,29 +368,30 @@ class DemoSeeder
         $counts = [];
 
         foreach ( [
-            'products',
-            'product_variants',
-            'product_prices',
-            'inventory_items',
-            'digital_files',
-            'customers',
-            'customer_addresses',
-            'orders',
-            'order_items',
-            'shipments',
-            'refunds',
-            'license_keys',
-            'product_reviews',
-            'promotions',
-            'coupons',
-            'tax_rates',
-            'shipping_methods',
-            'kanban_boards',
-            'kanban_columns',
-            'kanban_automations',
-            'order_board_assignments',
+            'ecommerce_products',
+            'ecommerce_product_variants',
+            'ecommerce_product_prices',
+            'ecommerce_inventory_items',
+            'ecommerce_digital_files',
+            'ecommerce_customers',
+            'ecommerce_customer_addresses',
+            'ecommerce_orders',
+            'ecommerce_order_items',
+            'ecommerce_shipments',
+            'ecommerce_refunds',
+            'ecommerce_license_keys',
+            'ecommerce_product_reviews',
+            'ecommerce_promotions',
+            'ecommerce_coupons',
+            'ecommerce_tax_rates',
+            'ecommerce_shipping_methods',
+            'ecommerce_kanban_boards',
+            'ecommerce_kanban_columns',
+            'ecommerce_kanban_automations',
+            'ecommerce_order_board_assignments',
         ] as $table ) {
-            $counts[ $table ] = DB::table( $table )->count();
+            // Keyed by the unprefixed name, which is what the command prints.
+            $counts[ substr( $table, strlen( 'ecommerce_' ) ) ] = DB::table( $table )->count();
         }
 
         return $counts;
@@ -407,10 +408,10 @@ class DemoSeeder
     protected function seedSubstatuses(): void
     {
         foreach ( self::DEFAULT_SUBSTATUSES as $status => $key ) {
-            $exists = DB::table( 'order_substatuses' )->where( 'system_status', $status )->where( 'key', $key )->exists();
+            $exists = DB::table( 'ecommerce_order_substatuses' )->where( 'system_status', $status )->where( 'key', $key )->exists();
 
             if ( ! $exists ) {
-                DB::table( 'order_substatuses' )->insert( $this->stamp( [
+                DB::table( 'ecommerce_order_substatuses' )->insert( $this->stamp( [
                     'system_status' => $status,
                     'key'           => $key,
                     'label'         => Str::headline( $key ),
@@ -421,13 +422,13 @@ class DemoSeeder
         }
 
         foreach ( [ [ 'picking', 'Picking', '#6366F1', 1 ], [ 'packed', 'Packed', '#0EA5E9', 2 ] ] as [ $key, $label, $color, $position ] ) {
-            DB::table( 'order_substatuses' )->updateOrInsert(
+            DB::table( 'ecommerce_order_substatuses' )->updateOrInsert(
                 [ 'system_status' => 'processing', 'key' => $key ],
                 $this->stamp( [ 'label' => $label, 'color' => $color, 'position' => $position, 'is_terminal' => false ] ),
             );
         }
 
-        $this->substatuses = DB::table( 'order_substatuses' )
+        $this->substatuses = DB::table( 'ecommerce_order_substatuses' )
             ->get( [ 'id', 'system_status', 'key' ] )
             ->mapWithKeys( static fn ( object $row ): array => [ $row->system_status . '.' . $row->key => (int) $row->id ] )
             ->all();
@@ -447,8 +448,8 @@ class DemoSeeder
     {
         // Migration …000024 seeds these; restore them if an operator removed one.
         foreach ( [ 'standard' => 'Standard', 'reduced' => 'Reduced rate' ] as $key => $label ) {
-            if ( ! DB::table( 'tax_classes' )->where( 'key', $key )->exists() ) {
-                DB::table( 'tax_classes' )->insert( $this->stamp( [ 'key' => $key, 'label' => $label ] ) );
+            if ( ! DB::table( 'ecommerce_tax_classes' )->where( 'key', $key )->exists() ) {
+                DB::table( 'ecommerce_tax_classes' )->insert( $this->stamp( [ 'key' => $key, 'label' => $label ] ) );
             }
         }
 
@@ -478,7 +479,7 @@ class DemoSeeder
             }
         }
 
-        DB::table( 'tax_rates' )->insert( $rows );
+        DB::table( 'ecommerce_tax_rates' )->insert( $rows );
     }
 
     /**
@@ -495,14 +496,14 @@ class DemoSeeder
             [ 'North America', [ 'US' ], 599 ],
             [ 'Europe', [ 'GB', 'ES', 'FR', 'DE' ], 899 ],
         ] as $position => [ $name, $countries, $flat ] ) {
-            $zoneId = DB::table( 'shipping_zones' )->insertGetId( $this->stamp( [
+            $zoneId = DB::table( 'ecommerce_shipping_zones' )->insertGetId( $this->stamp( [
                 'name'          => $name,
                 'country_codes' => json_encode( $countries ),
                 'priority'      => $position,
                 'is_active'     => true,
             ] ) );
 
-            DB::table( 'shipping_methods' )->insert( [
+            DB::table( 'ecommerce_shipping_methods' )->insert( [
                 $this->stamp( [ 'zone_id' => $zoneId, 'key' => 'flat-rate', 'label' => 'Standard shipping', 'config' => json_encode( [ 'amount' => $flat ] ), 'position' => 0, 'is_active' => true ] ),
                 $this->stamp( [ 'zone_id' => $zoneId, 'key' => 'free-shipping', 'label' => 'Free shipping', 'config' => json_encode( [ 'min_subtotal' => 7_500 ] ), 'position' => 1, 'is_active' => true ] ),
                 $this->stamp( [ 'zone_id' => $zoneId, 'key' => 'local-pickup', 'label' => 'Local pickup', 'config' => json_encode( [ 'amount' => 0 ] ), 'position' => 2, 'is_active' => true ] ),
@@ -527,7 +528,7 @@ class DemoSeeder
         ];
 
         foreach ( $definitions as $key => [ $name, $source, $action, $actionConfig, $condition, $conditionConfig, $startsIn, $endsIn, $code ] ) {
-            $id = DB::table( 'promotions' )->insertGetId( $this->stamp( [
+            $id = DB::table( 'ecommerce_promotions' )->insertGetId( $this->stamp( [
                 'key'          => $key,
                 'name'         => $name,
                 'source_type'  => $source,
@@ -538,11 +539,11 @@ class DemoSeeder
                 'is_active'    => true,
             ] ) );
 
-            DB::table( 'promotion_actions' )->insert( [ 'promotion_id' => $id, 'type' => $action, 'config' => json_encode( (object) $actionConfig ) ] );
-            DB::table( 'promotion_conditions' )->insert( [ 'promotion_id' => $id, 'type' => $condition, 'config' => json_encode( (object) $conditionConfig ) ] );
+            DB::table( 'ecommerce_promotion_actions' )->insert( [ 'promotion_id' => $id, 'type' => $action, 'config' => json_encode( (object) $actionConfig ) ] );
+            DB::table( 'ecommerce_promotion_conditions' )->insert( [ 'promotion_id' => $id, 'type' => $condition, 'config' => json_encode( (object) $conditionConfig ) ] );
 
             if ( null !== $code ) {
-                DB::table( 'coupons' )->insert( $this->stamp( [ 'promotion_id' => $id, 'code' => $code ] ) );
+                DB::table( 'ecommerce_coupons' )->insert( $this->stamp( [ 'promotion_id' => $id, 'code' => $code ] ) );
             }
 
             $this->promotions[ $key ] = (int) $id;
@@ -631,7 +632,7 @@ class DemoSeeder
             $meta['licensing'] = [ 'enabled' => true, 'activations_limit' => 3, 'expires_in_days' => 365 ];
         }
 
-        return (int) DB::table( 'products' )->insertGetId( $this->stamp( [
+        return (int) DB::table( 'ecommerce_products' )->insertGetId( $this->stamp( [
             'type'              => $digital ? DigitalProductType::KEY : SimpleProductType::KEY,
             'name'              => $name,
             'slug'              => $slug,
@@ -707,7 +708,7 @@ class DemoSeeder
 
         foreach ( $chosen as $attributeKey => $values ) {
             $definition                    = DemoCatalog::ATTRIBUTES[ $attributeKey ];
-            $attributeIds[ $attributeKey ] = (int) DB::table( 'product_attributes' )->insertGetId( $this->stamp( [
+            $attributeIds[ $attributeKey ] = (int) DB::table( 'ecommerce_product_attributes' )->insertGetId( $this->stamp( [
                 'product_id'   => $productId,
                 'key'          => $attributeKey,
                 'label'        => $definition['labels'][ $locale ],
@@ -716,7 +717,7 @@ class DemoSeeder
             ] ) );
 
             foreach ( $values as $position => $value ) {
-                $valueIds[ $attributeKey ][ $value ] = (int) DB::table( 'product_attribute_values' )->insertGetId( [
+                $valueIds[ $attributeKey ][ $value ] = (int) DB::table( 'ecommerce_product_attribute_values' )->insertGetId( [
                     'product_attribute_id' => $attributeIds[ $attributeKey ],
                     'value'                => $value,
                     'label'                => $definition['values'][ $value ][ $locale ],
@@ -734,7 +735,7 @@ class DemoSeeder
                 $label      = DemoCatalog::ATTRIBUTES['size']['values'][ $size ][ $locale ] . ' / ' . DemoCatalog::ATTRIBUTES['color']['values'][ $color ][ $locale ];
                 $variantSku = $sku . '-' . strtoupper( $size . '-' . $color );
                 $price      = 'l' === $size ? $base + 300 : $base;
-                $variantId  = (int) DB::table( 'product_variants' )->insertGetId( $this->stamp( [
+                $variantId  = (int) DB::table( 'ecommerce_product_variants' )->insertGetId( $this->stamp( [
                     'product_id'  => $productId,
                     'sku'         => $variantSku,
                     'name'        => $label,
@@ -745,7 +746,7 @@ class DemoSeeder
                 ] ) );
 
                 foreach ( [ 'size' => $size, 'color' => $color ] as $attributeKey => $value ) {
-                    DB::table( 'product_variant_option_values' )->insert( [
+                    DB::table( 'ecommerce_product_variant_option_values' )->insert( [
                         'product_variant_id'         => $variantId,
                         'product_attribute_id'       => $attributeIds[ $attributeKey ],
                         'product_attribute_value_id' => $valueIds[ $attributeKey ][ $value ],
@@ -800,7 +801,7 @@ class DemoSeeder
 
         $this->insertPrices( ( new Product() )->getMorphClass(), $productId, $price );
 
-        $fileId = (int) DB::table( 'digital_files' )->insertGetId( $this->stamp( [
+        $fileId = (int) DB::table( 'ecommerce_digital_files' )->insertGetId( $this->stamp( [
             'product_id'        => $productId,
             'disk'              => 'local',
             'path'              => 'ecommerce-demo/' . $slug . '.' . $extension,
@@ -836,7 +837,7 @@ class DemoSeeder
             $created = $this->now->copy()->subDays( $this->random->getInt( 91, 400 ) );
             $markets = $this->chance( 40 );
 
-            $customerId = (int) DB::table( 'customers' )->insertGetId( [
+            $customerId = (int) DB::table( 'ecommerce_customers' )->insertGetId( [
                 'email'                => $email,
                 'first_name'           => $first,
                 'last_name'            => $last,
@@ -851,7 +852,7 @@ class DemoSeeder
                 'updated_at'           => $created,
             ] );
 
-            DB::table( 'customer_addresses' )->insert( $this->stamp( array_merge( $address, [
+            DB::table( 'ecommerce_customer_addresses' )->insert( $this->stamp( array_merge( $address, [
                 'customer_id'         => $customerId,
                 'label'               => 'Home',
                 'is_default_shipping' => true,
@@ -859,7 +860,7 @@ class DemoSeeder
             ] ) ) );
 
             if ( $this->chance( 20 ) ) {
-                DB::table( 'customer_addresses' )->insert( $this->stamp( array_merge( $this->address( $locale, $first, $last ), [
+                DB::table( 'ecommerce_customer_addresses' )->insert( $this->stamp( array_merge( $this->address( $locale, $first, $last ), [
                     'customer_id' => $customerId,
                     'label'       => 'Work',
                 ] ) ) );
@@ -900,13 +901,13 @@ class DemoSeeder
             array_push( $timeline, ...$this->seedOrder( $placedAt, $status ) );
 
             if ( count( $timeline ) >= 500 ) {
-                DB::table( 'order_timeline_entries' )->insert( $timeline );
+                DB::table( 'ecommerce_order_timeline_entries' )->insert( $timeline );
                 $timeline = [];
             }
         }
 
         if ( [] !== $timeline ) {
-            DB::table( 'order_timeline_entries' )->insert( $timeline );
+            DB::table( 'ecommerce_order_timeline_entries' )->insert( $timeline );
         }
     }
 
@@ -1021,7 +1022,7 @@ class DemoSeeder
             : self::DEFAULT_SUBSTATUSES[ $status ];
         $updatedAt       = $this->later( $placedAt, 1, 72 );
 
-        $orderId = (int) DB::table( 'orders' )->insertGetId( [
+        $orderId = (int) DB::table( 'ecommerce_orders' )->insertGetId( [
             'order_number'            => $this->orderNumber(),
             'customer_id'             => $customer['id'] ?? null,
             'email'                   => $email,
@@ -1066,7 +1067,7 @@ class DemoSeeder
                 default                      => 'unfulfilled',
             };
 
-            $line['id'] = (int) DB::table( 'order_items' )->insertGetId( [
+            $line['id'] = (int) DB::table( 'ecommerce_order_items' )->insertGetId( [
                 'order_id'            => $orderId,
                 'product_id'          => $line['sellable']['product_id'],
                 'product_variant_id'  => $line['sellable']['variant_id'],
@@ -1126,7 +1127,7 @@ class DemoSeeder
         }
 
         if ( null !== $promo ) {
-            DB::table( 'promotion_usages' )->insert( [
+            DB::table( 'ecommerce_promotion_usages' )->insert( [
                 'promotion_id'      => $this->promotions[ $promo ],
                 'order_id'          => $orderId,
                 'customer_id'       => $customer['id'] ?? null,
@@ -1171,7 +1172,7 @@ class DemoSeeder
         $deliveredAt = $complete ? $this->later( $shippedAt, 24, 120 ) : null;
         $tracking    = strtoupper( bin2hex( $this->random->getBytes( 6 ) ) );
 
-        $shipmentId = (int) DB::table( 'shipments' )->insertGetId( [
+        $shipmentId = (int) DB::table( 'ecommerce_shipments' )->insertGetId( [
             'order_id'        => $orderId,
             'method_key'      => $methodKey ?? 'flat-rate',
             'carrier'         => $carrier,
@@ -1190,14 +1191,14 @@ class DemoSeeder
                 continue;
             }
 
-            DB::table( 'shipment_items' )->insert( [
+            DB::table( 'ecommerce_shipment_items' )->insert( [
                 'shipment_id'   => $shipmentId,
                 'order_item_id' => $line['id'],
                 'quantity'      => $line['qty'],
             ] );
 
             if ( ! $complete ) {
-                DB::table( 'order_items' )->where( 'id', $line['id'] )->update( [ 'fulfillment_status' => 'fulfilled' ] );
+                DB::table( 'ecommerce_order_items' )->where( 'id', $line['id'] )->update( [ 'fulfillment_status' => 'fulfilled' ] );
 
                 break;
             }
@@ -1219,7 +1220,7 @@ class DemoSeeder
      */
     protected function seedRefund( int $orderId, array $lines, int $amount, string $currency, Carbon $at ): void
     {
-        $refundId = (int) DB::table( 'refunds' )->insertGetId( [
+        $refundId = (int) DB::table( 'ecommerce_refunds' )->insertGetId( [
             'order_id'          => $orderId,
             'amount'            => $amount,
             'currency'          => $currency,
@@ -1230,7 +1231,7 @@ class DemoSeeder
         ] );
 
         foreach ( $lines as $line ) {
-            DB::table( 'refund_items' )->insert( [
+            DB::table( 'ecommerce_refund_items' )->insert( [
                 'refund_id'     => $refundId,
                 'order_item_id' => $line['id'],
                 'quantity'      => $line['qty'],
@@ -1260,7 +1261,7 @@ class DemoSeeder
 
             $issuedAt = $placedAt->copy()->addMinutes( 3 );
 
-            DB::table( 'license_keys' )->insert( [
+            DB::table( 'ecommerce_license_keys' )->insert( [
                 'order_item_id'     => $line['id'],
                 'digital_file_id'   => $line['sellable']['file_id'],
                 'key'               => implode( '-', str_split( strtoupper( bin2hex( $this->random->getBytes( 8 ) ) ), 4 ) ),
@@ -1298,7 +1299,7 @@ class DemoSeeder
         $at               = $this->later( $after, 24, 240 );
         $author           = explode( '@', $email )[0];
 
-        DB::table( 'product_reviews' )->insert( [
+        DB::table( 'ecommerce_product_reviews' )->insert( [
             'product_id'           => $productId,
             'customer_id'          => $customer['id'] ?? null,
             'order_id'             => $orderId,
@@ -1353,7 +1354,7 @@ class DemoSeeder
         $position = 0;
 
         foreach ( $boards as $key => $definition ) {
-            $boardId = (int) DB::table( 'kanban_boards' )->insertGetId( $this->stamp( [
+            $boardId = (int) DB::table( 'ecommerce_kanban_boards' )->insertGetId( $this->stamp( [
                 'key'           => $key,
                 'name'          => $definition['name'],
                 'description'   => 'Demo board seeded by ecommerce:seed-demo.',
@@ -1367,7 +1368,7 @@ class DemoSeeder
             $columns = [];
 
             foreach ( $definition['columns'] as $index => [ $substatus, $label, $widgets, $wip ] ) {
-                $columns[ $substatus ] = (int) DB::table( 'kanban_columns' )->insertGetId( $this->stamp( [
+                $columns[ $substatus ] = (int) DB::table( 'ecommerce_kanban_columns' )->insertGetId( $this->stamp( [
                     'board_id'       => $boardId,
                     'substatus_id'   => $this->substatuses[ $substatus ],
                     'label_override' => $label,
@@ -1406,7 +1407,7 @@ class DemoSeeder
             ];
 
         foreach ( $automations as [ $from, $to, $trigger, $config ] ) {
-            DB::table( 'kanban_automations' )->insert( $this->stamp( [
+            DB::table( 'ecommerce_kanban_automations' )->insert( $this->stamp( [
                 'board_id'       => $boardId,
                 'from_column_id' => null === $from ? null : $columns[ $from ],
                 'to_column_id'   => $columns[ $to ],
@@ -1433,18 +1434,18 @@ class DemoSeeder
      */
     protected function seedCards( int $boardId, bool $physical ): void
     {
-        $columnSubstatuses = DB::table( 'kanban_columns' )->where( 'board_id', $boardId )->pluck( 'substatus_id' )->map( static fn ( mixed $id ): int => (int) $id )->all();
+        $columnSubstatuses = DB::table( 'ecommerce_kanban_columns' )->where( 'board_id', $boardId )->pluck( 'substatus_id' )->map( static fn ( mixed $id ): int => (int) $id )->all();
         $simpleType        = SimpleProductType::KEY;
-        $withPhysical      = DB::table( 'order_items' )
-            ->join( 'products', 'products.id', '=', 'order_items.product_id' )
-            ->where( 'products.type', $simpleType )
+        $withPhysical      = DB::table( 'ecommerce_order_items' )
+            ->join( 'ecommerce_products', 'ecommerce_products.id', '=', 'ecommerce_order_items.product_id' )
+            ->where( 'ecommerce_products.type', $simpleType )
             ->distinct()
-            ->pluck( 'order_items.order_id' )
+            ->pluck( 'ecommerce_order_items.order_id' )
             ->mapWithKeys( static fn ( mixed $id ): array => [ (int) $id => true ] );
 
         $rows = [];
 
-        foreach ( DB::table( 'orders' )->whereIn( 'substatus_id', $columnSubstatuses )->orderBy( 'id' )->get( [ 'id', 'substatus_id', 'placed_at', 'updated_at' ] ) as $order ) {
+        foreach ( DB::table( 'ecommerce_orders' )->whereIn( 'substatus_id', $columnSubstatuses )->orderBy( 'id' )->get( [ 'id', 'substatus_id', 'placed_at', 'updated_at' ] ) as $order ) {
             if ( $physical !== $withPhysical->has( (int) $order->id ) ) {
                 continue;
             }
@@ -1459,7 +1460,7 @@ class DemoSeeder
         }
 
         foreach ( array_chunk( $rows, 200 ) as $chunk ) {
-            DB::table( 'order_board_assignments' )->insert( $chunk );
+            DB::table( 'ecommerce_order_board_assignments' )->insert( $chunk );
         }
     }
 
@@ -1473,7 +1474,7 @@ class DemoSeeder
      */
     protected function refreshAggregates(): void
     {
-        $stats = DB::table( 'orders' )
+        $stats = DB::table( 'ecommerce_orders' )
             ->whereNotNull( 'customer_id' )
             ->whereIn( 'payment_status', [ 'paid', 'partially_refunded' ] )
             ->groupBy( 'customer_id' )
@@ -1483,35 +1484,35 @@ class DemoSeeder
 
         $spend = [];
 
-        foreach ( DB::table( 'orders' )->whereNotNull( 'customer_id' )->whereIn( 'payment_status', [ 'paid', 'partially_refunded' ] )->get( [ 'customer_id', 'total_amount', 'total_refunded_amount', 'fx_rate_to_base_e8' ] ) as $order ) {
+        foreach ( DB::table( 'ecommerce_orders' )->whereNotNull( 'customer_id' )->whereIn( 'payment_status', [ 'paid', 'partially_refunded' ] )->get( [ 'customer_id', 'total_amount', 'total_refunded_amount', 'fx_rate_to_base_e8' ] ) as $order ) {
             $net                                = (int) $order->total_amount - (int) $order->total_refunded_amount;
             $spend[ (int) $order->customer_id ] = ( $spend[ (int) $order->customer_id ] ?? 0 ) + intdiv( $net * (int) $order->fx_rate_to_base_e8, 100_000_000 );
         }
 
         foreach ( $stats as $customerId => $row ) {
-            DB::table( 'customers' )->where( 'id', $customerId )->update( [
+            DB::table( 'ecommerce_customers' )->where( 'id', $customerId )->update( [
                 'orders_count'       => (int) $row->orders_count,
                 'last_ordered_at'    => $row->last_ordered_at,
                 'total_spent_amount' => $spend[ (int) $customerId ] ?? 0,
             ] );
         }
 
-        $ratings = DB::table( 'product_reviews' )
+        $ratings = DB::table( 'ecommerce_product_reviews' )
             ->where( 'status', 'approved' )
             ->groupBy( 'product_id' )
             ->selectRaw( 'product_id, avg(rating) as avg_rating, count(*) as reviews_count' )
             ->get();
 
         foreach ( $ratings as $row ) {
-            DB::table( 'products' )->where( 'id', $row->product_id )->update( [
+            DB::table( 'ecommerce_products' )->where( 'id', $row->product_id )->update( [
                 'avg_rating'    => round( (float) $row->avg_rating, 2 ),
                 'reviews_count' => (int) $row->reviews_count,
             ] );
         }
 
         foreach ( $this->promotions as $promotionId ) {
-            DB::table( 'promotions' )->where( 'id', $promotionId )->update( [
-                'times_used' => DB::table( 'promotion_usages' )->where( 'promotion_id', $promotionId )->count(),
+            DB::table( 'ecommerce_promotions' )->where( 'id', $promotionId )->update( [
+                'times_used' => DB::table( 'ecommerce_promotion_usages' )->where( 'promotion_id', $promotionId )->count(),
             ] );
         }
     }
@@ -1666,7 +1667,7 @@ class DemoSeeder
             ] );
         }
 
-        DB::table( 'product_prices' )->insert( $rows );
+        DB::table( 'ecommerce_product_prices' )->insert( $rows );
     }
 
     /**
@@ -1683,7 +1684,7 @@ class DemoSeeder
     {
         $roll = $this->random->getInt( 1, 20 );
 
-        DB::table( 'inventory_items' )->insert( $this->stamp( [
+        DB::table( 'ecommerce_inventory_items' )->insert( $this->stamp( [
             'stockable_type'      => $morph,
             'stockable_id'        => $id,
             'track_inventory'     => true,

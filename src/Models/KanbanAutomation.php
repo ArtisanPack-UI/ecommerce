@@ -55,7 +55,7 @@ class KanbanAutomation extends Model
      *
      * @var string
      */
-    protected $table = 'kanban_automations';
+    protected $table = 'ecommerce_kanban_automations';
 
     /**
      * @since 1.0.0

@@ -232,7 +232,7 @@ it( 'manages and merges tags', function (): void {
     $this->postJson( "{$api}/{$deals}/merge", [ 'target_id' => $sale ], idem() )->assertOk()->assertJsonPath( 'data.id', $sale );
     $this->postJson( "{$api}/{$sale}/merge", [ 'target_id' => $sale ], idem() )->assertStatus( 422 )->assertJsonPath( 'errors.0.code', 'merge-self' );
 
-    expect( $product->tags()->pluck( 'product_tags.id' )->all() )->toBe( [ $sale ] );
+    expect( $product->tags()->pluck( 'ecommerce_product_tags.id' )->all() )->toBe( [ $sale ] );
 
     $this->deleteJson( "{$api}/{$sale}", [], idem() )->assertOk();
 
