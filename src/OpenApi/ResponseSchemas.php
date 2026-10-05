@@ -101,6 +101,11 @@ final class ResponseSchemas
                 'icon'     => [ 'type' => [ 'string', 'null' ] ],
                 'position' => [ 'type' => 'integer' ],
             ], [ 'key', 'label', 'route', 'position' ] ) ),
+            'productsReviewsEligibility'        => self::object( [
+                'allowed'           => [ 'type' => 'boolean' ],
+                'reason'            => [ 'type' => [ 'string', 'null' ], 'enum' => [ 'guests-not-allowed', 'already-reviewed', 'purchase-required', null ] ],
+                'verified_purchase' => [ 'type' => 'boolean' ],
+            ], [ 'allowed', 'reason', 'verified_purchase' ] ),
             'productsViewsStore'                => self::object( [ 'recorded' => [ 'type' => 'boolean' ] ], [ 'recorded' ] ),
             'productsPurchaseOptions'           => self::object( [
                 'product_id' => [ 'type' => 'integer' ],

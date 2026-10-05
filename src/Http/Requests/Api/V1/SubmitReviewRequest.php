@@ -21,6 +21,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
 
 use ArtisanPackUI\Ecommerce\Models\Customer;
+use ArtisanPackUI\Ecommerce\Reviews\ReviewMediaStore;
 use ArtisanPackUI\Ecommerce\Services\ReviewService;
 
 /**
@@ -51,6 +52,11 @@ class SubmitReviewRequest extends ApiFormRequest
             'author_name'                  => [ ...$author, 'string', 'max:255' ],
             'author_email'                 => [ ...$author, 'string', 'email', 'max:255' ],
             'order_id'                     => [ 'nullable', 'integer', 'min:1' ],
+            // Photos (#181) need media-library to store them.
+            'media'                        => app( ReviewMediaStore::class )->available()
+                ? [ 'sometimes', 'array', 'max:' . max( 0, (int) config( 'artisanpack.ecommerce.reviews.max_media', 5 ) ) ]
+                : [ 'prohibited' ],
+            'media.*'                      => [ 'file', 'image', 'max:5120' ],
             ReviewService::honeypotField() => [ 'nullable' ],
         ];
     }

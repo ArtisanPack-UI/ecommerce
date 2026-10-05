@@ -112,6 +112,10 @@ Route::post( 'products/{product}/reviews', [ ProductReviewController::class, 'st
     ->whereNumber( 'product' )
     ->middleware( [ 'ecommerce.optional-auth', 'ecommerce.rate-limit:ecommerce.review.submit', 'ecommerce.idempotency' ] )
     ->name( 'products.reviews.store' );
+Route::get( 'products/{product}/reviews/eligibility', [ ProductReviewController::class, 'eligibility' ] )
+    ->whereNumber( 'product' )
+    ->middleware( [ 'ecommerce.optional-auth', 'ecommerce.rate-limit:ecommerce.catalog.read', 'ecommerce.cache:private' ] )
+    ->name( 'products.reviews.eligibility' );
 
 // Digital delivery (engine spec §9.9): the token is the credential.
 Route::where( [ 'token' => '[A-Za-z0-9]{64}' ] )

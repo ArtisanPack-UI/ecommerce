@@ -794,12 +794,22 @@ return [
     | `honeypot_field` — Name of a hidden form field real shoppers leave
     |                    empty. Submissions that fill it in are answered as
     |                    usual but filed straight to spam.
+    | `require_purchase` — Only customers with a paid order for the product
+    |                    may review it.
+    | `allow_multiple` — Let a customer review the same product again (by
+    |                    default one live review each; a rejected or spam
+    |                    one doesn't count).
+    | `max_media`      — Photos a review may carry (uploads need
+    |                    artisanpack-ui/media-library).
     |
     */
 
     'reviews' => [
-        'allow_guests'   => (bool) env( 'ECOMMERCE_REVIEWS_ALLOW_GUESTS', true ),
-        'honeypot_field' => env( 'ECOMMERCE_REVIEWS_HONEYPOT_FIELD', 'website' ),
+        'allow_guests'     => (bool) env( 'ECOMMERCE_REVIEWS_ALLOW_GUESTS', true ),
+        'honeypot_field'   => env( 'ECOMMERCE_REVIEWS_HONEYPOT_FIELD', 'website' ),
+        'require_purchase' => (bool) env( 'ECOMMERCE_REVIEWS_REQUIRE_PURCHASE', false ),
+        'allow_multiple'   => (bool) env( 'ECOMMERCE_REVIEWS_ALLOW_MULTIPLE', false ),
+        'max_media'        => (int) env( 'ECOMMERCE_REVIEWS_MAX_MEDIA', 5 ),
     ],
 
     /*

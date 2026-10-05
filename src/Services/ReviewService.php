@@ -33,11 +33,16 @@ namespace ArtisanPackUI\Ecommerce\Services;
 use ArtisanPackUI\Ecommerce\Contracts\ReviewModerator;
 use ArtisanPackUI\Ecommerce\Events\ReviewApproved;
 use ArtisanPackUI\Ecommerce\Events\ReviewSubmitted;
+use ArtisanPackUI\Ecommerce\Exceptions\ReviewNotAllowedException;
 use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\Models\ProductReview;
+use ArtisanPackUI\Ecommerce\Models\ProductReviewMedia;
 use ArtisanPackUI\Ecommerce\Reviews\ProductRatingAggregator;
+use ArtisanPackUI\Ecommerce\Reviews\ReviewEligibility;
+use ArtisanPackUI\Ecommerce\Reviews\ReviewMediaStore;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
@@ -98,9 +103,12 @@ class ReviewService
      * Submits a review of `$product`.
      *
      * `$attributes` takes `rating`, `title`, `body`, `author_name`,
-     * `author_email`, and `order_id`. Author details default to the
-     * customer's. A supplied `order_id` is kept only when it proves the
-     * purchase; otherwise it is dropped and the review is unverified.
+     * `author_email`, `order_id`, and `media` (uploaded photos, stored
+     * through {@see ReviewMediaStore}, at most `reviews.max_media`). Author
+     * details default to the customer's. A supplied `order_id` is kept only
+     * when it proves the purchase; without one, the customer's latest paid
+     * order for the product is used, so buyers get the verified badge
+     * (#181). The author must be eligible ({@see self::eligibility()}).
      *
      * @since 1.0.0
      *
@@ -110,15 +118,33 @@ class ReviewService
      * @param  bool                  $isSpam      Skip moderation and file straight to spam
      *                                            (e.g. a honeypot field was filled in).
      *
+     * @throws ReviewNotAllowedException When the author isn't eligible.
+     *
      * @return ProductReview|null The review, or null when a filter aborted the submission.
      */
     public function submit( Product $product, array $attributes, ?Customer $customer = null, bool $isSpam = false ): ?ProductReview
     {
+        $eligibility = $this->eligibility( $product, $customer );
+
+        if ( ! $eligibility->allowed ) {
+            throw new ReviewNotAllowedException( (string) $eligibility->reason );
+        }
+
         $order = isset( $attributes['order_id'] ) ? Order::query()->find( $attributes['order_id'] ) : null;
 
         if ( null !== $order && ! $this->provesPurchase( $order, $product, $customer ) ) {
             $order = null;
         }
+
+        $order ??= null === $eligibility->purchaseOrderId ? null : Order::query()->find( $eligibility->purchaseOrderId );
+
+        $media = array_slice(
+            array_values( array_filter( (array) ( $attributes['media'] ?? [] ), static fn ( mixed $file ): bool => $file instanceof UploadedFile ) ),
+            0,
+            max( 0, (int) config( 'artisanpack.ecommerce.reviews.max_media', 5 ) ),
+        );
+        $store    = app( ReviewMediaStore::class );
+        $mediaIds = array_map( static fn ( UploadedFile $file ): int => $store->store( $file ), $media );
 
         $attributes = applyFilters( 'ap.ecommerce.review.submitting', [
             'product_id'           => $product->id,
@@ -138,6 +164,10 @@ class ReviewService
         }
 
         $review = ProductReview::query()->create( $attributes );
+
+        foreach ( $mediaIds as $mediaId ) {
+            ProductReviewMedia::query()->create( [ 'review_id' => $review->id, 'media_id' => $mediaId ] );
+        }
 
         if ( $isSpam ) {
             // Bot traffic: file it, but don't announce it to listeners or the
@@ -291,6 +321,42 @@ class ReviewService
     }
 
     /**
+     * Whether `$customer` (null: a guest) may review `$product`, and
+     * whether the review would be a verified purchase (#181).
+     *
+     * @since 1.0.0
+     *
+     * @param  Product        $product   Product.
+     * @param  Customer|null  $customer  Shopper.
+     *
+     * @return ReviewEligibility
+     */
+    public function eligibility( Product $product, ?Customer $customer ): ReviewEligibility
+    {
+        if ( null === $customer && ! (bool) config( 'artisanpack.ecommerce.reviews.allow_guests', true ) ) {
+            return new ReviewEligibility( false, ReviewEligibility::GUESTS_NOT_ALLOWED );
+        }
+
+        $orderId = null === $customer ? null : $this->purchaseOrderId( $product, $customer );
+
+        if ( null === $orderId && (bool) config( 'artisanpack.ecommerce.reviews.require_purchase', false ) ) {
+            return new ReviewEligibility( false, ReviewEligibility::PURCHASE_REQUIRED );
+        }
+
+        $reviewed = null !== $customer && ProductReview::query()
+            ->where( 'product_id', $product->id )
+            ->where( 'customer_id', $customer->id )
+            ->whereNotIn( 'status', [ ProductReview::STATUS_REJECTED, ProductReview::STATUS_SPAM ] )
+            ->exists();
+
+        if ( $reviewed && ! (bool) config( 'artisanpack.ecommerce.reviews.allow_multiple', false ) ) {
+            return new ReviewEligibility( false, ReviewEligibility::ALREADY_REVIEWED, null !== $orderId, $orderId );
+        }
+
+        return new ReviewEligibility( true, null, null !== $orderId, $orderId );
+    }
+
+    /**
      * Whether `$order` proves the reviewer bought `$product`: it belongs to
      * the reviewing customer, has been paid for, and contains the product.
      *
@@ -308,6 +374,28 @@ class ReviewService
             && $order->customer_id === $customer->id
             && in_array( $order->payment_status, self::PURCHASED_PAYMENT_STATUSES, true )
             && $order->items()->where( 'product_id', $product->id )->exists();
+    }
+
+    /**
+     * The customer's latest paid order containing `$product`, if any.
+     *
+     * @since 1.0.0
+     *
+     * @param  Product   $product   Product.
+     * @param  Customer  $customer  Customer.
+     *
+     * @return int|null
+     */
+    protected function purchaseOrderId( Product $product, Customer $customer ): ?int
+    {
+        $id = Order::query()
+            ->where( 'customer_id', $customer->id )
+            ->whereIn( 'payment_status', self::PURCHASED_PAYMENT_STATUSES )
+            ->whereHas( 'items', static fn ( $items ) => $items->where( 'product_id', $product->id ) )
+            ->latest( 'id' )
+            ->value( 'id' );
+
+        return null === $id ? null : (int) $id;
     }
 
     /**

@@ -99,15 +99,15 @@ it( 'answers honeypot submissions like real ones but files them as spam', functi
 } );
 
 it( 'rate-limits review submissions per customer', function (): void {
-    $product = Product::factory()->create();
     Customer::factory()->forUser( 2 )->create();
     $this->actingAs( ecommerceShopper(), 'sanctum' );
 
+    // Different products: one customer reviews each product once (#181).
     foreach ( range( 1, 3 ) as $attempt ) {
-        $this->postJson( REVIEWS_API . "/products/{$product->id}/reviews", [ 'rating' => 5 ], idem() )->assertCreated();
+        $this->postJson( REVIEWS_API . '/products/' . Product::factory()->create()->id . '/reviews', [ 'rating' => 5 ], idem() )->assertCreated();
     }
 
-    $this->postJson( REVIEWS_API . "/products/{$product->id}/reviews", [ 'rating' => 5 ], idem() )
+    $this->postJson( REVIEWS_API . '/products/' . Product::factory()->create()->id . '/reviews', [ 'rating' => 5 ], idem() )
         ->assertStatus( 429 )
         ->assertHeader( 'Retry-After' );
 } );
