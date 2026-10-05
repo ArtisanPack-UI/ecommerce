@@ -374,6 +374,7 @@
     "Refund not allowed": "Erstattung nicht zulässig",
     "Refund quantity :quantity for order item :item exceeds the :remaining unit(s) still refundable on that line.": "Die Erstattungsmenge :quantity für die Bestellposition :item übersteigt die :remaining noch erstattbare(n) Einheit(en) dieser Position.",
     "Refund total :total exceeds outstanding refundable balance :outstanding for order :order.": "Der Erstattungsbetrag :total übersteigt den noch erstattbaren Saldo :outstanding der Bestellung :order.",
+    "Refusing to empty the store in production. --fresh there also needs --i-understand-this-deletes-production-data.": "Der Shop wird in der Produktion nicht geleert. --fresh benötigt dort zusätzlich --i-understand-this-deletes-production-data.",
     "Refusing to roll back \":path\": it holds the application's or the engine's own migrations. A satellite's migration paths must be its own directories.": "Rollback von „:path“ abgelehnt: Der Pfad enthält die eigenen Migrationen der Anwendung oder der Engine. Die Migrationspfade eines Satelliten müssen eigene Verzeichnisse sein.",
     "Refusing to seed demo data in production. Re-run with --force if you really mean it.": "Demo-Daten werden in der Produktion nicht angelegt. Führen Sie den Befehl mit --force erneut aus, wenn Sie das wirklich möchten.",
     "Refusing to uninstall without confirmation. Re-run with --force.": "Deinstallation ohne Bestätigung abgelehnt. Mit --force erneut ausführen.",

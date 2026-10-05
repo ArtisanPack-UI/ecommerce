@@ -182,6 +182,23 @@ it( 'refuses to run in production without --force', function (): void {
     expect( Product::query()->count() )->toBe( 0 );
 } );
 
+it( 'refuses --fresh --force in production without the explicit flag', function (): void {
+    $this->artisan( 'ecommerce:seed-demo', [ '--products' => 3, '--orders' => 0, '--force' => true ] )->assertSuccessful();
+
+    app()->detectEnvironment( fn (): string => 'production' );
+
+    $this->artisan( 'ecommerce:seed-demo', [ '--fresh' => true, '--force' => true, '--products' => 5, '--orders' => 0 ] )
+        ->expectsOutputToContain( '--i-understand-this-deletes-production-data' )
+        ->assertFailed();
+
+    expect( Product::query()->count() )->toBe( 3 );
+
+    $this->artisan( 'ecommerce:seed-demo', [ '--fresh' => true, '--force' => true, '--i-understand-this-deletes-production-data' => true, '--products' => 5, '--orders' => 0 ] )
+        ->assertSuccessful();
+
+    expect( Product::query()->count() )->toBe( 5 );
+} );
+
 it( 'rejects invalid counts', function (): void {
     $this->artisan( 'ecommerce:seed-demo', [ '--products' => 0, '--force' => true ] )->assertExitCode( 2 );
     $this->artisan( 'ecommerce:seed-demo', [ '--orders' => 'lots', '--force' => true ] )->assertExitCode( 2 );

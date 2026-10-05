@@ -374,6 +374,7 @@
     "Refund not allowed": "Refund not allowed",
     "Refund quantity :quantity for order item :item exceeds the :remaining unit(s) still refundable on that line.": "Refund quantity :quantity for order item :item exceeds the :remaining unit(s) still refundable on that line.",
     "Refund total :total exceeds outstanding refundable balance :outstanding for order :order.": "Refund total :total exceeds outstanding refundable balance :outstanding for order :order.",
+    "Refusing to empty the store in production. --fresh there also needs --i-understand-this-deletes-production-data.": "Refusing to empty the store in production. --fresh there also needs --i-understand-this-deletes-production-data.",
     "Refusing to roll back \":path\": it holds the application's or the engine's own migrations. A satellite's migration paths must be its own directories.": "Refusing to roll back \":path\": it holds the application's or the engine's own migrations. A satellite's migration paths must be its own directories.",
     "Refusing to seed demo data in production. Re-run with --force if you really mean it.": "Refusing to seed demo data in production. Re-run with --force if you really mean it.",
     "Refusing to uninstall without confirmation. Re-run with --force.": "Refusing to uninstall without confirmation. Re-run with --force.",
