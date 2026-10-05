@@ -228,29 +228,36 @@ class InventoryService
     }
 
     /**
-     * Moves every reservation `$from` holds onto `$to`, without an expiry:
-     * at placement a cart's checkout reservations become the order's, held
-     * until payment commits them or a cancellation releases them (parent
-     * plan §7.2).
+     * Moves every reservation `$from` holds onto `$to`. By default the
+     * expiry is dropped: at placement a cart's checkout reservations become
+     * the order's, held until payment commits them or a cancellation
+     * releases them (parent plan §7.2). A cart-to-cart move (a merge) keeps
+     * each reservation's expiry.
      *
      * @since 1.0.0
      *
-     * @param  Model  $from  Current holder (a Cart).
-     * @param  Model  $to    New holder (an Order).
+     * @param  Model  $from        Current holder (a Cart).
+     * @param  Model  $to          New holder (an Order, or the cart merged into).
+     * @param  bool   $keepExpiry  Keep each reservation's expiry.
      *
      * @return int Reservations moved.
      */
-    public function transferReservations( Model $from, Model $to ): int
+    public function transferReservations( Model $from, Model $to, bool $keepExpiry = false ): int
     {
+        $changes = [
+            'reservable_type' => $to->getMorphClass(),
+            'reservable_id'   => $to->getKey(),
+            'updated_at'      => Carbon::now(),
+        ];
+
+        if ( ! $keepExpiry ) {
+            $changes['expires_at'] = null;
+        }
+
         return InventoryReservation::query()
             ->where( 'reservable_type', $from->getMorphClass() )
             ->where( 'reservable_id', $from->getKey() )
-            ->update( [
-                'reservable_type' => $to->getMorphClass(),
-                'reservable_id'   => $to->getKey(),
-                'expires_at'      => null,
-                'updated_at'      => Carbon::now(),
-            ] );
+            ->update( $changes );
     }
 
     /**

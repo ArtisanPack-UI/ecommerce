@@ -460,6 +460,72 @@ class StorefrontCartService
     }
 
     /**
+     * Gives a guest cart to `$customer` (a shopper who signed in): the cart
+     * takes the customer's id and, when it has none, their email. The token
+     * is rotated, so a copy of the guest token kept elsewhere no longer
+     * opens a cart that now belongs to an account — callers hand the new
+     * token back to the shopper.
+     *
+     * @since 1.0.0
+     *
+     * @param  Cart      $cart      Cart.
+     * @param  Customer  $customer  Customer.
+     *
+     * @throws CartOperationException When the cart is closed or belongs to another customer.
+     *
+     * @return Cart The cart, with its new token.
+     */
+    public function attachCustomer( Cart $cart, Customer $customer ): Cart
+    {
+        $attached = $this->mutate( $cart, function ( Cart $locked ) use ( $customer ): bool {
+            if ( null !== $locked->customer_id && (int) $locked->customer_id !== (int) $customer->id ) {
+                throw new CartOperationException( 'cart', 'cart-owned', __( 'This cart belongs to another account.' ) );
+            }
+
+            if ( (int) $locked->customer_id === (int) $customer->id ) {
+                return false;
+            }
+
+            $locked->customer_id = $customer->id;
+            $locked->email ??= $customer->email;
+
+            return true;
+        } );
+
+        if ( ! $attached ) {
+            return $cart;
+        }
+
+        $rotated = $this->carts->rotateToken( $cart );
+        $cart->setRawAttributes( $rotated->getAttributes(), true );
+
+        Event::dispatch( new CartUpdated( $cart, [ 'action' => 'customer_attached', 'customer_id' => $customer->id ] ) );
+
+        return $cart;
+    }
+
+    /**
+     * Re-prices every line and recomputes the totals under the cart's lock,
+     * without another change — for callers that changed lines directly
+     * (a merge). Lines in another currency that have no price in the cart's
+     * currency are removed.
+     *
+     * @since 1.0.0
+     *
+     * @param  Cart  $cart  Cart.
+     *
+     * @throws CartOperationException When the cart is closed.
+     *
+     * @return Cart
+     */
+    public function recalculate( Cart $cart ): Cart
+    {
+        $this->mutate( $cart, static fn ( Cart $locked ): Cart => $locked );
+
+        return $cart;
+    }
+
+    /**
      * Re-prices the cart in another enabled currency: every line is priced
      * again in `$currency`, promotions are re-applied, and the shipping rate
      * and any payment session are dropped (their amounts were in the old
@@ -786,6 +852,38 @@ class StorefrontCartService
         }
 
         return $normalized;
+    }
+
+    /**
+     * Most distinct lines a cart may hold (`cart.max_lines`).
+     *
+     * @since 1.0.0
+     *
+     * @return int
+     */
+    public function maxLines(): int
+    {
+        $configured = (int) config( 'artisanpack.ecommerce.cart.max_lines', self::MAX_LINES );
+
+        return $configured > 0 ? $configured : self::MAX_LINES;
+    }
+
+    /**
+     * Rejects changes to a cart that became an order or expired.
+     *
+     * @since 1.0.0
+     *
+     * @param  Cart  $cart  Cart.
+     *
+     * @throws CartOperationException When the cart is closed.
+     *
+     * @return void
+     */
+    public function assertOpen( Cart $cart ): void
+    {
+        if ( null !== $cart->completed_order_id || ( null !== $cart->expires_at && $cart->expires_at->isPast() ) ) {
+            throw new CartOperationException( 'cart', 'cart-closed', __( 'This cart can no longer be changed.' ) );
+        }
     }
 
     /**
@@ -1341,7 +1439,9 @@ class StorefrontCartService
      * Re-prices every paid line at its current price, so no line keeps a
      * price that has since changed (an ended sale, a new price row). Lines
      * whose product is no longer sellable keep their stored price; checkout
-     * rejects them. Free-item lines stay at zero.
+     * rejects them. Free-item lines stay at zero. A line priced in another
+     * currency (carried over by a merge) is priced in the cart's currency,
+     * or removed when it has no price there.
      *
      * @since 1.0.0
      *
@@ -1351,24 +1451,40 @@ class StorefrontCartService
      */
     protected function repriceLines( Cart $cart ): void
     {
+        $currency = strtoupper( (string) $cart->currency );
+
         foreach ( $cart->items()->with( [ 'product', 'variant' ] )->get() as $item ) {
+            $foreign = strtoupper( (string) $item->unit_price_currency ) !== $currency;
+
             if ( $item->isFreeItem() || null === $item->product || $item->product->typeIsMissing() ) {
+                if ( $foreign ) {
+                    $item->delete();
+                }
+
                 continue;
             }
 
             try {
-                $price = $item->product->productType()->priceLine( $item->product, array_filter( [ 'variant_id' => $item->product_variant_id ] ) + (array) ( $item->options ?? [] ), 1, (string) $cart->currency );
+                $price = $item->product->productType()->priceLine( $item->product, array_filter( [ 'variant_id' => $item->product_variant_id ] ) + (array) ( $item->options ?? [] ), 1, $currency );
             } catch ( RuntimeException | InvalidArgumentException ) {
+                if ( $foreign ) {
+                    $item->delete();
+                }
+
                 continue;
             }
 
             $price = $this->linePrice( $cart, $item, $price );
 
-            if ( (int) $price->getAmount() !== (int) $item->unit_price_amount ) {
-                $item->unit_price_amount    = (int) $price->getAmount();
-                $item->line_subtotal_amount = $item->unit_price_amount * (int) $item->quantity;
-                $item->line_total_amount    = $item->line_subtotal_amount;
-                $item->save();
+            if ( $foreign || (int) $price->getAmount() !== (int) $item->unit_price_amount ) {
+                $item->forceFill( [
+                    'unit_price_amount'      => (int) $price->getAmount(),
+                    'unit_price_currency'    => $currency,
+                    'line_subtotal_amount'   => (int) $price->getAmount() * (int) $item->quantity,
+                    'line_subtotal_currency' => $currency,
+                    'line_total_amount'      => (int) $price->getAmount() * (int) $item->quantity,
+                    'line_total_currency'    => $currency,
+                ] )->save();
             }
         }
 
@@ -1387,38 +1503,6 @@ class StorefrontCartService
     protected function paidLineCount( Cart $cart ): int
     {
         return $cart->items()->get()->reject( static fn ( CartItem $item ): bool => $item->isFreeItem() )->count();
-    }
-
-    /**
-     * Most distinct lines a cart may hold (`cart.max_lines`).
-     *
-     * @since 1.0.0
-     *
-     * @return int
-     */
-    protected function maxLines(): int
-    {
-        $configured = (int) config( 'artisanpack.ecommerce.cart.max_lines', self::MAX_LINES );
-
-        return $configured > 0 ? $configured : self::MAX_LINES;
-    }
-
-    /**
-     * Rejects changes to a cart that became an order or expired.
-     *
-     * @since 1.0.0
-     *
-     * @param  Cart  $cart  Cart.
-     *
-     * @throws CartOperationException When the cart is closed.
-     *
-     * @return void
-     */
-    protected function assertOpen( Cart $cart ): void
-    {
-        if ( null !== $cart->completed_order_id || ( null !== $cart->expires_at && $cart->expires_at->isPast() ) ) {
-            throw new CartOperationException( 'cart', 'cart-closed', __( 'This cart can no longer be changed.' ) );
-        }
     }
 
     /**

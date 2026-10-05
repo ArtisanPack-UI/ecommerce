@@ -23,6 +23,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Models;
 
 use ArtisanPackUI\Ecommerce\Database\Factories\CartFactory;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -146,6 +147,26 @@ class Cart extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo( Customer::class );
+    }
+
+    /**
+     * Whether `$user` may use this cart by its token: a guest cart (no
+     * customer) is open to whoever holds the token; an account's cart only
+     * to that account's signed-in user.
+     *
+     * @since 1.0.0
+     *
+     * @param  Authenticatable|null  $user  Signed-in user.
+     *
+     * @return bool
+     */
+    public function isAccessibleBy( ?Authenticatable $user ): bool
+    {
+        if ( null === $this->customer_id ) {
+            return true;
+        }
+
+        return null !== $user && (int) Customer::forUser( $user )?->id === (int) $this->customer_id;
     }
 
     /**

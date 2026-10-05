@@ -42,10 +42,17 @@ it( 'never loads admin-only relations for shoppers', function (): void {
         ->assertJsonPath( 'data.orders.nodes.0.notes.0.body', 'Staff only: fraud check pending' );
 } );
 
-it( 'does not reveal a cart\'s customer to token holders', function (): void {
-    $cart = Cart::factory()->create( [ 'customer_id' => Customer::factory()->create( [ 'email' => 'private@example.test' ] )->id ] );
+it( 'opens an account\'s cart only to that account and never renders its customer', function (): void {
+    $cart  = Cart::factory()->create( [ 'customer_id' => Customer::factory()->forUser( 7 )->create( [ 'email' => 'private@example.test' ] )->id ] );
+    $query = 'query ($t: String!) { cart(token: $t) { customer_id customer { email } } }';
 
-    gql( $this, 'query ($t: String!) { cart(token: $t) { customer_id customer { email } } }', [ 't' => $cart->token ] )
+    gql( $this, $query, [ 't' => $cart->token ] )->assertJsonPath( 'data.cart', null );
+
+    Sanctum::actingAs( ApiUser::make( 8 ), [ TokenAbilities::STOREFRONT ] );
+    gql( $this, $query, [ 't' => $cart->token ] )->assertJsonPath( 'data.cart', null );
+
+    Sanctum::actingAs( ApiUser::make( 7 ), [ TokenAbilities::STOREFRONT ] );
+    gql( $this, $query, [ 't' => $cart->token ] )
         ->assertJsonPath( 'data.cart.customer', null )
         ->assertJsonPath( 'data.cart.customer_id', $cart->customer_id );
 } );

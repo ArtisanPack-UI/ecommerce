@@ -168,14 +168,21 @@ class Queries
                 ),
             ],
 
-            // Cart (the token is the credential).
+            // Cart (the token is the credential for a guest cart).
             'cart' => [
                 'type'    => 'Cart',
                 'args'    => [ 'token' => 'String!' ],
                 'resolve' => function ( $root, array $args, $context, ResolveInfo $info ): ?array {
                     $this->r->throttle( 'ecommerce.cart.mutate', [ 'cart_token' => $args['token'] ] );
 
-                    return $this->r->present( Cart::query()->where( 'token', $args['token'] )->first(), 'Cart', $this->r->selection( $info ) );
+                    $cart = Cart::query()->where( 'token', $args['token'] )->first();
+
+                    // An account's cart also needs that account's session (engine spec §9.2).
+                    if ( null !== $cart && ! $cart->isAccessibleBy( $this->r->user() ) ) {
+                        $cart = null;
+                    }
+
+                    return $this->r->present( $cart, 'Cart', $this->r->selection( $info ) );
                 },
             ],
 

@@ -49,6 +49,7 @@ use ArtisanPackUI\Ecommerce\Models\PromotionUsage;
 use ArtisanPackUI\Ecommerce\Models\Refund;
 use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder as QueryBuilder;
@@ -265,6 +266,59 @@ class CustomerService
 
             return $locked;
         } );
+    }
+
+    /**
+     * The customer record for a signed-in user.
+     *
+     * Returns the customer linked to the user. With `$create`, a user that
+     * has none gets one:
+     *
+     * - a user whose email is verified ({@see MustVerifyEmail}) is linked
+     *   through {@see self::linkUser()}, which claims an existing guest
+     *   customer under that email;
+     * - otherwise a new customer is created for the user only when no
+     *   customer uses that email yet — an unverified address never claims
+     *   someone else's guest orders. Null when it is taken.
+     *
+     * @since 1.0.0
+     *
+     * @param  Authenticatable  $user    Signed-in user.
+     * @param  bool             $create  Create or link a customer when none is linked.
+     *
+     * @return Customer|null
+     */
+    public function customerForUser( Authenticatable $user, bool $create = false ): ?Customer
+    {
+        $customer = Customer::forUser( $user );
+
+        if ( null !== $customer || ! $create || ! is_numeric( $user->getAuthIdentifier() ) ) {
+            return $customer;
+        }
+
+        if ( $user instanceof MustVerifyEmail && $user->hasVerifiedEmail() ) {
+            return $this->linkUser( $user );
+        }
+
+        $email = $this->extractEmail( $user );
+
+        if ( null === $email ) {
+            return null;
+        }
+
+        $userId   = (int) $user->getAuthIdentifier();
+        $customer = Customer::query()->createOrFirst( [ 'email' => $this->normalizeEmail( $email ) ], [ 'user_id' => $userId ] );
+
+        if ( (int) $customer->user_id !== $userId ) {
+            return null;
+        }
+
+        if ( $customer->wasRecentlyCreated ) {
+            doAction( 'ap.ecommerce.customer.registered', $customer );
+            doAction( 'ap.ecommerce.customer.userLinked', $customer, $user );
+        }
+
+        return $customer;
     }
 
     /**

@@ -51,6 +51,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\GraphQL\Fields;
 
+use ArtisanPackUI\Ecommerce\Exceptions\CartCurrencyMismatchException;
 use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
 use ArtisanPackUI\Ecommerce\Exceptions\NotificationTemplateException;
 use ArtisanPackUI\Ecommerce\Exceptions\OrderNotCancellableException;
@@ -67,6 +68,7 @@ use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ApplyCouponRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CancelOrderRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CreateCartRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\IssueRefundRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\MergeCartRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\OrderSubstatusRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\PreviewNotificationTemplateRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductCategoryRequest;
@@ -92,6 +94,8 @@ use ArtisanPackUI\Ecommerce\Models\ProductTag;
 use ArtisanPackUI\Ecommerce\Models\ProductVariant;
 use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
+use ArtisanPackUI\Ecommerce\Services\CurrentCart;
+use ArtisanPackUI\Ecommerce\Services\CustomerService;
 use ArtisanPackUI\Ecommerce\Services\InventoryService;
 use ArtisanPackUI\Ecommerce\Services\NotificationTemplateService;
 use ArtisanPackUI\Ecommerce\Services\OrderCancellationService;
@@ -103,6 +107,8 @@ use ArtisanPackUI\Ecommerce\Services\ProductTagService;
 use ArtisanPackUI\Ecommerce\Services\RefundService;
 use ArtisanPackUI\Ecommerce\Services\StorefrontCartService;
 use ArtisanPackUI\Ecommerce\Services\WebhookSubscriptionService;
+use ArtisanPackUI\Ecommerce\ValueObjects\CartMergeResolution;
+use ArtisanPackUI\Ecommerce\ValueObjects\PendingCartMerge;
 use Closure;
 use GraphQL\Type\Definition\ResolveInfo;
 use Illuminate\Support\Facades\Validator;
@@ -159,6 +165,9 @@ class Mutations
             'ApplyCouponPayload'    => $output( [ 'cart' => 'Cart' ] ),
             'RemoveCouponInput'     => $input( [ 'cart_token' => 'String!', 'code' => 'String!' ] ),
             'RemoveCouponPayload'   => $output( [ 'cart' => 'Cart' ] ),
+            'MergeCartInput'        => $input( [ 'cart_token' => 'String!', 'resolution' => 'String' ] ),
+            'MergeCartPayload'      => $output( [ 'cart' => 'Cart', 'merged' => 'Boolean!', 'pending' => 'CartMergePending' ] ),
+            'CartMergePending'      => [ 'fields' => [ 'guest_currency' => 'String!', 'account_currency' => 'String!', 'resolutions' => '[String!]!' ] ],
             'RefundLineInput'       => [
                 'kind'   => 'input',
                 'fields' => [ 'order_item_id' => 'ID!', 'quantity' => 'Int!', 'amount' => 'BigInt!', 'restock' => 'Boolean' ],
@@ -307,7 +316,9 @@ class Mutations
                 $this->r->throttle( 'ecommerce.cart.mutate' );
                 $this->validate( $input, CreateCartRequest::baseRules() );
 
-                $cart = $this->carts()->create( $input['currency'] ?? null, $input['email'] ?? null );
+                $user     = $this->r->user();
+                $customer = null === $user ? null : app( CustomerService::class )->customerForUser( $user, true );
+                $cart     = $this->carts()->create( $input['currency'] ?? null, $input['email'] ?? null, $customer );
 
                 return [ 'cart' => $this->cart( $cart, $info ) ];
             } ),
@@ -359,6 +370,33 @@ class Mutations
                 $this->carts()->removeCoupon( $cart, (string) $input['code'] );
 
                 return [ 'cart' => $this->cart( $cart, $info ) ];
+            } ),
+
+            'mergeCart' => $this->mutation( 'MergeCart', function ( array $input, ResolveInfo $info ): array {
+                $user = $this->r->requireUser();
+                $this->r->throttle( 'ecommerce.cart.mutate', [ 'cart_token' => (string) $input['cart_token'] ] );
+                $this->validate( $input, MergeCartRequest::baseRules() );
+
+                $current = app( CurrentCart::class );
+
+                if ( null === $current->guestCart( (string) $input['cart_token'] ) ) {
+                    throw GraphQLError::notFound();
+                }
+
+                $resolution = isset( $input['resolution'] ) ? CartMergeResolution::from( (string) $input['resolution'] ) : null;
+
+                try {
+                    $cart = $current->mergeGuestCart( (string) $input['cart_token'], $user, $resolution );
+                } catch ( CartCurrencyMismatchException $exception ) {
+                    return [
+                        'cart'    => null,
+                        'merged'  => false,
+                        'pending' => PendingCartMerge::fromException( $exception )->toPublicArray(),
+                        'errors'  => [ [ 'field' => 'resolution', 'code' => 'currency-mismatch', 'message' => __( 'Choose which currency to keep.' ) ] ],
+                    ];
+                }
+
+                return [ 'cart' => null === $cart ? null : $this->cart( $cart, $info ), 'merged' => null !== $cart, 'pending' => null ];
             } ),
 
             'issueRefund' => $this->mutation( 'IssueRefund', function ( array $input, ResolveInfo $info ): array {
@@ -819,7 +857,14 @@ class Mutations
     {
         $this->r->throttle( $policy, [ 'cart_token' => (string) $input['cart_token'] ] );
 
-        return Cart::query()->where( 'token', (string) $input['cart_token'] )->first() ?? throw GraphQLError::notFound();
+        $cart = Cart::query()->where( 'token', (string) $input['cart_token'] )->first();
+
+        // An account's cart also needs that account's session (engine spec §9.2).
+        if ( null === $cart || ! $cart->isAccessibleBy( $this->r->user() ) ) {
+            throw GraphQLError::notFound();
+        }
+
+        return $cart;
     }
 
     /**

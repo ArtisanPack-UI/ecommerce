@@ -123,11 +123,24 @@ return [
     | `ttl_days`  — Days of inactivity before a cart expires. Every change
     |               pushes the expiry back; an expired cart can't be changed.
     |
+    | `cookie`    — Name of the cookie holding a guest's cart token, shared
+    |               by every storefront (GuestCartCookie). Encrypted by the
+    |               host's EncryptCookies middleware like any other cookie.
+    |
+    | `cookie_lifetime` — Lifetime of that cookie, in minutes (default 30 days).
+    |
+    | `merge_on_login`  — Merge the guest cart into the shopper's account cart
+    |               when they sign in (parent plan §7.1). A currency mismatch
+    |               is left pending for the storefront to resolve.
+    |
     */
 
     'cart' => [
-        'max_lines' => (int) env( 'ECOMMERCE_CART_MAX_LINES', 100 ),
-        'ttl_days'  => (int) env( 'ECOMMERCE_CART_TTL_DAYS', 30 ),
+        'max_lines'       => (int) env( 'ECOMMERCE_CART_MAX_LINES', 100 ),
+        'ttl_days'        => (int) env( 'ECOMMERCE_CART_TTL_DAYS', 30 ),
+        'cookie'          => env( 'ECOMMERCE_CART_COOKIE', 'ecommerce_cart' ),
+        'cookie_lifetime' => (int) env( 'ECOMMERCE_CART_COOKIE_LIFETIME', 43_200 ),
+        'merge_on_login'  => (bool) env( 'ECOMMERCE_CART_MERGE_ON_LOGIN', true ),
     ],
 
     /*

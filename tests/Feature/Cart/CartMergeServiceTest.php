@@ -7,6 +7,7 @@ use ArtisanPackUI\Ecommerce\Exceptions\CartCurrencyMismatchException;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
 use ArtisanPackUI\Ecommerce\Models\Product;
+use ArtisanPackUI\Ecommerce\Models\ProductPrice;
 use ArtisanPackUI\Ecommerce\Services\CartMergeService;
 use ArtisanPackUI\Ecommerce\Services\CartService;
 use ArtisanPackUI\Ecommerce\ValueObjects\CartMergeResolution;
@@ -94,44 +95,63 @@ it( 'throws when currencies differ and no resolution is provided', function (): 
     }
 } );
 
-it( 'keep-guest-currency rewrites destination currency and drops destination lines', function (): void {
+it( 'keep-guest-currency switches the account cart to the guest currency and re-prices every line from the catalog', function (): void {
     [ $guest, $user ] = makeGuestAndUserCarts( 'USD', 'EUR' );
 
-    $product = Product::factory()->simple()->create();
-    addLine( $user, $product, 5, 500, 'EUR' );
-    addLine( $guest, $product, 2, 1_000, 'USD' );
+    $shared  = Product::factory()->simple()->create();
+    $mugs    = Product::factory()->simple()->create();
+    $euOnly  = Product::factory()->simple()->create();
+    ProductPrice::factory()->forPriceable( $shared )->create( [ 'currency' => 'USD', 'price_amount' => 1_000 ] );
+    ProductPrice::factory()->forPriceable( $shared )->create( [ 'currency' => 'EUR', 'price_amount' => 900 ] );
+    ProductPrice::factory()->forPriceable( $mugs )->create( [ 'currency' => 'USD', 'price_amount' => 400 ] );
+    ProductPrice::factory()->forPriceable( $mugs )->create( [ 'currency' => 'EUR', 'price_amount' => 350 ] );
+    ProductPrice::factory()->forPriceable( $euOnly )->create( [ 'currency' => 'EUR', 'price_amount' => 2_000 ] );
+
+    addLine( $user, $shared, 1, 900, 'EUR' );
+    addLine( $user, $mugs, 2, 350, 'EUR' );
+    addLine( $user, $euOnly, 1, 2_000, 'EUR' );
+    addLine( $guest, $shared, 2, 1_000, 'USD' );
 
     $result = $this->mergeService->merge( $guest, $user, CartMergeResolution::KeepGuestCurrency );
+    $lines  = CartItem::query()->where( 'cart_id', $result->id )->get()->keyBy( 'product_id' );
 
-    expect( $result->currency )->toBe( 'USD' );
-    expect( $result->subtotal_currency )->toBe( 'USD' );
-    $lines = CartItem::query()->where( 'cart_id', $result->id )->get();
-    expect( $lines )->toHaveCount( 1 );
-    expect( $lines->first()->quantity )->toBe( 2 );
-    expect( $lines->first()->unit_price_currency )->toBe( 'USD' );
+    expect( $result->currency )->toBe( 'USD' )
+        ->and( $result->subtotal_currency )->toBe( 'USD' )
+        ->and( $lines )->toHaveCount( 2 )
+        ->and( $lines[ $shared->id ]->quantity )->toBe( 3 )
+        ->and( $lines[ $shared->id ]->unit_price_amount )->toBe( 1_000 )
+        ->and( $lines[ $mugs->id ]->unit_price_currency )->toBe( 'USD' )
+        ->and( $lines[ $mugs->id ]->unit_price_amount )->toBe( 400 )
+        ->and( $result->subtotal_amount )->toBe( 3 * 1_000 + 2 * 400 );
 } );
 
-it( 'switch-to-account-currency retains the destination cart and discards the guest cart', function (): void {
+it( 'switch-to-account-currency keeps the account currency and carries the guest lines re-priced in it', function (): void {
     [ $guest, $user ] = makeGuestAndUserCarts( 'USD', 'EUR' );
 
-    $product = Product::factory()->simple()->create();
-    addLine( $user, $product, 5, 500, 'EUR' );
-    addLine( $guest, $product, 2, 1_000, 'USD' );
+    $shared = Product::factory()->simple()->create();
+    $usOnly = Product::factory()->simple()->create();
+    ProductPrice::factory()->forPriceable( $shared )->create( [ 'currency' => 'USD', 'price_amount' => 1_000 ] );
+    ProductPrice::factory()->forPriceable( $shared )->create( [ 'currency' => 'EUR', 'price_amount' => 900 ] );
+    ProductPrice::factory()->forPriceable( $usOnly )->create( [ 'currency' => 'USD', 'price_amount' => 700 ] );
+
+    addLine( $user, $shared, 5, 900, 'EUR' );
+    addLine( $guest, $shared, 2, 1_000, 'USD' );
+    addLine( $guest, $usOnly, 1, 700, 'USD' );
 
     Event::fake( [ CartMerged::class ] );
 
     $result = $this->mergeService->merge( $guest, $user, CartMergeResolution::SwitchToAccountCurrency );
+    $lines  = CartItem::query()->where( 'cart_id', $result->id )->get();
 
-    expect( $result->currency )->toBe( 'EUR' );
-    $lines = CartItem::query()->where( 'cart_id', $result->id )->get();
-    expect( $lines )->toHaveCount( 1 );
-    expect( $lines->first()->quantity )->toBe( 5 );
-    expect( Cart::query()->where( 'id', $guest->id )->exists() )->toBeFalse();
+    expect( $result->currency )->toBe( 'EUR' )
+        ->and( $lines )->toHaveCount( 1 )
+        ->and( $lines->first()->quantity )->toBe( 7 )
+        ->and( $lines->first()->unit_price_amount )->toBe( 900 )
+        ->and( $result->subtotal_amount )->toBe( 7 * 900 )
+        ->and( Cart::query()->where( 'id', $guest->id )->exists() )->toBeFalse();
 
-    Event::assertDispatched(
-        CartMerged::class,
-        fn ( CartMerged $event ) => 0 === $event->guestItemsMerged,
-    );
+    // The US-only line had no EUR price, so only the shared line counts as carried.
+    Event::assertDispatched( CartMerged::class, fn ( CartMerged $event ) => 1 === $event->guestItemsMerged );
 } );
 
 it( 'cancel-merge discards the guest cart, returns the destination unchanged, and does not fire CartMerged', function (): void {

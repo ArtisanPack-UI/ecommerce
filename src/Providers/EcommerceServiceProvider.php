@@ -80,6 +80,7 @@ use ArtisanPackUI\Ecommerce\Listeners\BroadcastKanbanCardMoved;
 use ArtisanPackUI\Ecommerce\Listeners\DispatchWebhooksForEvent;
 use ArtisanPackUI\Ecommerce\Listeners\IssueDigitalDeliverables;
 use ArtisanPackUI\Ecommerce\Listeners\LinkCustomerOnUserVerified;
+use ArtisanPackUI\Ecommerce\Listeners\MergeGuestCartOnLogin;
 use ArtisanPackUI\Ecommerce\Listeners\RecordModelActivity;
 use ArtisanPackUI\Ecommerce\Listeners\RevokeDigitalDeliverables;
 use ArtisanPackUI\Ecommerce\Listeners\SendCatalogNotifications;
@@ -197,6 +198,7 @@ use ArtisanPackUI\Ecommerce\Support\RegionalJsonFallbackLoader;
 use ArtisanPackUI\Ecommerce\Support\RegistryHookRegistrar;
 use ArtisanPackUI\Ecommerce\Tax\ManualTaxProvider;
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
@@ -1484,6 +1486,7 @@ class EcommerceServiceProvider extends ServiceProvider
     /**
      * Wires the customer-lifecycle listeners: on verified-email registration,
      * back-fill `customers.user_id` for the shopper (engine spec §5.8 / §3.22),
+     * on login merge the guest cart into the account cart (parent plan §7.1),
      * and on a settled payment fire the `customer.firstOrder` /
      * `customer.becameVip` milestones.
      *
@@ -1497,6 +1500,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $events = $this->app->make( Dispatcher::class );
 
         $events->listen( Verified::class, LinkCustomerOnUserVerified::class );
+        $events->listen( Login::class, MergeGuestCartOnLogin::class );
 
         $this->app->make( TrackCustomerMilestones::class )->subscribe();
     }

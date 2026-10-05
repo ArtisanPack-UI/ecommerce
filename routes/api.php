@@ -118,10 +118,12 @@ Route::post( 'license/validate', [ LicenseKeyController::class, 'validateKey' ] 
 
 // Cart (token is the credential).
 Route::post( 'carts', [ CartController::class, 'store' ] )
-    ->middleware( [ 'ecommerce.rate-limit:ecommerce.cart.mutate', 'ecommerce.idempotency' ] )
+    ->middleware( [ 'ecommerce.optional-auth', 'ecommerce.rate-limit:ecommerce.cart.mutate', 'ecommerce.idempotency' ] )
     ->name( 'carts.store' );
 
-Route::where( [ 'cart' => '[A-Za-z0-9]{40}', 'item' => '[0-9]+' ] )->group( function (): void {
+// A guest cart's token is its credential; an account's cart also needs that
+// account's session or Sanctum token, so these routes resolve the user.
+Route::where( [ 'cart' => '[A-Za-z0-9]{40}', 'item' => '[0-9]+' ] )->middleware( 'ecommerce.optional-auth' )->group( function (): void {
     Route::get( 'carts/{cart}', [ CartController::class, 'show' ] )
         ->middleware( 'ecommerce.rate-limit:ecommerce.cart.mutate' )
         ->name( 'carts.show' );
@@ -131,6 +133,7 @@ Route::where( [ 'cart' => '[A-Za-z0-9]{40}', 'item' => '[0-9]+' ] )->group( func
         Route::patch( 'carts/{cart}/items/{item}', [ CartController::class, 'updateItem' ] )->name( 'carts.items.update' );
         Route::delete( 'carts/{cart}/items/{item}', [ CartController::class, 'removeItem' ] )->name( 'carts.items.destroy' );
         Route::delete( 'carts/{cart}/coupons/{code}', [ CartController::class, 'removeCoupon' ] )->name( 'carts.coupons.destroy' );
+        Route::post( 'carts/{cart}/merge', [ CartController::class, 'merge' ] )->name( 'carts.merge' );
     } );
 
     Route::post( 'carts/{cart}/coupons', [ CartController::class, 'applyCoupon' ] )
