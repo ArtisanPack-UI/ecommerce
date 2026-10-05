@@ -17,6 +17,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use LogicException;
 use Money\Money;
+use RuntimeException;
 use Tests\TestCase;
 
 final class WebhookControllerTest extends TestCase
@@ -136,6 +137,83 @@ final class WebhookControllerTest extends TestCase
             'error_code'      => 'signature_mismatch',
             'response_status' => 400,
         ] );
+    }
+
+    /**
+     * @return void
+     */
+    public function test_a_failed_dispatch_releases_the_claim_so_the_provider_retry_reaches_every_hook(): void
+    {
+        $this->registerFakeGateway( 'fake' );
+
+        $failNext = true;
+        $received = 0;
+        addAction( 'ap.ecommerce.gateway.fake.webhook_received', function () use ( &$failNext ): void {
+            if ( $failNext ) {
+                $failNext = false;
+
+                throw new RuntimeException( 'listener crashed' );
+            }
+        } );
+        addAction( 'ap.ecommerce.payment.webhookReceived', function () use ( &$received ): void {
+            $received++;
+        } );
+
+        $payload = [ 'id' => 'evt_retry', 'type' => 'payment.captured' ];
+
+        $this->withoutExceptionHandling();
+
+        try {
+            $this->postJson( '/ecommerce/webhooks/fake', $payload );
+            $this->fail( 'The listener failure should surface so the provider retries.' );
+        } catch ( RuntimeException $e ) {
+            $this->assertSame( 'listener crashed', $e->getMessage() );
+        }
+
+        $this->assertSame( 0, $received );
+        $this->assertDatabaseMissing( 'idempotency_records', [ 'idempotency_key' => 'evt_retry' ] );
+
+        $this->postJson( '/ecommerce/webhooks/fake', $payload )->assertOk()->assertJsonMissing( [ 'duplicate' => true ] );
+        $this->postJson( '/ecommerce/webhooks/fake', $payload )->assertOk()->assertJsonPath( 'duplicate', true );
+
+        $this->assertSame( 1, $received );
+    }
+
+    /**
+     * @return void
+     */
+    public function test_it_fires_payment_webhook_received_with_the_payload_and_provider(): void
+    {
+        $this->registerFakeGateway( 'fake' );
+
+        $calls = [];
+        addAction( 'ap.ecommerce.payment.webhookReceived', function ( array $payload, string $provider ) use ( &$calls ): void {
+            $calls[] = [ $payload, $provider ];
+        } );
+
+        $payload = [ 'id' => 'evt_spec_1', 'type' => 'payment.captured' ];
+
+        $this->postJson( '/ecommerce/webhooks/fake', $payload )->assertOk();
+        $this->postJson( '/ecommerce/webhooks/fake', $payload )->assertOk();
+
+        $this->assertSame( [ [ $payload, 'fake' ] ], $calls );
+    }
+
+    /**
+     * @return void
+     */
+    public function test_an_unverified_delivery_never_fires_payment_webhook_received(): void
+    {
+        $this->registerFakeGateway( 'fake', verified: false );
+
+        $fired = false;
+        addAction( 'ap.ecommerce.payment.webhookReceived', function () use ( &$fired ): void {
+            $fired = true;
+        } );
+
+        $this->postJson( '/ecommerce/webhooks/fake', [ 'id' => 'evt_bad' ] )->assertStatus( 400 );
+
+        $this->assertFalse( $fired );
     }
 
     /**

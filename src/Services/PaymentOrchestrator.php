@@ -59,6 +59,7 @@ use ArtisanPackUI\Ecommerce\ValueObjects\PaymentSession;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use Money\Money;
 use RuntimeException;
 use Throwable;
@@ -406,9 +407,13 @@ class PaymentOrchestrator
     }
 
     /**
-     * Step 3 — capture on approve. Success dispatches
-     * {@see PaymentSucceeded}; a gateway that returns `success = false`
-     * or throws dispatches {@see PaymentFailed}.
+     * Step 3 — capture on approve. Success fires
+     * `ap.ecommerce.payment.succeeded` then `ap.ecommerce.order.paid` and
+     * dispatches {@see PaymentSucceeded}; a gateway that returns
+     * `success = false` or throws fires `ap.ecommerce.payment.failed` and
+     * dispatches {@see PaymentFailed}. The two success actions run after
+     * the capture is committed, so a listener that throws is logged
+     * rather than failing the finalize (see {@see self::afterCapture()}).
      *
      * @since 1.0.0
      *
@@ -431,11 +436,15 @@ class PaymentOrchestrator
             $result = $gateway->capturePayment( $order, $session );
         } catch ( Throwable $e ) {
             $this->recordCaptureFailure( $order, $gateway, $session, $e->getMessage(), null );
-            Event::dispatch( new PaymentFailed( $order->fresh() ?? $order, $gateway, $e ) );
+
+            $refreshed = $order->fresh() ?? $order;
+
+            doAction( 'ap.ecommerce.payment.failed', $gateway, $e, $refreshed );
+            Event::dispatch( new PaymentFailed( $refreshed, $gateway, $e ) );
 
             return new PaymentFinalization(
                 status: PaymentFinalization::STATUS_FAILED,
-                order: $order->fresh() ?? $order,
+                order: $refreshed,
                 session: $session,
                 fraud: $decision,
             );
@@ -473,7 +482,10 @@ class PaymentOrchestrator
 
         $refreshed = $this->recordCaptureSuccess( $order, $gateway, $result );
 
-        doAction( 'ap.ecommerce.payment.succeeded', $result, $refreshed );
+        // The money has moved and the capture is committed: a throwing
+        // listener must not turn this into a failed checkout.
+        $this->afterCapture( 'ap.ecommerce.payment.succeeded', $refreshed, $result, $refreshed );
+        $this->afterCapture( 'ap.ecommerce.order.paid', $refreshed, $refreshed, $result );
         Event::dispatch( new PaymentSucceeded( $refreshed, $result ) );
 
         return new PaymentFinalization(
@@ -483,6 +495,33 @@ class PaymentOrchestrator
             fraud: $decision,
             payment: $result,
         );
+    }
+
+    /**
+     * Fires a post-capture action, logging instead of rethrowing when a
+     * listener throws. Each action is isolated, so one failing listener
+     * can't stop the next action, the {@see PaymentSucceeded} event, or
+     * the captured outcome from being returned.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $hook     Action name.
+     * @param  Order   $order    Captured order, for the log context.
+     * @param  mixed   ...$args  Action arguments.
+     *
+     * @return void
+     */
+    protected function afterCapture( string $hook, Order $order, mixed ...$args ): void
+    {
+        try {
+            doAction( $hook, ...$args );
+        } catch ( Throwable $e ) {
+            Log::channel( 'ecommerce' )->error( 'A post-capture listener failed; the capture stands.', [
+                'hook'      => $hook,
+                'order_id'  => $order->id,
+                'exception' => $e->getMessage(),
+            ] );
+        }
     }
 
     /**

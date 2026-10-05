@@ -397,3 +397,28 @@ it( 'fires unpublished whenever an active product leaves the storefront', functi
 
     expect( $fired )->toBe( [ 'unpublished' ] );
 } );
+
+it( 'passes the product to each lifecycle hook and the variant plus product to variant.saved', function (): void {
+    $received = [];
+
+    foreach ( [ 'saving', 'published', 'deleted' ] as $hook ) {
+        addAction( "ap.ecommerce.product.{$hook}", function ( Product $product ) use ( &$received, $hook ): void {
+            $received[ $hook ] = $product->slug;
+        } );
+    }
+
+    addAction( 'ap.ecommerce.variant.saved', function ( ProductVariant $variant, Product $product ) use ( &$received ): void {
+        $received['variant.saved'] = [ $variant->sku, $product->slug ];
+    } );
+
+    $product = $this->products->create( [ 'type' => 'variable', 'name' => 'Payload Tee', 'slug' => 'payload-tee', 'status' => 'active' ] );
+    $this->products->createVariant( $product, [ 'sku' => 'PAY-S' ] );
+    $this->products->delete( $product );
+
+    expect( $received )->toBe( [
+        'saving'        => 'payload-tee',
+        'published'     => 'payload-tee',
+        'variant.saved' => [ 'PAY-S', 'payload-tee' ],
+        'deleted'       => 'payload-tee',
+    ] );
+} );

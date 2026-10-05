@@ -167,3 +167,48 @@ it( 'clears a tracking field on an empty string and keeps it on null', function 
     expect( $shipment->fresh()->tracking_number )->toBe( '1Z1' )
         ->and( $shipment->fresh()->tracking_url )->toBeNull();
 } );
+
+it( 'fires order.fulfilling with the order before any shipment row is written', function (): void {
+    $fired = null;
+
+    addAction( 'ap.ecommerce.order.fulfilling', function ( Order $order ) use ( &$fired ): void {
+        $fired = [ $order->id, Shipment::query()->where( 'order_id', $order->id )->count() ];
+    } );
+
+    $this->service->create( $this->order, 'flat-rate', [ $this->lineA->id => 1 ] );
+
+    expect( $fired )->toBe( [ $this->order->id, 0 ] );
+} );
+
+it( 'aborts the shipment when an order.fulfilling listener throws', function (): void {
+    addAction( 'ap.ecommerce.order.fulfilling', function (): void {
+        throw new RuntimeException( 'warehouse closed' );
+    } );
+
+    expect( fn () => $this->service->create( $this->order, 'flat-rate' ) )->toThrow( RuntimeException::class, 'warehouse closed' );
+    expect( Shipment::query()->where( 'order_id', $this->order->id )->count() )->toBe( 0 );
+} );
+
+it( 'does not fire order.fulfilling for an order that can no longer be shipped', function (): void {
+    $this->order->update( [ 'system_status' => 'cancelled' ] );
+    $fired = false;
+
+    addAction( 'ap.ecommerce.order.fulfilling', function () use ( &$fired ): void {
+        $fired = true;
+    } );
+
+    expect( fn () => $this->service->create( $this->order, 'flat-rate' ) )->toThrow( InvalidArgumentException::class );
+    expect( $fired )->toBeFalse();
+} );
+
+it( 'does not fire order.fulfilling when the requested quantities are rejected', function (): void {
+    $fired = false;
+
+    addAction( 'ap.ecommerce.order.fulfilling', function () use ( &$fired ): void {
+        $fired = true;
+    } );
+
+    expect( fn () => $this->service->create( $this->order, 'flat-rate', [ $this->lineA->id => 99 ] ) )->toThrow( InvalidArgumentException::class );
+    expect( fn () => $this->service->create( $this->order, 'flat-rate', [], [ 'status' => 'teleported' ] ) )->toThrow( InvalidArgumentException::class );
+    expect( $fired )->toBeFalse();
+} );

@@ -27,6 +27,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Registries;
 
 use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
+use ArtisanPackUI\Ecommerce\Models\Cart;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
@@ -242,5 +243,40 @@ class PaymentGatewayRegistry
         }
 
         return $gateways;
+    }
+
+    /**
+     * The gateways a checkout should offer for `$cart`: every registered
+     * gateway, run through `ap.ecommerce.payment.availableGateways`
+     * (filter) so a satellite can hide one (no COD over a limit, no
+     * invoice billing for guests, …).
+     *
+     * The filter can only narrow or reorder the list: entries that aren't
+     * a {@see PaymentGateway} registered under the same key are dropped, so
+     * the result always resolves through {@see self::get()}.
+     *
+     * @since 1.0.0
+     *
+     * @param  Cart  $cart  Cart being checked out.
+     *
+     * @return array<string, PaymentGateway>
+     */
+    public function availableFor( Cart $cart ): array
+    {
+        $filtered = applyFilters( 'ap.ecommerce.payment.availableGateways', $this->all(), $cart );
+
+        if ( ! is_array( $filtered ) ) {
+            return $this->all();
+        }
+
+        $available = [];
+
+        foreach ( $filtered as $key => $gateway ) {
+            if ( is_string( $key ) && $gateway instanceof PaymentGateway && $this->has( $key ) && $this->get( $key ) === $gateway ) {
+                $available[ $key ] = $gateway;
+            }
+        }
+
+        return $available;
     }
 }

@@ -72,6 +72,11 @@ class ShipmentService
      * Line and order `fulfillment_status` roll up afterwards
      * (`unfulfilled` → `partial` → `fulfilled`).
      *
+     * Fires `ap.ecommerce.order.fulfilling` (action) with the locked order
+     * once the order, quantities, and status have all been validated, before
+     * any shipment row is written; a listener that throws aborts the
+     * shipment. A rejected request never fires it.
+     *
      * @since 1.0.0
      *
      * @param  Order                 $order       Order being fulfilled.
@@ -121,6 +126,8 @@ class ShipmentService
             if ( ! in_array( $status, Shipment::STATUSES, true ) ) {
                 throw new InvalidArgumentException( __( 'Unknown shipment status ":status".', [ 'status' => $status ] ) );
             }
+
+            doAction( 'ap.ecommerce.order.fulfilling', $locked );
 
             $shipment = Shipment::query()->create( array_merge(
                 array_intersect_key( $attributes, array_flip( [ 'carrier', 'service', 'tracking_number', 'tracking_url', 'shipped_at', 'meta' ] ) ),

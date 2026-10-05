@@ -147,11 +147,25 @@ return [
     | `claim_rate_window_minutes`    — Length of the rate-limit window in
     |                                   minutes (default: 60).
     |
+    | `vip.order_count`              — Paid orders after which a customer
+    |                                   becomes a VIP and
+    |                                   `ap.ecommerce.customer.becameVip`
+    |                                   fires (default: 0, off).
+    |
+    | `vip.lifetime_spend`           — Lifetime spend, net of refunds, in
+    |                                   minor units of the base currency,
+    |                                   after which a customer becomes a VIP
+    |                                   (default: 0, off).
+    |
     */
 
     'customers' => [
         'claim_rate_limit'          => (int) env( 'ECOMMERCE_CLAIM_RATE_LIMIT', 5 ),
         'claim_rate_window_minutes' => (int) env( 'ECOMMERCE_CLAIM_RATE_WINDOW_MINUTES', 60 ),
+        'vip'                       => [
+            'order_count'    => (int) env( 'ECOMMERCE_VIP_ORDER_COUNT', 0 ),
+            'lifetime_spend' => (int) env( 'ECOMMERCE_VIP_LIFETIME_SPEND', 0 ),
+        ],
     ],
 
     /*
