@@ -15,6 +15,7 @@ use ArtisanPackUI\Ecommerce\ValueObjects\RefundResult;
 use ArtisanPackUI\Ecommerce\ValueObjects\WebhookResult;
 use Illuminate\Http\Request;
 use Money\Money;
+use RuntimeException;
 
 /**
  * In-memory reference {@see PaymentGateway} used only to prove the shared
@@ -24,6 +25,13 @@ final class InMemoryPaymentGateway implements PaymentGateway
 {
     public const WEBHOOK_SECRET   = 'test-shared-secret';
     public const SIGNATURE_HEADER = 'X-InMemory-Signature';
+
+    /**
+     * Authorization state per payment reference: `authorized` or `voided`.
+     *
+     * @var array<string, string>
+     */
+    public static array $authorizations = [];
 
     public function key(): string
     {
@@ -70,6 +78,13 @@ final class InMemoryPaymentGateway implements PaymentGateway
 
     public function voidPendingPayment( Order $order ): void
     {
+        $reference = (string) $order->payment_reference;
+
+        match ( self::$authorizations[ $reference ] ?? null ) {
+            'authorized' => self::$authorizations[ $reference ] = 'voided',
+            'voided'     => null, // Already voided: a no-op, per the contract.
+            default      => throw new RuntimeException( "No authorization {$reference} to void." ),
+        };
     }
 
     public function refund( Order $order, Money $amount, ?string $reason = null ): RefundResult
@@ -123,6 +138,21 @@ final class InMemoryPaymentGatewayContractTest extends PaymentGatewayContractTes
             'payment_status'      => 'paid',
             'payment_gateway_key' => 'in-memory',
         ] );
+    }
+
+    protected function makePendingAuthorizationOrder(): Order
+    {
+        $order = Order::factory()->create( [
+            'currency'            => 'USD',
+            'total_amount'        => 10_000,
+            'payment_status'      => 'pending',
+            'payment_gateway_key' => 'in-memory',
+            'payment_reference'   => 'pi_auth_' . uniqid(),
+        ] );
+
+        InMemoryPaymentGateway::$authorizations[ (string) $order->payment_reference ] = 'authorized';
+
+        return $order;
     }
 
     protected function signedWebhookRequest(): Request

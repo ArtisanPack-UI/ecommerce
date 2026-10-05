@@ -536,5 +536,7 @@
     "Job class": "Classe de la tâche",
     "Add the job to artisanpack.ecommerce.kanban.dispatchable_jobs first.": "Ajoutez d'abord la tâche à artisanpack.ecommerce.kanban.dispatchable_jobs.",
     "Job": "Tâche",
-    "A label for shipment :id is already being bought.": "Une étiquette est déjà en cours d'achat pour l'expédition :id."
+    "A label for shipment :id is already being bought.": "Une étiquette est déjà en cours d'achat pour l'expédition :id.",
+    "Payment :reference was already captured; refund it instead of voiding it.": "Le paiement :reference a déjà été capturé ; remboursez-le au lieu de l'annuler.",
+    "Stripe did not confirm that payment :reference was voided (status: :status).": "Stripe n'a pas confirmé l'annulation du paiement :reference (statut : :status)."
 }

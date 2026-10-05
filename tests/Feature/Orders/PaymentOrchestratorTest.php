@@ -33,6 +33,8 @@ final class OrchestratorFakeGateway implements PaymentGateway
     /** @var array<int, string> */
     public array $calls = [];
 
+    public bool $shouldThrowOnVoid = false;
+
     public bool $shouldThrowOnCapture = false;
 
     public ?PaymentResult $captureResult = null;
@@ -92,6 +94,10 @@ final class OrchestratorFakeGateway implements PaymentGateway
     public function voidPendingPayment( Order $order ): void
     {
         $this->calls[] = 'voidPendingPayment';
+
+        if ( $this->shouldThrowOnVoid ) {
+            throw new RuntimeException( 'void refused' );
+        }
     }
 
     public function refund( Order $order, Money $amount, ?string $reason = null ): RefundResult
@@ -587,4 +593,19 @@ it( 'still returns captured and dispatches PaymentSucceeded when a post-capture 
     expect( $paidRan )->toBeTrue();
     expect( $order->fresh()->payment_status )->toBe( 'paid' );
     Event::assertDispatched( PaymentSucceeded::class );
+} );
+
+it( 'still blocks the order when the fraud-path void is refused', function (): void {
+    Event::fake( [ FraudBlocked::class, PaymentFailed::class, PaymentSucceeded::class ] );
+    orchRegisterFraud( FraudDecision::block( 92, [ 'high_risk_address' ] ) );
+    [ $order, $cart ]                 = orchMakeOrderAndCart();
+    $this->gateway->shouldThrowOnVoid = true;
+
+    $result = app( PaymentOrchestrator::class )->finalize( $order, $cart, orchShipping() );
+
+    expect( $result->isBlocked() )->toBeTrue()
+        ->and( $order->fresh()->system_status )->toBe( 'failed' )
+        ->and( $this->gateway->calls )->toEqual( [ 'createPaymentSession', 'voidPendingPayment' ] );
+
+    Event::assertDispatched( FraudBlocked::class );
 } );

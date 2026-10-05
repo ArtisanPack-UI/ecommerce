@@ -186,3 +186,20 @@ it( 'never renders the claim key in the shipment resource', function (): void {
 
     expect( $rendered['meta']['label_purchase'] )->toBe( [ 'provider' => 'claim-labels', 'claimed_at' => $this->shipment->fresh()->meta['label_purchase']['claimed_at'] ] );
 } );
+
+it( 'loses to a request that took over its claim and is still buying', function (): void {
+    $provider = claimTestProvider( function ( Shipment $shipment ): void {
+        // Our claim went stale mid-call; another request (another provider,
+        // so a new key) took it over and hasn't finished yet.
+        $stored = Shipment::query()->findOrFail( $shipment->id );
+        $stored->forceFill( [ 'meta' => [ 'label_purchase' => [ 'key' => 'newer-key', 'provider' => 'other-labels', 'claimed_at' => now()->toIso8601String() ] ] ] )->save();
+    } );
+
+    app( ShippingLabelProviderRegistry::class )->register( 'claim-labels', $provider );
+
+    expect( fn () => $this->service->buyLabel( $this->shipment, 'claim-labels' ) )->toThrow( InvalidArgumentException::class, 'already being bought' );
+
+    expect( $provider->voided )->toBe( [ 501 ] )
+        ->and( $this->shipment->fresh()->label_id )->toBeNull()
+        ->and( $this->shipment->fresh()->meta['label_purchase']['key'] )->toBe( 'newer-key' );
+} );

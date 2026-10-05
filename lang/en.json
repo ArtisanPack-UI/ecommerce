@@ -536,5 +536,7 @@
     "Job class": "Job class",
     "Add the job to artisanpack.ecommerce.kanban.dispatchable_jobs first.": "Add the job to artisanpack.ecommerce.kanban.dispatchable_jobs first.",
     "Job": "Job",
-    "A label for shipment :id is already being bought.": "A label for shipment :id is already being bought."
+    "A label for shipment :id is already being bought.": "A label for shipment :id is already being bought.",
+    "Payment :reference was already captured; refund it instead of voiding it.": "Payment :reference was already captured; refund it instead of voiding it.",
+    "Stripe did not confirm that payment :reference was voided (status: :status).": "Stripe did not confirm that payment :reference was voided (status: :status)."
 }

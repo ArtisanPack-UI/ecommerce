@@ -55,9 +55,9 @@ use Throwable;
 /**
  * Contract test for {@see PaymentGateway} implementations.
  *
- * Satellites extend this class and provide the four fixture hooks
- * ({@see self::gateway()}, {@see self::makeOrder()}, {@see self::signedWebhookRequest()},
- * {@see self::unsignedWebhookRequest()}) plus the two capture-outcome hooks
+ * Satellites extend this class and provide the five fixture hooks
+ * ({@see self::gateway()}, {@see self::makeOrder()}, {@see self::makePendingAuthorizationOrder()},
+ * {@see self::signedWebhookRequest()}, {@see self::unsignedWebhookRequest()}) plus the two capture-outcome hooks
  * ({@see self::captureTerminalDeclineResult()}, {@see self::captureRetryableResult()}).
  * Satellites whose gateway does not support refunds override
  * {@see self::gatewaySupportsRefunds()} to `false` and the refund cases
@@ -318,22 +318,17 @@ abstract class PaymentGatewayContractTest extends TestCase
     abstract protected function captureRetryableResult(): PaymentResult;
 
     /**
-     * A persisted order with a live, uncaptured authorization at the
-     * gateway under test. Defaults to {@see self::makeOrder()} with
-     * `payment_status = pending`; satellites whose gateway needs a real
-     * authorization (a stub client holding the intent) override it.
+     * A persisted order holding a live, uncaptured authorization at the
+     * gateway under test (`payment_status = pending`). The provider side
+     * must really be authorized — through a stub client or sandbox — so the
+     * first void voids something and the second meets an already-voided
+     * authorization. Flipping a captured order's status is not enough.
      *
      * @since 1.0.0
      *
      * @return Order
      */
-    protected function makePendingAuthorizationOrder(): Order
-    {
-        $order = $this->makeOrder();
-        $order->forceFill( [ 'payment_status' => 'pending' ] )->save();
-
-        return $order;
-    }
+    abstract protected function makePendingAuthorizationOrder(): Order;
 
     /**
      * Whether the gateway under test supports refunds. Defaults to `true`;

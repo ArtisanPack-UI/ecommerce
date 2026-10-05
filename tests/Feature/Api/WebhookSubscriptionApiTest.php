@@ -6,6 +6,7 @@ use ArtisanPackUI\Ecommerce\Jobs\DeliverWebhookJob;
 use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Queue;
 
@@ -213,4 +214,24 @@ it( 'scopes a delivery read to its subscription and gates it on webhookSubscript
     Gate::define( 'ecommerce.webhookSubscription.viewAny', fn (): bool => true );
 
     $this->getJson( "/api/ecommerce/v1/admin/webhook-subscriptions/{$subscription->id}/deliveries" )->assertOk();
+} );
+
+it( 'does not load payloads or response bodies for the deliveries listing', function (): void {
+    $subscription = WebhookSubscription::factory()->create();
+    WebhookDelivery::factory()->create( [ 'subscription_id' => $subscription->id, 'response_body' => str_repeat( 'x', 5000 ) ] );
+
+    $this->actingAs( ecommerceAdmin(), 'sanctum' );
+
+    DB::enableQueryLog();
+
+    $this->getJson( "/api/ecommerce/v1/admin/webhook-subscriptions/{$subscription->id}/deliveries" )
+        ->assertOk()
+        ->assertJsonPath( 'data.0.event', 'order.refunded' );
+
+    $sql = collect( DB::getQueryLog() )->pluck( 'query' )->first( fn ( string $query ): bool => str_contains( $query, 'from "webhook_deliveries"' ) );
+
+    expect( $sql )->not->toBeNull()
+        ->and( $sql )->not->toContain( '"payload",' )
+        ->and( $sql )->not->toContain( 'response_body' )
+        ->and( $sql )->not->toContain( '*' );
 } );

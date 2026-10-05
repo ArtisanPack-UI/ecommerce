@@ -245,7 +245,9 @@ class ShipmentService
      *    purchase's idempotency key for carriers that accept one.
      * 3. **Finalize** — a second short locked transaction writes the label
      *    and tracking fields and clears the claim. A failed purchase clears
-     *    the claim and rethrows.
+     *    the claim and rethrows. A request whose claim was taken over (by a
+     *    claim with a different key) or whose shipment already has another
+     *    label loses: it voids the label it bought and throws.
      *
      * A claim older than `artisanpack.ecommerce.fulfillment.label_claim_ttl_minutes`
      * (a crashed worker) may be taken over; the retry reuses its key when
@@ -274,19 +276,25 @@ class ShipmentService
             throw $exception;
         }
 
-        $won = DB::transaction( function () use ( $shipment, $label, $claimKey ): bool {
+        // Null when this request won; otherwise why it lost.
+        $lost = DB::transaction( function () use ( $shipment, $label, $claimKey ): ?string {
             $locked = Shipment::query()->whereKey( $shipment->id )->lockForUpdate()->firstOrFail();
 
             // A request that took over our claim as stale finished first.
             if ( null !== $locked->label_id && (int) $locked->label_id !== (int) $label->id ) {
-                return false;
+                return __( 'Shipment :id already has a label.', [ 'id' => $locked->id ] );
             }
 
-            $meta = (array) ( $locked->meta ?? [] );
+            $meta       = (array) ( $locked->meta ?? [] );
+            $currentKey = $meta[ self::LABEL_CLAIM_META ]['key'] ?? null;
 
-            if ( $claimKey === ( $meta[ self::LABEL_CLAIM_META ]['key'] ?? null ) ) {
-                unset( $meta[ self::LABEL_CLAIM_META ] );
+            // Another request took over our (stale) claim and is still
+            // buying: it wins, and this request voids its own label.
+            if ( null !== $currentKey && $claimKey !== $currentKey ) {
+                return __( 'A label for shipment :id is already being bought.', [ 'id' => $locked->id ] );
             }
+
+            unset( $meta[ self::LABEL_CLAIM_META ] );
 
             $locked->meta            = [] === $meta ? null : $meta;
             $locked->label_id        = $label->id;
@@ -298,13 +306,13 @@ class ShipmentService
 
             $shipment->setRawAttributes( $locked->getAttributes(), true );
 
-            return true;
+            return null;
         } );
 
-        if ( ! $won ) {
+        if ( null !== $lost ) {
             $this->voidDuplicateLabel( $provider, $label, $shipment );
 
-            throw new InvalidArgumentException( __( 'Shipment :id already has a label.', [ 'id' => $shipment->id ] ) );
+            throw new InvalidArgumentException( $lost );
         }
 
         return $label;

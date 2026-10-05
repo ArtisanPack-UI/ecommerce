@@ -43,6 +43,26 @@ use Illuminate\Http\Request;
 class WebhookSubscriptionController extends ApiController
 {
     /**
+     * Columns the deliveries listing reads (everything but `payload` and
+     * `response_body`).
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    private const DELIVERY_LIST_COLUMNS = [
+        'id',
+        'subscription_id',
+        'event',
+        'payload_hash',
+        'response_status',
+        'attempts',
+        'delivered_at',
+        'next_retry_at',
+        'created_at',
+    ];
+
+    /**
      * @since 1.0.0
      *
      * @param  WebhookSubscriptionService  $subscriptions  Subscription service.
@@ -152,7 +172,9 @@ class WebhookSubscriptionController extends ApiController
     public function deliveries( Request $request, WebhookSubscription $subscription ): JsonResponse
     {
         return $this->listResponse(
-            $subscription->deliveries()->getQuery(),
+            // Payloads and response bodies can be large and the listing
+            // doesn't render them, so leave them in the database.
+            $subscription->deliveries()->getQuery()->select( self::DELIVERY_LIST_COLUMNS ),
             $request,
             WebhookDeliveryResource::class,
             [

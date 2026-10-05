@@ -31,6 +31,7 @@ use ArtisanPackUI\Ecommerce\ValueObjects\RefundResult;
 use ArtisanPackUI\Ecommerce\ValueObjects\WebhookResult;
 use Illuminate\Http\Request;
 use Money\Money;
+use Throwable;
 
 /**
  * PaymentGateway contract.
@@ -144,16 +145,25 @@ interface PaymentGateway
      * of the cancel throws, the order stays `pending` with the
      * authorization already voided, and the retry voids again.
      *
-     * Implementations MUST therefore be idempotent: an authorization that
-     * is already voided, cancelled, or expired MUST be treated as a
-     * successful no-op, never an error, or that order could never be
-     * cancelled. Throw only when the provider refuses to void a live
-     * authorization. `PaymentGatewayContractTest` checks this, so
-     * `ecommerce:verify-satellite` does too (engine issue #154).
+     * Implementations MUST therefore be idempotent: an authorization the
+     * provider confirms is already voided, cancelled, or expired (or that
+     * does not exist) MUST be treated as a successful no-op, or that order
+     * could never be cancelled. `PaymentGatewayContractTest` checks this,
+     * so `ecommerce:verify-satellite` does too (engine issue #154).
+     *
+     * Returning normally means "nothing is authorized any more". So
+     * implementations MUST throw — never swallow — when the provider
+     * refuses the void, when the payment turns out to be captured (it
+     * needs a refund instead), or when the outcome is unknown (a network
+     * error, or a response that doesn't confirm the cancellation).
+     * Otherwise the cancel records a live authorization as voided. Callers
+     * that treat the void as best-effort (the fraud path) catch and log.
      *
      * @since 1.0.0
      *
      * @param  Order  $order  The order whose pending authorization is being released.
+     *
+     * @throws Throwable When the void is refused, the payment was captured, or the outcome is unconfirmed.
      *
      * @return void
      */

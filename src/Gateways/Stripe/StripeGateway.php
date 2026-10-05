@@ -42,18 +42,17 @@ use ArtisanPackUI\Ecommerce\ValueObjects\RefundResult;
 use ArtisanPackUI\Ecommerce\ValueObjects\WebhookResult;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Money\Currency;
 use Money\Money;
 use RuntimeException;
 use Stripe\Exception\ApiConnectionException;
 use Stripe\Exception\ApiErrorException;
 use Stripe\Exception\CardException;
+use Stripe\Exception\InvalidRequestException;
 use Stripe\Exception\RateLimitException;
 use Stripe\Exception\SignatureVerificationException;
 use Stripe\PaymentIntent;
 use Stripe\StripeClient;
-use Throwable;
 
 /**
  * @package    ArtisanPack_UI
@@ -314,13 +313,20 @@ class StripeGateway implements PaymentGateway
     /**
      * Cancels an uncaptured PaymentIntent.
      *
-     * No-op when the PI has already been captured, canceled, or cannot be
-     * found — the engine calls this from the fraud path (engine spec §8.4)
-     * and MUST NOT throw on double-void.
+     * A no-op when the order has no PaymentIntent, when Stripe reports it
+     * already `canceled`, or when it no longer exists — so a second void is
+     * harmless (engine issue #154). Throws when the intent was captured
+     * (refund it instead), when Stripe refuses or can't be reached, and
+     * when the cancel response doesn't confirm `canceled`, so the engine
+     * never records a live authorization as voided. The fraud path treats
+     * the void as best-effort and catches these.
      *
      * @since 1.0.0
      *
      * @param  Order  $order  The order whose pending authorization is being released.
+     *
+     * @throws ApiErrorException When Stripe refuses the request or can't be reached.
+     * @throws RuntimeException  When the intent was captured, or the cancellation is unconfirmed.
      *
      * @return void
      */
@@ -334,27 +340,30 @@ class StripeGateway implements PaymentGateway
 
         try {
             $intent = $this->client()->paymentIntents->retrieve( $reference );
-
-            if ( in_array( $intent->status, [ 'succeeded', 'canceled' ], true ) ) {
+        } catch ( InvalidRequestException $e ) {
+            if ( 'resource_missing' === $e->getStripeCode() ) {
                 return;
             }
 
-            $this->client()->paymentIntents->cancel(
-                $reference,
-                [],
-                $this->requestOptions( [ 'idempotency_key' => 'ap-ec-void-' . $reference ] ),
-            );
-        } catch ( Throwable $e ) {
-            // Voiding is best-effort — the fraud path already treats the
-            // order as blocked. Surfacing an exception here would prevent
-            // that state transition, which is a bigger problem than a
-            // dangling authorization Stripe will expire on its own. Log
-            // it so operators can reconcile stale authorizations.
-            Log::channel( 'ecommerce' )->warning( 'Stripe void failed; authorization will expire on its own.', [
-                'order_id'          => $order->getKey(),
-                'payment_reference' => $reference,
-                'error'             => $e->getMessage(),
-            ] );
+            throw $e;
+        }
+
+        if ( 'canceled' === $intent->status ) {
+            return;
+        }
+
+        if ( 'succeeded' === $intent->status ) {
+            throw new RuntimeException( __( 'Payment :reference was already captured; refund it instead of voiding it.', [ 'reference' => $reference ] ) );
+        }
+
+        $canceled = $this->client()->paymentIntents->cancel(
+            $reference,
+            [],
+            $this->requestOptions( [ 'idempotency_key' => 'ap-ec-void-' . $reference ] ),
+        );
+
+        if ( 'canceled' !== $canceled->status ) {
+            throw new RuntimeException( __( 'Stripe did not confirm that payment :reference was voided (status: :status).', [ 'reference' => $reference, 'status' => (string) $canceled->status ] ) );
         }
     }
 

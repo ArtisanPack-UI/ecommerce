@@ -81,7 +81,7 @@ $auth = (array) config( 'artisanpack.ecommerce.api.auth_middleware', [ 'ecommerc
 /**
  * Middleware for an admin-gated route.
  *
- * @var Closure(string, string, bool): array<int, string> $admin
+ * @var Closure(string, string, bool=): array<int, string> $admin
  */
 $admin = static fn ( string $resource, string $action, bool $mutates = false ): array => array_merge(
     $auth,

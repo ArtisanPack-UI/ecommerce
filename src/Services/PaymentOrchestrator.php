@@ -308,7 +308,18 @@ class PaymentOrchestrator
         // the money released at the provider — worst case is a stray
         // `failed` order pointing at a voided auth, which the ops team
         // can reconcile from the timeline entry we're about to write.
-        $gateway->voidPendingPayment( $order );
+        // The void is best-effort here: a refused or unconfirmed void must
+        // not keep a blocked order open, and an unvoided authorization
+        // expires at the provider on its own.
+        try {
+            $gateway->voidPendingPayment( $order );
+        } catch ( Throwable $exception ) {
+            Log::channel( 'ecommerce' )->warning( 'Could not void the authorization on a fraud-blocked order; it will expire at the provider.', [
+                'order_id' => $order->getKey(),
+                'gateway'  => $gateway->key(),
+                'error'    => $exception->getMessage(),
+            ] );
+        }
 
         $refreshed = DB::transaction( function () use ( $order, $gateway, $decision ): Order {
             $locked = Order::query()->lockForUpdate()->findOrFail( $order->id );
