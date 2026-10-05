@@ -26,8 +26,10 @@ namespace ArtisanPackUI\Ecommerce\Models;
 
 use ArtisanPackUI\Ecommerce\Contracts\ProductType;
 use ArtisanPackUI\Ecommerce\Database\Factories\ProductFactory;
+use ArtisanPackUI\Ecommerce\Inventory\StockStatus;
 use ArtisanPackUI\Ecommerce\ProductTypes\MissingProductType;
 use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
+use ArtisanPackUI\Ecommerce\Services\ProductPriceResolver;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -372,11 +374,14 @@ class Product extends Model
     /**
      * The document indexed for search.
      *
-     * Runs through `ap.ecommerce.product.searchableData` (engine spec §6.9)
-     * so satellites can feed extra fields (categories, review snippets,
-     * brand, …) to a dedicated search engine. Under the `database` driver
-     * the document is cut back to {@see self::DATABASE_SEARCH_COLUMNS},
-     * because that driver can only search real columns.
+     * Dedicated engines get the text fields plus what storefronts facet on
+     * (#176): category and tag ids and slugs, attribute values by key, the
+     * current price per currency, and whether it's in stock. It runs
+     * through `ap.ecommerce.product.searchableData` (engine spec §6.9) so
+     * satellites can add more. Under the `database` driver the document is
+     * cut back to {@see self::DATABASE_SEARCH_COLUMNS}, because that driver
+     * can only search real columns (filters and facets then come from the
+     * catalog query).
      *
      * @since 1.0.0
      *
@@ -384,6 +389,8 @@ class Product extends Model
      */
     public function toSearchableArray(): array
     {
+        $database = $this->searchableUsing() instanceof DatabaseEngine;
+
         $data = (array) applyFilters( 'ap.ecommerce.product.searchableData', [
             'id'                => $this->getKey(),
             'name'              => $this->name,
@@ -394,12 +401,13 @@ class Product extends Model
             'description'       => $this->description,
             'type'              => $this->type,
             'status'            => $this->status,
+            'is_featured'       => (bool) $this->is_featured,
             'avg_rating'        => $this->avg_rating,
             'reviews_count'     => $this->reviews_count,
             'published_at'      => $this->published_at?->getTimestamp(),
-        ], $this );
+        ] + ( $database ? [] : $this->searchFacetFields() ), $this );
 
-        if ( $this->searchableUsing() instanceof DatabaseEngine ) {
+        if ( $database ) {
             return array_intersect_key( $data, array_flip( self::DATABASE_SEARCH_COLUMNS ) );
         }
 
@@ -447,6 +455,61 @@ class Product extends Model
     public function shouldBeSearchable(): bool
     {
         return (bool) config( 'artisanpack.ecommerce.features.scout', true ) && 'active' === $this->status;
+    }
+
+    /**
+     * Eager-loads what {@see self::toSearchableArray()} reads when Scout
+     * imports products in bulk.
+     *
+     * @since 1.0.0
+     *
+     * @param  Builder<Product>  $query  Import query.
+     *
+     * @return Builder<Product>
+     */
+    protected function makeAllSearchableUsing( Builder $query ): Builder
+    {
+        return $query->with( [ 'categories', 'tags', 'productAttributes.values', 'prices' ] );
+    }
+
+    /**
+     * The facetable fields of the search document.
+     *
+     * @since 1.0.0
+     *
+     * @return array<string, mixed>
+     */
+    protected function searchFacetFields(): array
+    {
+        $prices = [];
+
+        foreach ( $this->prices->whereNull( 'starts_at' )->whereNull( 'ends_at' ) as $price ) {
+            $prices[ strtoupper( (string) $price->currency ) ] = (int) $price->price_amount;
+        }
+
+        foreach ( array_keys( $prices ) as $currency ) {
+            $current = app( ProductPriceResolver::class )->resolve( $this, $currency );
+
+            if ( null !== $current ) {
+                $prices[ $currency ] = (int) $current->getAmount();
+            }
+        }
+
+        $attributes = [];
+
+        foreach ( $this->productAttributes as $attribute ) {
+            $attributes[ (string) $attribute->key ] = $attribute->values->pluck( 'value' )->map( static fn ( $value ): string => (string) $value )->values()->all();
+        }
+
+        return [
+            'category_ids'   => $this->categories->pluck( 'id' )->map( static fn ( $id ): int => (int) $id )->values()->all(),
+            'category_slugs' => $this->categories->pluck( 'slug' )->values()->all(),
+            'tag_ids'        => $this->tags->pluck( 'id' )->map( static fn ( $id ): int => (int) $id )->values()->all(),
+            'tag_slugs'      => $this->tags->pluck( 'slug' )->values()->all(),
+            'attributes'     => $attributes,
+            'prices'         => $prices,
+            'in_stock'       => StockStatus::for( $this )->purchasable(),
+        ];
     }
 
     /**

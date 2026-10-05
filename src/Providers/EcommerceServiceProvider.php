@@ -91,6 +91,7 @@ use ArtisanPackUI\Ecommerce\Listeners\MergeGuestCartOnLogin;
 use ArtisanPackUI\Ecommerce\Listeners\RecordModelActivity;
 use ArtisanPackUI\Ecommerce\Listeners\RevokeDigitalDeliverables;
 use ArtisanPackUI\Ecommerce\Listeners\SendCatalogNotifications;
+use ArtisanPackUI\Ecommerce\Listeners\SyncSearchIndexers;
 use ArtisanPackUI\Ecommerce\Listeners\TrackCustomerMilestones;
 use ArtisanPackUI\Ecommerce\Listeners\UpdateCustomerStats;
 use ArtisanPackUI\Ecommerce\Logging\EcommerceLogFormatter;
@@ -178,6 +179,8 @@ use ArtisanPackUI\Ecommerce\Registries\PromotionConditionRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PromotionSourceRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ReportRegistry;
 use ArtisanPackUI\Ecommerce\Registries\SatelliteRegistry;
+use ArtisanPackUI\Ecommerce\Registries\SearchIndexerRegistry;
+use ArtisanPackUI\Ecommerce\Registries\SearchProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\SettingsRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingLabelProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingMethodTypeRegistry;
@@ -194,6 +197,7 @@ use ArtisanPackUI\Ecommerce\Reports\TaxCollectedReport;
 use ArtisanPackUI\Ecommerce\Reports\TopProductsReport;
 use ArtisanPackUI\Ecommerce\Reviews\NoopReviewModerator;
 use ArtisanPackUI\Ecommerce\Reviews\ProductRatingAggregator;
+use ArtisanPackUI\Ecommerce\Search\DatabaseSearchProvider;
 use ArtisanPackUI\Ecommerce\Services\ActivityLogService;
 use ArtisanPackUI\Ecommerce\Services\DatabaseCartStorage;
 use ArtisanPackUI\Ecommerce\Services\Fraud\AlwaysApproveFraudProvider;
@@ -316,6 +320,8 @@ class EcommerceServiceProvider extends ServiceProvider
             KanbanCardWidgetRegistry::class,
             KanbanAutomationRegistry::class,
             NotificationTemplateRegistry::class,
+            SearchProviderRegistry::class,
+            SearchIndexerRegistry::class,
         ] as $registry ) {
             $this->app->singleton( $registry, static fn ( $app ) => new $registry( $app ) );
         }
@@ -369,6 +375,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->registerCoreFulfillmentAllocationStrategies();
         $this->registerCorePaymentGateways();
         $this->registerCoreFraudProviders();
+        $this->registerCoreSearchProviders();
         $this->registerCoreTaxProviders();
         $this->registerCoreShippingMethodTypes();
         $this->registerCorePromotionRules();
@@ -830,6 +837,26 @@ class EcommerceServiceProvider extends ServiceProvider
                 'supports_partial_refunds' => true,
             ],
         );
+    }
+
+    /**
+     * Registers the core search provider and keeps registered search
+     * indexers in step with the catalog (#176). The active provider is
+     * `search.provider`.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCoreSearchProviders(): void
+    {
+        $this->app->make( SearchProviderRegistry::class )->register(
+            DatabaseSearchProvider::KEY,
+            DatabaseSearchProvider::class,
+            [ 'label' => static fn (): string => __( 'Store search' ) ],
+        );
+
+        SyncSearchIndexers::register();
     }
 
     /**

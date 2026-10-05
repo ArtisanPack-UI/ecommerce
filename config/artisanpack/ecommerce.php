@@ -721,12 +721,17 @@ return [
     |            client) — or to an empty value to follow `scout.driver`.
     | `index`  — Index name for dedicated engines (`scout.prefix` is
     |            prepended).
+    | `provider` — Key of the SearchProvider storefront search uses
+    |            (`GET search`): `default` (Scout + the catalog query's
+    |            filters and facets) unless a search satellite registers
+    |            another.
     |
     */
 
     'search' => [
-        'driver' => env( 'ECOMMERCE_SEARCH_DRIVER', 'database' ),
-        'index'  => env( 'ECOMMERCE_SEARCH_INDEX', 'ecommerce_products' ),
+        'provider' => env( 'ECOMMERCE_SEARCH_PROVIDER', 'default' ),
+        'driver'   => env( 'ECOMMERCE_SEARCH_DRIVER', 'database' ),
+        'index'    => env( 'ECOMMERCE_SEARCH_INDEX', 'ecommerce_products' ),
     ],
 
     /*

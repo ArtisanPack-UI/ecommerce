@@ -78,9 +78,9 @@ it( 'accepts every documented filter, sort, and include', function (): void {
         }
 
         if ( isset( $parameters['sort'] ) ) {
-            preg_match( '/One of: (.*?)\. /', (string) $parameters['sort']['description'], $match );
+            preg_match( '/One of: (.*?)\. /', (string) ( $parameters['sort']['description'] ?? '' ), $match );
 
-            foreach ( explode( ', ', $match[1] ) as $sort ) {
+            foreach ( $parameters['sort']['schema']['enum'] ?? explode( ', ', $match[1] ) as $sort ) {
                 $query = $url . 'sort=' . urlencode( $sort );
 
                 expect( $this->getJson( $query )->status() )->toBeIn( [ 200, 404 ], $query );
