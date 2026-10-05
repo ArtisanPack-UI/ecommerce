@@ -98,7 +98,8 @@ jobs:
         run: composer update --${{ matrix.stability }} --no-interaction --prefer-dist
 
       - name: Show resolved versions
-        run: composer show laravel/framework orchestra/testbench pestphp/pest rebing/graphql-laravel stripe/stripe-php twig/twig
+        # `composer show` takes one package, so filter the full list.
+        run: composer show | grep -E '^(laravel/framework|orchestra/testbench|pestphp/pest|phpunit/phpunit|rebing/graphql-laravel|stripe/stripe-php|twig/twig) ' || true
 
       - name: Run Unit tests
         env:
