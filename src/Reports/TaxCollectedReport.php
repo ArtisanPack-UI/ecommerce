@@ -16,8 +16,9 @@
  * tax label. A missing jurisdiction falls back to the
  * shipping address, then the billing address.
  *
- * Refunds do not reduce this report; it is tax charged, not tax net of
- * refunds.
+ * Refunds issued in the range reduce the rows by the tax they returned
+ * ({@see RefundSplit}), split across the order's breakdown, so the report is
+ * tax collected net of refunds for the period.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -92,25 +93,33 @@ class TaxCollectedReport extends Report
                         continue;
                     }
 
-                    $country = strtoupper( (string) ( $entry['country_code'] ?? $address['country_code'] ?? '' ) );
-                    $region  = strtoupper( (string) ( $entry['region_code'] ?? $address['region_code'] ?? $address['region'] ?? '' ) );
-                    $key     = implode( '|', [ $entry['label'], (string) ( $entry['rate_ubps'] ?? '' ), $country, $region ] );
-
-                    $rows[ $key ] ??= [
-                        'label'        => $entry['label'],
-                        'rate_ubps'    => $entry['rate_ubps'],
-                        'country_code' => '' === $country ? null : $country,
-                        'region_code'  => '' === $region ? null : $region,
-                        'jurisdiction' => implode( '-', array_filter( [ $country, $region ] ) ),
-                        'amount'       => 0,
-                        'orders'       => [],
-                    ];
-
-                    $rows[ $key ]['amount'] += $amount;
-                    $rows[ $key ]['orders'][ $order->id ]  = true;
-                    $orders[ $order->id ]                  = true;
+                    $this->addToRow( $rows, $entry, $address, $amount, (int) $order->id );
+                    $orders[ $order->id ] = true;
                 }
             } );
+
+        // Refunds issued in the range take back the tax they returned, from
+        // the same jurisdiction rows in proportion to the order's breakdown.
+        RefundSplit::each( $range->queryBounds(), function ( object $refund, array $split ) use ( $amounts, $defaultLabel, &$rows ): void {
+            if ( 0 === $split['tax'] ) {
+                return;
+            }
+
+            $order   = (object) [ 'tax_amount' => $refund->order_tax, 'meta' => $refund->meta ];
+            $entries = $this->entries( $order, $defaultLabel );
+            $address = self::address( $refund->shipping_address ) ?? self::address( $refund->billing_address ) ?? [];
+            $shares  = self::apportion( $split['tax'], array_column( $entries, 'amount' ) );
+
+            foreach ( $entries as $index => $entry ) {
+                $amount = $amounts->toBase( $shares[ $index ] ?? 0, (string) $refund->currency, (string) $refund->base_currency, $refund->fx_rate_to_base_e8, $refund->order_id );
+
+                if ( null === $amount || 0 === $amount ) {
+                    continue;
+                }
+
+                $this->addToRow( $rows, $entry, $address, -$amount, null );
+            }
+        } );
 
         $rows = array_map( static fn ( array $row ): array => [ ...$row, 'orders' => count( $row['orders'] ) ], array_values( $rows ) );
 
@@ -123,6 +132,86 @@ class TaxCollectedReport extends Report
             ],
             'rows'   => $rows,
         ] );
+    }
+
+    /**
+     * Adds `$amount` to the row for `$entry`'s rate and jurisdiction,
+     * creating it when needed.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<string, array<string, mixed>>  $rows     Rows by key.
+     * @param  array<string, mixed>                 $entry    Tax entry.
+     * @param  array<string, mixed>                 $address  Order address (jurisdiction fallback).
+     * @param  int                                  $amount   Base-currency amount (negative for a refund).
+     * @param  int|null                             $orderId  Order to count, or null (refunds don't add orders).
+     *
+     * @return void
+     */
+    protected function addToRow( array &$rows, array $entry, array $address, int $amount, ?int $orderId ): void
+    {
+        $country = strtoupper( (string) ( $entry['country_code'] ?? $address['country_code'] ?? '' ) );
+        $region  = strtoupper( (string) ( $entry['region_code'] ?? $address['region_code'] ?? $address['region'] ?? '' ) );
+        $key     = implode( '|', [ $entry['label'], (string) ( $entry['rate_ubps'] ?? '' ), $country, $region ] );
+
+        $rows[ $key ] ??= [
+            'label'        => $entry['label'],
+            'rate_ubps'    => $entry['rate_ubps'],
+            'country_code' => '' === $country ? null : $country,
+            'region_code'  => '' === $region ? null : $region,
+            'jurisdiction' => implode( '-', array_filter( [ $country, $region ] ) ),
+            'amount'       => 0,
+            'orders'       => [],
+        ];
+
+        $rows[ $key ]['amount'] += $amount;
+
+        if ( null !== $orderId ) {
+            $rows[ $key ]['orders'][ $orderId ] = true;
+        }
+    }
+
+    /**
+     * Splits `$amount` across `$weights` (largest remainder, so the parts
+     * sum exactly). An even split when the weights are all zero.
+     *
+     * @since 1.0.0
+     *
+     * @param  int              $amount   Amount.
+     * @param  array<int, int>  $weights  Weights.
+     *
+     * @return array<int, int>
+     */
+    protected static function apportion( int $amount, array $weights ): array
+    {
+        $weights = array_map( static fn ( int $weight ): int => max( 0, $weight ), $weights );
+        $sum     = array_sum( $weights );
+        $count   = count( $weights );
+
+        if ( 0 === $count ) {
+            return [];
+        }
+
+        if ( 0 === $sum ) {
+            $weights = array_fill( 0, $count, 1 );
+            $sum     = $count;
+        }
+
+        $parts      = [];
+        $remainders = [];
+
+        foreach ( $weights as $index => $weight ) {
+            $parts[ $index ]      = intdiv( $amount * $weight, $sum );
+            $remainders[ $index ] = ( $amount * $weight ) % $sum;
+        }
+
+        arsort( $remainders );
+
+        foreach ( array_keys( array_slice( $remainders, 0, $amount - array_sum( $parts ), true ) ) as $index ) {
+            ++$parts[ $index ];
+        }
+
+        return $parts;
     }
 
     /**

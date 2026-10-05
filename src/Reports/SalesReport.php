@@ -15,13 +15,17 @@
  * |-----------------------|--------------------------------------------------------|
  * | `gross`               | Σ order subtotals (before discounts)                   |
  * | `discounts`           | Σ order discounts                                      |
- * | `refunds`             | Σ refunds issued in the bucket                         |
- * | `net`                 | `gross − discounts − refunds`                          |
- * | `tax`                 | Σ order tax                                            |
- * | `shipping`            | Σ order shipping                                       |
+ * | `refunds`             | Σ refunds issued in the bucket (all parts)             |
+ * | `net`                 | `gross − discounts − merchandise refunded`             |
+ * | `tax`                 | Σ order tax − tax refunded in the bucket               |
+ * | `shipping`            | Σ order shipping − shipping refunded in the bucket     |
  * | `total`               | Σ order totals (`gross − discounts + tax + shipping`)  |
  * | `orders`              | Number of orders                                       |
  * | `average_order_value` | `total ÷ orders`, rounded; 0 with no orders            |
+ *
+ * Each refund is split into merchandise, tax, and shipping ({@see RefundSplit}),
+ * so a fully refunded order nets to zero on every metric. A refund that
+ * can't be converted to the base currency is left out.
  *
  * Amounts are minor units of the current base currency (see {@see BaseAmounts}).
  *
@@ -38,7 +42,6 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Reports;
 
 use ArtisanPackUI\Ecommerce\Models\Order;
-use ArtisanPackUI\Ecommerce\Models\Refund;
 use InvalidArgumentException;
 
 /**
@@ -57,6 +60,16 @@ class SalesReport extends Report
      * @var array<int, string>
      */
     public const METRICS = [ 'gross', 'discounts', 'refunds', 'net', 'tax', 'shipping', 'total', 'orders', 'average_order_value' ];
+
+    /**
+     * Working key: the merchandise part of the bucket's refunds (dropped
+     * from the output).
+     *
+     * @since 1.0.0
+     *
+     * @var string
+     */
+    protected const REFUNDED_GOODS = '_refunded_goods';
 
     /**
      * Order amount columns summed per bucket.
@@ -128,23 +141,31 @@ class SalesReport extends Report
                 $series[ $bucket ]['orders']++;
             } );
 
-        $refunds = ( new Refund() )->getTable();
-        $orders  = ( new Order() )->getTable();
+        // Refunds issued in each bucket, split into merchandise, tax, and
+        // shipping so each comes off its own metric. A refund that can't be
+        // converted is left out rather than counted as zero.
+        RefundSplit::each( $bounds, function ( object $refund, array $split ) use ( $range, $amounts, &$series ): void {
+            $bucket = $range->bucketKey( (string) $refund->created_at );
 
-        Refund::query()
-            ->toBase()
-            ->join( $orders, "{$orders}.id", '=', "{$refunds}.order_id" )
-            ->select( [ "{$refunds}.id", "{$refunds}.amount", "{$refunds}.currency", "{$refunds}.created_at", "{$refunds}.order_id", "{$orders}.base_currency", "{$orders}.fx_rate_to_base_e8" ] )
-            ->whereBetween( "{$refunds}.created_at", $bounds )
-            ->where( "{$refunds}.status", Refund::STATUS_SUCCEEDED )
-            ->lazyById( 1000, "{$refunds}.id", 'id' )
-            ->each( function ( object $refund ) use ( $range, $amounts, &$series ): void {
-                $bucket = $range->bucketKey( (string) $refund->created_at );
+            if ( ! isset( $series[ $bucket ] ) ) {
+                return;
+            }
 
-                if ( isset( $series[ $bucket ] ) ) {
-                    $series[ $bucket ]['refunds'] += (int) $amounts->toBase( $refund->amount, (string) $refund->currency, (string) $refund->base_currency, $refund->fx_rate_to_base_e8, $refund->order_id );
+            $converted = [];
+
+            foreach ( [ 'amount', 'tax', 'shipping' ] as $part ) {
+                $converted[ $part ] = $amounts->toBase( $split[ $part ], (string) $refund->currency, (string) $refund->base_currency, $refund->fx_rate_to_base_e8, $refund->order_id );
+
+                if ( null === $converted[ $part ] ) {
+                    return;
                 }
-            } );
+            }
+
+            $series[ $bucket ]['refunds'] += $converted['amount'];
+            $series[ $bucket ]['tax'] -= $converted['tax'];
+            $series[ $bucket ]['shipping'] -= $converted['shipping'];
+            $series[ $bucket ][ self::REFUNDED_GOODS ] += $converted['amount'] - $converted['tax'] - $converted['shipping'];
+        } );
 
         $totals = self::emptyBucket();
         $rows   = [];
@@ -152,17 +173,22 @@ class SalesReport extends Report
         foreach ( $series as $key => $bucket ) {
             $bucket = self::finish( $bucket );
 
-            foreach ( self::METRICS as $metric ) {
+            foreach ( [ ...self::METRICS, self::REFUNDED_GOODS ] as $metric ) {
                 if ( 'average_order_value' !== $metric && 'net' !== $metric ) {
                     $totals[ $metric ] += $bucket[ $metric ];
                 }
             }
 
+            unset( $bucket[ self::REFUNDED_GOODS ] );
+
             $rows[] = [ 'period' => $key, 'start' => $buckets[ $key ], ...$bucket ];
         }
 
+        $totals = self::finish( $totals );
+        unset( $totals[ self::REFUNDED_GOODS ] );
+
         return $this->result( $range, $amounts, [
-            'totals' => self::finish( $totals ),
+            'totals' => $totals,
             'series' => $rows,
         ] );
     }
@@ -176,7 +202,7 @@ class SalesReport extends Report
      */
     protected static function emptyBucket(): array
     {
-        return array_fill_keys( self::METRICS, 0 );
+        return array_fill_keys( [ ...self::METRICS, self::REFUNDED_GOODS ], 0 );
     }
 
     /**
@@ -190,7 +216,7 @@ class SalesReport extends Report
      */
     protected static function finish( array $bucket ): array
     {
-        $bucket['net']                 = $bucket['gross'] - $bucket['discounts'] - $bucket['refunds'];
+        $bucket['net']                 = $bucket['gross'] - $bucket['discounts'] - $bucket[ self::REFUNDED_GOODS ];
         $bucket['average_order_value'] = $bucket['orders'] > 0 ? (int) round( $bucket['total'] / $bucket['orders'] ) : 0;
 
         return $bucket;
