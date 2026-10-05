@@ -91,6 +91,8 @@ class ProductService
         'width',
         'height',
         'dim_unit',
+        'is_featured',
+        'position',
         'meta',
         'published_at',
     ];

@@ -74,6 +74,8 @@ use Laravel\Scout\Searchable;
  * @property string|null                                                                $dim_unit
  * @property float                                                                      $avg_rating
  * @property int                                                                        $reviews_count
+ * @property bool                                                                       $is_featured
+ * @property int                                                                        $position
  * @property int|null                                                                   $warehouse_id
  * @property array<string, mixed>                                                       $meta
  * @property Carbon|null                                            $published_at
@@ -148,6 +150,8 @@ class Product extends Model
         'dim_unit',
         'avg_rating',
         'reviews_count',
+        'is_featured',
+        'position',
         'warehouse_id',
         'meta',
         'published_at',
@@ -165,6 +169,8 @@ class Product extends Model
         'is_taxable'    => true,
         'avg_rating'    => 0.0,
         'reviews_count' => 0,
+        'is_featured'   => false,
+        'position'      => 0,
     ];
 
     /**
@@ -505,6 +511,8 @@ class Product extends Model
             'height'        => 'float',
             'avg_rating'    => 'float',
             'reviews_count' => 'integer',
+            'is_featured'   => 'boolean',
+            'position'      => 'integer',
             'meta'          => 'array',
             'published_at'  => 'datetime',
         ];

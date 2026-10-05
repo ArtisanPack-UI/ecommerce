@@ -166,6 +166,8 @@ final class ResourceSchemas
                 'dim_unit'                => 'String',
                 'avg_rating'              => 'Float',
                 'reviews_count'           => 'Int',
+                'is_featured'             => 'Boolean',
+                'position'                => 'Int',
                 'meta'                    => 'JSON',
                 'published_at'            => 'DateTime',
             ] + $timestamps, [

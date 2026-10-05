@@ -51,7 +51,7 @@ it( 'rejects unknown include, filter, and sort parameters as problem+json', func
         ->assertHeader( 'Content-Type', 'application/problem+json' )
         ->assertJsonPath( 'errors.0.field', $field );
 } )->with( [
-    'include' => [ 'include=images', 'include' ],
+    'include' => [ 'include=children', 'include' ],
     'filter'  => [ 'filter[cost]=1', 'filter' ],
     'sort'    => [ 'sort=cost_amount', 'sort' ],
 ] );

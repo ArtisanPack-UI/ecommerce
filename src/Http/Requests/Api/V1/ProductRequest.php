@@ -60,6 +60,8 @@ class ProductRequest extends ApiFormRequest
                 'width'                   => [ 'nullable', 'numeric', 'min:0' ],
                 'height'                  => [ 'nullable', 'numeric', 'min:0' ],
                 'dim_unit'                => [ 'nullable', 'string', Rule::in( ProductService::DIMENSION_UNITS ) ],
+                'is_featured'             => [ 'boolean' ],
+                'position'                => [ 'integer', 'min:0', 'max:4294967295' ],
                 'meta'                    => [ 'nullable', 'array', 'max:50' ],
                 'published_at'            => [ 'nullable', 'date' ],
                 'category_ids'            => [ 'array', 'max:200' ],

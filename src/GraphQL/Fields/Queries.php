@@ -28,6 +28,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\GraphQL\Fields;
 
 use ArtisanPackUI\Ecommerce\Auth\TokenAbilities;
+use ArtisanPackUI\Ecommerce\Catalog\CatalogQuery;
 use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
 use ArtisanPackUI\Ecommerce\GraphQL\GraphQLError;
 use ArtisanPackUI\Ecommerce\GraphQL\Support\Resolvers;
@@ -111,7 +112,24 @@ class Queries
         return [
             'ProductFilter' => [
                 'kind'   => 'input',
-                'fields' => [ 'type' => 'String', 'sku' => 'String', 'slug' => 'String', 'search' => 'String' ],
+                'fields' => [
+                    'type'        => 'String',
+                    'sku'         => 'String',
+                    'slug'        => 'String',
+                    'search'      => 'String',
+                    'category'    => 'String',
+                    'descendants' => 'Boolean',
+                    'tag'         => 'String',
+                    'price_min'   => 'Int',
+                    'price_max'   => 'Int',
+                    'currency'    => 'String',
+                    'attributes'  => 'JSON',
+                    'in_stock'    => 'Boolean',
+                    'on_sale'     => 'Boolean',
+                    'featured'    => 'Boolean',
+                    'min_rating'  => 'Float',
+                    'ids'         => '[ID!]',
+                ],
             ],
             'OrderFilter' => [
                 'kind'   => 'input',
@@ -170,9 +188,9 @@ class Queries
             ],
             'products' => [
                 'type'    => 'ProductConnection!',
-                'args'    => [ 'filter' => 'ProductFilter' ] + $page,
+                'args'    => [ 'filter' => 'ProductFilter', 'sort' => 'String' ] + $page,
                 'resolve' => fn ( $root, array $args, $context, ResolveInfo $info ): array => $this->catalog(
-                    fn () => $this->r->connection( $this->filterProducts( Product::query()->storefrontVisible(), (array) ( $args['filter'] ?? [] ) ), 'Product', $args, $info ),
+                    fn () => $this->r->connection( $this->catalogProducts( (array) ( $args['filter'] ?? [] ), isset( $args['sort'] ) ? (string) $args['sort'] : null ), 'Product', $args, $info ),
                 ),
             ],
             'search' => [
@@ -552,15 +570,46 @@ class Queries
     {
         foreach ( [ 'type', 'sku', 'slug' ] as $column ) {
             if ( isset( $filter[ $column ] ) ) {
-                $query->where( $column, $filter[ $column ] );
+                $query->where( $query->getModel()->qualifyColumn( $column ), $filter[ $column ] );
             }
         }
 
-        if ( isset( $filter['search'] ) && '' !== $filter['search'] ) {
-            $query->whereRaw( "name LIKE ? ESCAPE '!'", [ '%' . str_replace( [ '!', '%', '_' ], [ '!!', '!%', '!_' ], (string) $filter['search'] ) . '%' ] );
-        }
-
         return $query;
+    }
+
+    /**
+     * Storefront products through {@see CatalogQuery}, ordered by a column
+     * sort (`position` — the default —, `name`, `-name`, `newest`, or
+     * `rating`), so they page by cursor like every connection.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<string, mixed>  $filter  `ProductFilter`.
+     * @param  string|null           $sort    Sort.
+     *
+     * @return Builder<Product>
+     */
+    protected function catalogProducts( array $filter, ?string $sort ): Builder
+    {
+        $flags = array_map( static fn ( mixed $value ): mixed => is_bool( $value ) ? ( $value ? '1' : '0' ) : $value, $filter );
+
+        $query = app( CatalogQuery::class )
+            ->fromParameters( $flags, null, isset( $filter['currency'] ) && 1 === preg_match( '/^[A-Za-z]{3}$/', (string) $filter['currency'] ) ? (string) $filter['currency'] : null )
+            ->builder( false );
+
+        $this->filterProducts( $query, $filter );
+
+        $model = $query->getModel();
+
+        match ( $sort ) {
+            'name'   => $query->orderBy( $model->qualifyColumn( 'name' ) ),
+            '-name'  => $query->orderByDesc( $model->qualifyColumn( 'name' ) ),
+            'newest' => $query->orderByDesc( $model->qualifyColumn( 'created_at' ) ),
+            'rating' => $query->orderByDesc( $model->qualifyColumn( 'avg_rating' ) ),
+            default  => $query->orderBy( $model->qualifyColumn( 'position' ) ),
+        };
+
+        return $query->orderBy( $model->getQualifiedKeyName() );
     }
 
     /**

@@ -30,6 +30,7 @@ declare( strict_types=1 );
 
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ActivityLogController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CartController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CatalogController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CheckoutController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ConfigCatalogController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CouponController;
@@ -98,6 +99,10 @@ Route::middleware( 'ecommerce.rate-limit:ecommerce.catalog.read' )->group( funct
     Route::get( 'products/{product}/variants', [ ProductController::class, 'variants' ] )->whereNumber( 'product' )->name( 'products.variants' );
     Route::get( 'products/{product}/reviews', [ ProductReviewController::class, 'index' ] )->whereNumber( 'product' )->name( 'products.reviews.index' );
     Route::get( 'search', [ SearchController::class, 'index' ] )->name( 'search' );
+    Route::get( 'categories', [ CatalogController::class, 'categories' ] )->name( 'categories.index' );
+    Route::get( 'categories/{category}', [ CatalogController::class, 'category' ] )->where( 'category', '[A-Za-z0-9_-]+' )->name( 'categories.show' );
+    Route::get( 'categories/{category}/products', [ CatalogController::class, 'categoryProducts' ] )->where( 'category', '[A-Za-z0-9_-]+' )->name( 'categories.products' );
+    Route::get( 'tags', [ CatalogController::class, 'tags' ] )->name( 'tags.index' );
 } );
 
 // Reviews (engine spec §9.1): signed-in customers or, when allowed, guests.

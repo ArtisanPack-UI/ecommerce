@@ -46,6 +46,8 @@ return new class extends Migration {
             $table->string( 'dim_unit', 20 )->nullable(); // mm|cm|in
             $table->decimal( 'avg_rating', 3, 2 )->default( 0 );
             $table->unsignedInteger( 'reviews_count' )->default( 0 );
+            $table->boolean( 'is_featured' )->default( false );
+            $table->unsignedInteger( 'position' )->default( 0 ); // manual catalog order
             $table->unsignedBigInteger( 'warehouse_id' )->nullable();
             $table->json( 'meta' )->nullable();
             $table->timestamp( 'published_at' )->nullable();
@@ -54,6 +56,8 @@ return new class extends Migration {
             $table->index( 'type', 'ecommerce_products_type_idx' );
             $table->index( 'status', 'ecommerce_products_status_idx' );
             $table->index( 'published_at', 'ecommerce_products_published_idx' );
+            $table->index( [ 'status', 'is_featured' ], 'ecommerce_products_featured_idx' );
+            $table->index( 'avg_rating', 'ecommerce_products_rating_idx' );
         } );
     }
 

@@ -19,8 +19,11 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Catalog\CatalogQuery;
 use ArtisanPackUI\Ecommerce\Http\Resources\ProductResource;
 use ArtisanPackUI\Ecommerce\Http\Resources\ProductVariantResource;
+use ArtisanPackUI\Ecommerce\Http\Support\ListQuery;
+use ArtisanPackUI\Ecommerce\Http\Support\Problem;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use Closure;
@@ -38,6 +41,37 @@ use Illuminate\Support\Carbon;
 class ProductController extends ApiController
 {
     /**
+     * Filters handled by {@see CatalogQuery}.
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    public const CATALOG_FILTERS = [ 'search', 'category', 'descendants', 'tag', 'price_min', 'price_max', 'in_stock', 'on_sale', 'featured', 'min_rating', 'ids' ];
+
+    /**
+     * Sorts computed by {@see CatalogQuery} (page-paginated).
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    public const COMPUTED_SORTS = [ 'price', '-price', 'popularity', 'relevance', 'newest' ];
+
+    /**
+     * Storefront products through {@see CatalogQuery}.
+     *
+     * Filters (`filter[...]`): `type`, `sku`, `slug`, `search`, `category`
+     * (id or slug; `descendants=0` for that category only), `tag`,
+     * `price_min` / `price_max` (minor units of `currency`), `in_stock`,
+     * `on_sale`, `featured`, `min_rating`, `ids`; attribute values as
+     * `attributes[key]=value1,value2`. `q` is the same as `filter[search]`.
+     *
+     * Sorts: `name`, `created_at`, `position` (default), `rating` —
+     * cursor-paginated; `price`, `-price`, `popularity`, `relevance`, and
+     * `newest` are computed and page-paginated (`page`). `facets=1` adds
+     * `meta.facets` ({@see CatalogQuery::facets()}).
+     *
      * @since 1.0.0
      *
      * @param  Request  $request  Request.
@@ -47,22 +81,55 @@ class ProductController extends ApiController
     #[ApiOperation( summary: 'List storefront products', resource: ProductResource::class, collection: true )]
     public function index( Request $request ): JsonResponse
     {
-        return $this->listResponse(
-            $this->visible(),
-            $request,
-            ProductResource::class,
-            [
-                'type'   => 'type',
-                'sku'    => 'sku',
-                'slug'   => 'slug',
-                'search' => static fn ( Builder $query, string $term ) => $query->whereRaw(
-                    "name LIKE ? ESCAPE '!'",
-                    [ '%' . str_replace( [ '!', '%', '_' ], [ '!!', '!%', '!_' ], $term ) . '%' ],
-                ),
-            ],
-            [ 'name' => 'name', 'created_at' => 'created_at' ],
-            $this->includes(),
+        $filters  = $request->query( 'filter', [] );
+        $filters  = is_array( $filters ) ? $filters : [];
+        $sort     = is_string( $request->query( 'sort' ) ) ? (string) $request->query( 'sort' ) : '';
+        $computed = in_array( $sort, self::COMPUTED_SORTS, true );
+        $currency = $request->query( 'currency' );
+
+        $catalogFilters = array_intersect_key( $filters, array_flip( self::CATALOG_FILTERS ) );
+
+        if ( is_string( $request->query( 'q' ) ) && '' !== trim( (string) $request->query( 'q' ) ) ) {
+            $catalogFilters['search'] = (string) $request->query( 'q' );
+        }
+
+        $catalogFilters['attributes'] = is_array( $request->query( 'attributes' ) ) ? $request->query( 'attributes' ) : [];
+
+        if ( null !== $currency && ( ! is_string( $currency ) || 1 !== preg_match( '/^[A-Za-z]{3}$/', $currency ) ) ) {
+            return Problem::make( 400, 'invalid-parameter', __( 'Invalid parameter' ), __( 'currency must be a three-letter ISO 4217 code.' ), $request, [
+                [ 'field' => 'currency', 'code' => 'invalid', 'message' => __( 'currency must be a three-letter ISO 4217 code.' ) ],
+            ] );
+        }
+
+        $catalog = app( CatalogQuery::class )->fromParameters( $catalogFilters, $computed ? $sort : null, is_string( $currency ) ? $currency : null );
+        $query   = $catalog->builder( $computed );
+
+        $query->with( ListQuery::includes( $request, $this->includes() ) );
+
+        // Validates every filter (catalog ones are already applied) and, for
+        // column sorts, orders the query.
+        $listRequest = $computed ? $request->duplicate( array_diff_key( $request->query->all(), [ 'sort' => true ] ) ) : $request;
+        $passThrough = static fn (): null => null;
+
+        ListQuery::apply(
+            $query,
+            $listRequest,
+            [ 'type' => 'type', 'sku' => 'sku', 'slug' => 'slug', ...array_fill_keys( self::CATALOG_FILTERS, $passThrough ) ],
+            [ 'name' => 'name', 'created_at' => 'created_at', 'position' => 'position', 'rating' => 'avg_rating' ],
+            $computed ? '-id' : 'position',
         );
+
+        $perPage   = min( max( 1, (int) config( 'artisanpack.ecommerce.api.max_per_page', 100 ) ), max( 1, (int) $request->query( 'per_page', (string) config( 'artisanpack.ecommerce.api.default_per_page', 25 ) ) ) );
+        $paginator = $computed ? $query->paginate( $perPage )->withQueryString() : ListQuery::paginate( $query, $request );
+        $payload   = ProductResource::collection( $paginator )->response( $request )->getData( true );
+
+        $payload['data'] = (array) applyFilters( 'ap.ecommerce.api.list.' . ProductResource::NAME, $payload['data'], $query, $request );
+
+        if ( in_array( (string) $request->query( 'facets' ), [ '1', 'true' ], true ) ) {
+            $payload['meta']['facets'] = $catalog->facets();
+        }
+
+        return new JsonResponse( $payload );
     }
 
     /**
@@ -112,6 +179,16 @@ class ProductController extends ApiController
      *
      * @return array<string, array{0: string, 1: Closure}|string>
      */
+    public function publicIncludes(): array
+    {
+        return $this->includes();
+    }
+
+    /**
+     * @since 1.0.0
+     *
+     * @return array<string, array{0: string, 1: Closure}|string>
+     */
     protected function includes(): array
     {
         $current = static fn ( $query ) => $query->currentAt( Carbon::now() );
@@ -122,6 +199,9 @@ class ProductController extends ApiController
             'prices'            => [ 'prices', $current ],
             'attributes'        => 'productAttributes',
             'attributes.values' => 'productAttributes.values',
+            'images'            => 'images',
+            'categories'        => 'categories',
+            'tags'              => 'tags',
         ];
     }
 

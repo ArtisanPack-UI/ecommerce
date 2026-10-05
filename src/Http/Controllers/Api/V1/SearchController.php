@@ -22,6 +22,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
 use ArtisanPackUI\Ecommerce\Http\Resources\ProductResource;
+use ArtisanPackUI\Ecommerce\Http\Support\ListQuery;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
@@ -77,9 +78,12 @@ class SearchController extends ApiController
 
         // `status` is filtered by the engine; `query()` then drops anything
         // scheduled for later publication.
+        // Same includes as `GET products` (current prices only).
+        $with = ListQuery::includes( $request, app( ProductController::class )->publicIncludes() );
+
         $paginator = Product::search( $term )
             ->where( 'status', 'active' )
-            ->query( static fn ( $query ) => $query->storefrontVisible() )
+            ->query( static fn ( $query ) => $query->storefrontVisible()->with( $with ) )
             ->paginate( $perPage, 'page', $page );
 
         $payload         = ProductResource::collection( $paginator )->response( $request )->getData( true );
