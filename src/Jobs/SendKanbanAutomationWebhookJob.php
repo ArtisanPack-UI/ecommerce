@@ -78,6 +78,8 @@ class SendKanbanAutomationWebhookJob implements ShouldBeEncrypted, ShouldQueue
     ) {
         $this->onConnection( config( 'artisanpack.ecommerce.webhooks.connection' ) );
         $this->onQueue( config( 'artisanpack.ecommerce.webhooks.queue' ) );
+        // Only once the card move that triggered it has committed.
+        $this->afterCommit();
     }
 
     /**

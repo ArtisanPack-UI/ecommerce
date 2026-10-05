@@ -442,6 +442,7 @@ final class ResourceSchemas
             'Refund' => self::schema( Resources\RefundResource::class, Models\Refund::class, 'A refund issued against an order.', [
                 'order_id'          => 'Int!',
                 'amount'            => 'Money!',
+                'status'            => 'String!',
                 'reason'            => 'String',
                 'gateway_reference' => 'String',
                 'issued_by_user_id' => 'Int',
@@ -451,11 +452,13 @@ final class ResourceSchemas
             ] ),
 
             'RefundItem' => self::schema( Resources\RefundItemResource::class, Models\RefundItem::class, 'A per-line allocation of a refund.', [
-                'refund_id'     => 'Int!',
-                'order_item_id' => 'Int!',
-                'quantity'      => 'Int!',
-                'amount'        => 'Money!',
-                'restock'       => 'Boolean',
+                'refund_id'       => 'Int!',
+                'order_item_id'   => 'Int!',
+                'quantity'        => 'Int!',
+                'amount'          => 'Money!',
+                'tax_amount'      => 'Money!',
+                'shipping_amount' => 'Money!',
+                'restock'         => 'Boolean',
             ] ),
 
             'InventoryItem' => self::schema( Resources\InventoryItemResource::class, Models\InventoryItem::class, 'Stock levels for a product or variant.', [

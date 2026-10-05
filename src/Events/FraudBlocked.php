@@ -22,6 +22,7 @@ namespace ArtisanPackUI\Ecommerce\Events;
 
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\ValueObjects\FraudDecision;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 
 /**
  * @package    ArtisanPack_UI
@@ -29,7 +30,7 @@ use ArtisanPackUI\Ecommerce\ValueObjects\FraudDecision;
  *
  * @since      1.0.0
  */
-class FraudBlocked
+class FraudBlocked implements ShouldDispatchAfterCommit
 {
     /**
      * @since 1.0.0

@@ -31,6 +31,10 @@ return new class extends Migration {
             $table->unsignedBigInteger( 'order_item_id' );
             $table->unsignedInteger( 'quantity' );
             $table->bigInteger( 'amount' );
+            // The tax and shipping parts of `amount`, apportioned from the
+            // order line, so reports can split a refund (audit C8).
+            $table->bigInteger( 'tax_amount' )->default( 0 );
+            $table->bigInteger( 'shipping_amount' )->default( 0 );
             $table->char( 'currency', 3 );
             $table->boolean( 'restock' )->default( false );
 

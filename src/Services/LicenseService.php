@@ -39,6 +39,7 @@ use ArtisanPackUI\Ecommerce\Models\LicenseActivation;
 use ArtisanPackUI\Ecommerce\Models\LicenseKey;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
+use ArtisanPackUI\Ecommerce\Support\AfterCommit;
 use DateTimeInterface;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -86,7 +87,7 @@ class LicenseService
             'meta'              => [],
         ] );
 
-        doAction( 'ap.ecommerce.license.issued', $key, $item );
+        AfterCommit::action( 'ap.ecommerce.license.issued', $key, $item );
         Event::dispatch( new LicenseIssued( $key, $item ) );
 
         return $key;
@@ -189,7 +190,7 @@ class LicenseService
         } );
 
         if ( $activation instanceof LicenseActivation ) {
-            doAction( 'ap.ecommerce.license.activated', $activation );
+            AfterCommit::action( 'ap.ecommerce.license.activated', $activation );
             Event::dispatch( new LicenseActivated( $activation ) );
         }
 
@@ -265,7 +266,7 @@ class LicenseService
 
         $license->forceFill( [ 'is_revoked' => true, 'revoked_at' => now(), 'meta' => $meta ] )->save();
 
-        doAction( 'ap.ecommerce.license.revoked', $license, $reason );
+        AfterCommit::action( 'ap.ecommerce.license.revoked', $license, $reason );
         Event::dispatch( new LicenseRevoked( $license, $reason ) );
 
         return $license;

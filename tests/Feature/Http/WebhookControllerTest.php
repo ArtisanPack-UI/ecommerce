@@ -267,6 +267,11 @@ final class WebhookControllerTest extends TestCase
                 throw new LogicException( 'not used' );
             }
 
+            public function retrievePaymentSession( string $reference ): PaymentSession
+            {
+                throw new LogicException( 'not used' );
+            }
+
             public function capturePayment( Order $order, PaymentSession $session ): PaymentResult
             {
                 throw new LogicException( 'not used' );
@@ -276,7 +281,7 @@ final class WebhookControllerTest extends TestCase
             {
             }
 
-            public function refund( Order $order, Money $amount, ?string $reason = null ): RefundResult
+            public function refund( Order $order, Money $amount, ?string $reason = null, array $context = [] ): RefundResult
             {
                 throw new LogicException( 'not used' );
             }

@@ -104,7 +104,8 @@ class NotificationDispatcher
                 continue;
             }
 
-            $notification = new EcommerceNotification( $templateKey, $definition->channel(), $variables );
+            // Queued only once the change it reports has committed.
+            $notification = ( new EcommerceNotification( $templateKey, $definition->channel(), $variables ) )->afterCommit();
 
             if ( null !== $delay ) {
                 $notification->delay( $delay );

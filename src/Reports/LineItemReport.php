@@ -28,6 +28,7 @@ namespace ArtisanPackUI\Ecommerce\Reports;
 
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
+use ArtisanPackUI\Ecommerce\Models\Refund;
 use ArtisanPackUI\Ecommerce\Models\RefundItem;
 use Closure;
 use Illuminate\Support\Facades\DB;
@@ -53,12 +54,16 @@ abstract class LineItemReport extends Report
      */
     protected function eachSoldLine( ReportRange $range, BaseAmounts $amounts, Closure $callback ): void
     {
-        $items   = ( new OrderItem() )->getTable();
-        $orders  = ( new Order() )->getTable();
-        $refunds = RefundItem::query()
+        $items       = ( new OrderItem() )->getTable();
+        $orders      = ( new Order() )->getTable();
+        $refundItems = ( new RefundItem() )->getTable();
+        $refundRows  = ( new Refund() )->getTable();
+        $refunds     = RefundItem::query()
             ->toBase()
-            ->select( 'order_item_id', DB::raw( 'SUM(quantity) as refunded_quantity' ), DB::raw( 'SUM(amount) as refunded_amount' ) )
-            ->groupBy( 'order_item_id' );
+            ->join( $refundRows, "{$refundRows}.id", '=', "{$refundItems}.refund_id" )
+            ->where( "{$refundRows}.status", Refund::STATUS_SUCCEEDED )
+            ->select( "{$refundItems}.order_item_id", DB::raw( "SUM({$refundItems}.quantity) as refunded_quantity" ), DB::raw( "SUM({$refundItems}.amount) as refunded_amount" ) )
+            ->groupBy( "{$refundItems}.order_item_id" );
 
         OrderItem::query()
             ->toBase()

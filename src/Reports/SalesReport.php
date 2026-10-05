@@ -136,6 +136,7 @@ class SalesReport extends Report
             ->join( $orders, "{$orders}.id", '=', "{$refunds}.order_id" )
             ->select( [ "{$refunds}.id", "{$refunds}.amount", "{$refunds}.currency", "{$refunds}.created_at", "{$refunds}.order_id", "{$orders}.base_currency", "{$orders}.fx_rate_to_base_e8" ] )
             ->whereBetween( "{$refunds}.created_at", $bounds )
+            ->where( "{$refunds}.status", Refund::STATUS_SUCCEEDED )
             ->lazyById( 1000, "{$refunds}.id", 'id' )
             ->each( function ( object $refund ) use ( $range, $amounts, &$series ): void {
                 $bucket = $range->bucketKey( (string) $refund->created_at );

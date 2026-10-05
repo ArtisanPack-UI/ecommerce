@@ -41,6 +41,7 @@ use ArtisanPackUI\Ecommerce\Models\KanbanColumn;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderBoardAssignment;
 use ArtisanPackUI\Ecommerce\Models\OrderSubstatus;
+use ArtisanPackUI\Ecommerce\Support\AfterCommit;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -132,7 +133,7 @@ class KanbanBoardService
         [ $assignment, $from, $to, $board ]  = $result;
         $refreshed                           = $order->fresh() ?? $order;
 
-        doAction( 'ap.ecommerce.kanban.cardMoved', $refreshed, $from, $to, $board );
+        AfterCommit::action( 'ap.ecommerce.kanban.cardMoved', $refreshed, $from, $to, $board );
         Event::dispatch( new KanbanCardMoved( $refreshed, $from, $to, $board ) );
 
         return $assignment;

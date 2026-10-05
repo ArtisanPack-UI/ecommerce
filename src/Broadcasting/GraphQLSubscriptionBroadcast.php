@@ -23,6 +23,7 @@ namespace ArtisanPackUI\Ecommerce\Broadcasting;
 
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 
 /**
  * @package    ArtisanPack_UI
@@ -30,7 +31,7 @@ use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
  *
  * @since      1.0.0
  */
-class GraphQLSubscriptionBroadcast implements ShouldBroadcast
+class GraphQLSubscriptionBroadcast implements ShouldBroadcast, ShouldDispatchAfterCommit
 {
     /**
      * @since 1.0.0

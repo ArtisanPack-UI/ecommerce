@@ -40,6 +40,7 @@ use ArtisanPackUI\Ecommerce\Models\OrderItem;
 use ArtisanPackUI\Ecommerce\Models\OrderTimelineEntry;
 use ArtisanPackUI\Ecommerce\Models\RefundItem;
 use ArtisanPackUI\Ecommerce\Models\ShipmentItem;
+use ArtisanPackUI\Ecommerce\Support\AfterCommit;
 use ArtisanPackUI\Ecommerce\ValueObjects\OrderEditResult;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -845,7 +846,7 @@ class OrderEditService
 
         [ $paymentActionRequired, $refundDelta ] = $this->totalDelta( $preEditSnapshot, $order );
 
-        doAction( 'ap.ecommerce.order.edited', $order, $diff, $editRow );
+        AfterCommit::action( 'ap.ecommerce.order.edited', $order, $diff, $editRow );
         Event::dispatch( new OrderEdited( $order, $diff, $editRow ) );
 
         return new OrderEditResult(
@@ -878,7 +879,7 @@ class OrderEditService
         }
 
         $history = [
-            'refunds'       => RefundItem::query()->whereIn( 'order_item_id', $ids )->pluck( 'order_item_id' ),
+            'refunds'       => RefundItem::query()->whereIn( 'order_item_id', $ids )->whereHas( 'refund', static fn ( $query ) => $query->counting() )->pluck( 'order_item_id' ),
             'shipments'     => ShipmentItem::query()->whereIn( 'order_item_id', $ids )->pluck( 'order_item_id' ),
             'license keys'  => LicenseKey::query()->whereIn( 'order_item_id', $ids )->pluck( 'order_item_id' ),
             'downloads'     => DigitalDownload::query()->whereIn( 'order_item_id', $ids )->pluck( 'order_item_id' ),
@@ -916,7 +917,7 @@ class OrderEditService
      */
     protected function guardQuantity( Order $order, OrderItem $item, int $quantity ): void
     {
-        $refunded = (int) RefundItem::query()->where( 'order_item_id', $item->id )->sum( 'quantity' );
+        $refunded = (int) RefundItem::query()->where( 'order_item_id', $item->id )->whereHas( 'refund', static fn ( $query ) => $query->counting() )->sum( 'quantity' );
         $shipped  = (int) ShipmentItem::query()->where( 'order_item_id', $item->id )->sum( 'quantity' );
         $floor    = max( $refunded, $shipped );
 

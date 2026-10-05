@@ -198,10 +198,11 @@ it( 'can retry a cancel that rolled back after the void, given an idempotent gat
         ++$voided;
     } );
 
+    // A step inside the cancel transaction fails after the void.
     $fail = function (): void {
-        throw new RuntimeException( 'listener blew up' );
+        throw new RuntimeException( 'release blew up' );
     };
-    addAction( 'ap.ecommerce.order.statusChanged', $fail );
+    addAction( 'ap.ecommerce.inventory.reservationReleased', $fail );
 
     expect( fn () => $this->service->cancel( $order, 'Customer asked' ) )->toThrow( RuntimeException::class );
 
@@ -209,11 +210,28 @@ it( 'can retry a cancel that rolled back after the void, given an idempotent gat
     expect( $order->fresh()->system_status )->toBe( 'pending' )
         ->and( $order->fresh()->payment_status )->toBe( 'pending' );
 
-    removeAction( 'ap.ecommerce.order.statusChanged', $fail );
+    removeAction( 'ap.ecommerce.inventory.reservationReleased', $fail );
 
     $summary = $this->service->cancel( $order, 'Customer asked' );
 
     expect( $summary->order->system_status )->toBe( 'cancelled' )
         ->and( $summary->order->payment_status )->toBe( OrderCancellationService::PAYMENT_STATUS_VOIDED )
         ->and( $voided )->toBe( 2 );
+} );
+
+it( 'keeps a cancellation when a status listener throws after it committed', function (): void {
+    [ $order ] = cancellableOrderWithReservation( 1, [ 'payment_status' => 'pending' ] );
+    $this->gateway->shouldReceive( 'voidPendingPayment' )->once();
+
+    $fail = function (): void {
+        throw new RuntimeException( 'listener blew up' );
+    };
+    addAction( 'ap.ecommerce.order.statusChanged', $fail );
+
+    $summary = $this->service->cancel( $order, 'Customer asked' );
+
+    removeAction( 'ap.ecommerce.order.statusChanged', $fail );
+
+    expect( $summary->order->system_status )->toBe( 'cancelled' )
+        ->and( $order->fresh()->system_status )->toBe( 'cancelled' );
 } );

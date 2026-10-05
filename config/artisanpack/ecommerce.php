@@ -345,12 +345,19 @@ return [
     |   - `publishable_key` — Publishable key surfaced to the storefront so
     |                         Stripe Elements can initialize.
     |   - `webhook_secret`  — Endpoint secret (`whsec_…`) used to verify
-    |                         inbound webhook signatures.
+    |                         inbound webhook signatures. Several secrets,
+    |                         comma-separated, are all accepted, so a secret
+    |                         can be rotated without dropping deliveries.
     |   - `api_version`     — Optional pinned Stripe API version.
     |   - `capture_method`  — `automatic` (default), `manual`, or
     |                         `automatic_async`. `manual` uses the classic
-    |                         auth/capture split for orders that need a
-    |                         review step before capture.
+    |                         auth/capture split: the money is only held
+    |                         when the shopper confirms, so the fraud check
+    |                         at finalize runs before anything is captured.
+    |                         With `automatic` the shopper's confirmation
+    |                         captures, and a blocked payment is refunded.
+    |   - `appearance`      — Stripe Elements appearance options passed to
+    |                         storefronts through the client config.
     |   - `webhook_route`   — Path (relative to app root) where the
     |                         `POST` webhook endpoint is registered.
     |
@@ -365,6 +372,7 @@ return [
             'api_version'     => env( 'ECOMMERCE_STRIPE_API_VERSION' ),
             'capture_method'  => env( 'ECOMMERCE_STRIPE_CAPTURE_METHOD', 'automatic' ),
             'webhook_route'   => env( 'ECOMMERCE_STRIPE_WEBHOOK_ROUTE', 'ecommerce/webhooks/stripe' ),
+            'appearance'      => [],
         ],
     ],
 
@@ -383,10 +391,32 @@ return [
     | because silently skipping fraud assessment is exactly the failure
     | mode this contract exists to prevent.
     |
+    | `fail_open` — When a provider can't reach its service (or, for
+    | Stripe Radar, the payment has no charge to read yet), approve anyway
+    | (`true`) or hold the payment for review (`false`, the default). Held
+    | payments stay authorized on a pending order until an admin approves
+    | or cancels them.
+    |
     */
 
     'fraud' => [
-        'provider' => env( 'ECOMMERCE_FRAUD_PROVIDER', 'always-approve' ),
+        'provider'  => env( 'ECOMMERCE_FRAUD_PROVIDER', 'always-approve' ),
+        'fail_open' => (bool) env( 'ECOMMERCE_FRAUD_FAIL_OPEN', false ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Store
+    |--------------------------------------------------------------------------
+    |
+    | `country` — ISO 3166-1 alpha-2 country the store trades from. Used
+    | where an order or cart has no address of its own (an all-digital
+    | order's fraud assessment, for example).
+    |
+    */
+
+    'store' => [
+        'country' => strtoupper( (string) env( 'ECOMMERCE_STORE_COUNTRY', 'US' ) ),
     ],
 
     /*

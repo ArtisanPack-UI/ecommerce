@@ -17,10 +17,14 @@
  *
  * Sessions that were not created through the Stripe gateway are approved
  * with a `not_applicable` reason — Radar has nothing to say about a
- * PayPal or Braintree authorization. Transient Stripe API failures also
- * approve rather than throw, per the contract's fail-open guidance, but
- * they set the `provider_error` reason so downstream policy (§8.4) can
- * decide to escalate.
+ * PayPal or Braintree authorization.
+ *
+ * Radar scores a charge, and a PaymentIntent only has one once the shopper
+ * has confirmed it. A session with no charge yet is therefore challenged
+ * (`no_charge`), not approved: checkout finalizes the confirmed session,
+ * which does have one. When Stripe can't be reached the result follows
+ * `artisanpack.ecommerce.fraud.fail_open`: approve with a `provider_error`
+ * reason when true, otherwise challenge, which holds the payment for review.
  *
  * Engine plan §6.1 + §8.4.
  *
@@ -137,8 +141,12 @@ class StripeRadarFraudProvider implements FraudProvider
                 [ 'expand' => [ 'latest_charge' ] ],
             );
         } catch ( Throwable $e ) {
+            $failOpen = (bool) config( 'artisanpack.ecommerce.fraud.fail_open', false );
+
             Log::channel( 'ecommerce' )->warning(
-                'Stripe Radar assessment failed; approving with provider_error reason.',
+                $failOpen
+                    ? 'Stripe Radar assessment failed; approving (fraud.fail_open) with provider_error reason.'
+                    : 'Stripe Radar assessment failed; holding the payment for review.',
                 [
                     'session_reference' => $session->reference,
                     'exception'         => $e::class,
@@ -146,13 +154,16 @@ class StripeRadarFraudProvider implements FraudProvider
                 ],
             );
 
-            return FraudDecision::approve( 0, [ 'provider_error' ] );
+            return $failOpen
+                ? FraudDecision::approve( 0, [ 'provider_error' ] )
+                : FraudDecision::challenge( 0, [ 'provider_error' ] );
         }
 
         $charge = $intent->latest_charge ?? null;
 
+        // Nothing to score until the shopper confirms the payment.
         if ( ! is_object( $charge ) ) {
-            return FraudDecision::approve( 0, [ 'no_charge' ], $session->reference );
+            return FraudDecision::challenge( 0, [ 'no_charge' ], $session->reference );
         }
 
         $outcome   = $charge->outcome ?? null;

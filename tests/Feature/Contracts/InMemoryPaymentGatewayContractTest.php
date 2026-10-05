@@ -33,6 +33,13 @@ final class InMemoryPaymentGateway implements PaymentGateway
      */
     public static array $authorizations = [];
 
+    /**
+     * Sessions created so far, by reference.
+     *
+     * @var array<string, PaymentSession>
+     */
+    public static array $sessions = [];
+
     public function key(): string
     {
         return 'in-memory';
@@ -60,11 +67,17 @@ final class InMemoryPaymentGateway implements PaymentGateway
 
     public function createPaymentSession( Cart $cart, array $context = [] ): PaymentSession
     {
-        return new PaymentSession(
+        return self::$sessions[ 'ps_' . ( $cart->getKey() ?? 'new' ) ] = new PaymentSession(
             gatewayKey: $this->key(),
             reference: 'ps_' . ( $cart->getKey() ?? 'new' ),
-            amount: Money::USD( 0 ),
+            amount: Money::USD( (int) ( $cart->total_amount ?? 0 ) ),
+            status: PaymentSession::STATUS_REQUIRES_PAYMENT_METHOD,
         );
+    }
+
+    public function retrievePaymentSession( string $reference ): PaymentSession
+    {
+        return self::$sessions[ $reference ] ?? throw new RuntimeException( "No session {$reference}." );
     }
 
     public function capturePayment( Order $order, PaymentSession $session ): PaymentResult
@@ -87,7 +100,7 @@ final class InMemoryPaymentGateway implements PaymentGateway
         };
     }
 
-    public function refund( Order $order, Money $amount, ?string $reason = null ): RefundResult
+    public function refund( Order $order, Money $amount, ?string $reason = null, array $context = [] ): RefundResult
     {
         if ( $amount->getCurrency()->getCode() !== $order->currency ) {
             throw new PaymentCurrencyMismatchException( $order->currency, $amount->getCurrency()->getCode() );
@@ -128,6 +141,11 @@ final class InMemoryPaymentGatewayContractTest extends PaymentGatewayContractTes
     protected function gateway(): PaymentGateway
     {
         return new InMemoryPaymentGateway();
+    }
+
+    protected function existingPaymentSession(): PaymentSession
+    {
+        return $this->gateway()->createPaymentSession( Cart::factory()->create( [ 'total_amount' => 2_500 ] ) );
     }
 
     protected function makeOrder( string $currency = 'USD', int $capturedAmount = 10_000 ): Order

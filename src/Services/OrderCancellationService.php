@@ -34,6 +34,7 @@ use ArtisanPackUI\Ecommerce\Models\InventoryReservation;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderTimelineEntry;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
+use ArtisanPackUI\Ecommerce\Support\AfterCommit;
 use ArtisanPackUI\Ecommerce\ValueObjects\OrderCancellationSummary;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -200,7 +201,7 @@ class OrderCancellationService
             return new OrderCancellationSummary( $cancelled, true, null, $released, null !== $gateway, $owed, (string) $cancelled->currency );
         } );
 
-        doAction( 'ap.ecommerce.order.cancelled', $summary->order );
+        AfterCommit::action( 'ap.ecommerce.order.cancelled', $summary->order );
         Event::dispatch( new OrderCancelled( $summary->order, $reason ) );
 
         return $summary;

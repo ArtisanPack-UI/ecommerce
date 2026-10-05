@@ -22,6 +22,7 @@ namespace ArtisanPackUI\Ecommerce\Events;
 
 use ArtisanPackUI\Ecommerce\Models\DigitalDownload;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 
 /**
  * @package    ArtisanPack_UI
@@ -29,7 +30,7 @@ use ArtisanPackUI\Ecommerce\Models\OrderItem;
  *
  * @since      1.0.0
  */
-class DigitalDownloadTokenIssued
+class DigitalDownloadTokenIssued implements ShouldDispatchAfterCommit
 {
     /**
      * @since 1.0.0

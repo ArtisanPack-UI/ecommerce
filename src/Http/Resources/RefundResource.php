@@ -49,6 +49,7 @@ class RefundResource extends EcommerceResource
         return [
             'order_id'          => $this->resource->order_id,
             'amount'            => $this->money( 'amount', 'currency' ),
+            'status'            => $this->resource->status,
             'reason'            => $this->resource->reason,
             'gateway_reference' => $this->resource->gateway_reference,
             'issued_by_user_id' => $this->resource->issued_by_user_id,

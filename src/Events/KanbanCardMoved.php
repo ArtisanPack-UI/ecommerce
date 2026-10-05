@@ -23,6 +23,7 @@ namespace ArtisanPackUI\Ecommerce\Events;
 use ArtisanPackUI\Ecommerce\Models\KanbanBoard;
 use ArtisanPackUI\Ecommerce\Models\KanbanColumn;
 use ArtisanPackUI\Ecommerce\Models\Order;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 
 /**
  * @package    ArtisanPack_UI
@@ -30,7 +31,7 @@ use ArtisanPackUI\Ecommerce\Models\Order;
  *
  * @since      1.0.0
  */
-class KanbanCardMoved
+class KanbanCardMoved implements ShouldDispatchAfterCommit
 {
     /**
      * @since 1.0.0

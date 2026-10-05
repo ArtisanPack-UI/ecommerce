@@ -25,6 +25,10 @@
  *    authorization that is already voided as a successful no-op, so a
  *    cancel that rolled back after its void can be retried (engine issue
  *    #154).
+ * 6. **Sessions can be retrieved.** `retrievePaymentSession()` MUST report
+ *    an existing session's reference and amount with a normalized status,
+ *    so checkout finalizes the session the shopper confirmed instead of
+ *    creating (and charging) a new one.
  *
  * Engine spec §4.2, parent plan §15.2.
  *
@@ -250,6 +254,24 @@ abstract class PaymentGatewayContractTest extends TestCase
     }
 
     /**
+     * Retrieving an existing session MUST report the same reference and
+     * amount, and a status from {@see PaymentSession::STATUSES}.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function test_retrieve_payment_session_reports_the_existing_session(): void
+    {
+        $existing  = $this->existingPaymentSession();
+        $retrieved = $this->gateway()->retrievePaymentSession( $existing->reference );
+
+        $this->assertSame( $existing->reference, $retrieved->reference, 'The retrieved session must be the one asked for.' );
+        $this->assertTrue( $existing->amount->equals( $retrieved->amount ), 'The retrieved session must report the amount it was created for.' );
+        $this->assertContains( $retrieved->status, PaymentSession::STATUSES, 'retrievePaymentSession() must report a normalized PaymentSession::STATUS_* value.' );
+    }
+
+    /**
      * The gateway under test.
      *
      * @since 1.0.0
@@ -329,6 +351,17 @@ abstract class PaymentGatewayContractTest extends TestCase
      * @return Order
      */
     abstract protected function makePendingAuthorizationOrder(): Order;
+
+    /**
+     * A session that exists at the gateway under test (typically one just
+     * created through `createPaymentSession()` against a stub client or
+     * sandbox), used to check {@see PaymentGateway::retrievePaymentSession()}.
+     *
+     * @since 1.0.0
+     *
+     * @return PaymentSession
+     */
+    abstract protected function existingPaymentSession(): PaymentSession;
 
     /**
      * Whether the gateway under test supports refunds. Defaults to `true`;

@@ -21,6 +21,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Events;
 
 use ArtisanPackUI\Ecommerce\Models\OrderBoardAssignment;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 
 /**
  * @package    ArtisanPack_UI
@@ -28,7 +29,7 @@ use ArtisanPackUI\Ecommerce\Models\OrderBoardAssignment;
  *
  * @since      1.0.0
  */
-class KanbanBoardAssignmentAdded
+class KanbanBoardAssignmentAdded implements ShouldDispatchAfterCommit
 {
     /**
      * @since 1.0.0

@@ -21,6 +21,7 @@ namespace ArtisanPackUI\Ecommerce\Events;
 
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderEdit;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 
 /**
  * @package    ArtisanPack_UI
@@ -28,7 +29,7 @@ use ArtisanPackUI\Ecommerce\Models\OrderEdit;
  *
  * @since      1.0.0
  */
-class OrderEdited
+class OrderEdited implements ShouldDispatchAfterCommit
 {
     /**
      * @since 1.0.0

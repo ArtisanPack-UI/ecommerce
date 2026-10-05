@@ -116,6 +116,33 @@ interface PaymentGateway
     public function createPaymentSession( Cart $cart, array $context = [] ): PaymentSession;
 
     /**
+     * Loads an existing provider session by its reference, so checkout can
+     * finalize (or resume after a step-up) the session the shopper
+     * confirmed instead of creating a new one. The two-phase flow is:
+     *
+     * 1. {@see self::createPaymentSession()} when the shopper reaches the
+     *    payment step (the engine stores the reference on the cart);
+     * 2. the shopper confirms it client-side (Stripe Payment Element, a
+     *    PayPal approval, ...), which may include a 3DS challenge;
+     * 3. finalize calls this method, checks `$status`, the amount, and the
+     *    currency, and captures that same session.
+     *
+     * The returned session MUST carry the provider's current amount (in the
+     * currency it was created in) and a normalized `$status`
+     * ({@see PaymentSession::STATUS_REQUIRES_ACTION}, `authorized`,
+     * `succeeded`, ...). It MUST NOT create, confirm, or capture anything.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $reference  {@see PaymentSession::$reference} from createPaymentSession().
+     *
+     * @throws Throwable When the provider can't be reached or has no such session.
+     *
+     * @return PaymentSession
+     */
+    public function retrievePaymentSession( string $reference ): PaymentSession;
+
+    /**
      * Captures a previously-authorized payment identified by `$session`.
      *
      * Implementations MUST be idempotent — a second capture call for the
@@ -181,15 +208,24 @@ interface PaymentGateway
      *
      * @since 1.0.0
      *
-     * @param  Order        $order    The order the refund is being issued against.
-     * @param  Money        $amount   Amount to refund, in the order's payment currency.
-     * @param  string|null  $reason   Optional free-text reason forwarded to the provider.
+     * `$context` carries:
+     * - `idempotency_key` (string) — stable per refund attempt (the engine
+     *   passes the id of the pending refund row it wrote), so a retry never
+     *   refunds twice; forward it to the provider's idempotency mechanism.
+     * - `refund_id` (int) — the engine's refund row, worth copying into the
+     *   provider refund's metadata so webhooks can be matched back.
+     * @since 1.0.0
+     *
+     * @param  Order                 $order    The order the refund is being issued against.
+     * @param  Money                 $amount   Amount to refund, in the order's payment currency.
+     * @param  string|null           $reason   Optional free-text reason forwarded to the provider.
+     * @param  array<string, mixed>  $context  See above.
      *
      * @throws PaymentCurrencyMismatchException When `$amount` is not in `$order->currency`.
      *
      * @return RefundResult
      */
-    public function refund( Order $order, Money $amount, ?string $reason = null ): RefundResult;
+    public function refund( Order $order, Money $amount, ?string $reason = null, array $context = [] ): RefundResult;
 
     /**
      * Handles a signed inbound provider webhook.
@@ -199,6 +235,12 @@ interface PaymentGateway
      * that does not verify MUST return {@see WebhookResult::unverified()}
      * so the controller layer responds `400` without dispatching any
      * downstream events.
+     *
+     * For events about a payment, a verified result SHOULD also carry the
+     * normalized `outcome` (`succeeded`, `failed`, `requires_action`,
+     * `refunded`) and the session reference it concerns: the engine then
+     * finalizes or fails the matching checkout, so a shopper who closes the
+     * tab after paying still gets their order.
      *
      * @since 1.0.0
      *

@@ -51,6 +51,7 @@ use Money\Money;
  * @property string|null                                                    $reason
  * @property string|null                                                    $gateway_reference
  * @property int|null                                                       $issued_by_user_id
+ * @property string                                                         $status
  * @property Carbon|null                                                    $created_at
  * @property Carbon|null                                                    $updated_at
  * @property Order                                                          $order
@@ -59,6 +60,33 @@ use Money\Money;
 class Refund extends Model
 {
     use HasFactory;
+
+    /**
+     * Written before the gateway is called; not yet money moved.
+     *
+     * @since 1.0.0
+     *
+     * @var string
+     */
+    public const STATUS_PENDING = 'pending';
+
+    /**
+     * The gateway refunded it.
+     *
+     * @since 1.0.0
+     *
+     * @var string
+     */
+    public const STATUS_SUCCEEDED = 'succeeded';
+
+    /**
+     * The gateway declined or errored; no money moved.
+     *
+     * @since 1.0.0
+     *
+     * @var string
+     */
+    public const STATUS_FAILED = 'failed';
 
     /**
      * @since 1.0.0
@@ -79,6 +107,7 @@ class Refund extends Model
         'reason',
         'gateway_reference',
         'issued_by_user_id',
+        'status',
     ];
 
     /**
@@ -103,6 +132,75 @@ class Refund extends Model
     public function items(): HasMany
     {
         return $this->hasMany( RefundItem::class );
+    }
+
+    /**
+     * Settles a pending refund once the gateway answered — the one change a
+     * refund row allows. Only `status` (and, on success, the provider's
+     * `gateway_reference`) are written, and only while the row is still
+     * pending, so a settled refund can never be changed back.
+     *
+     * @since 1.0.0
+     *
+     * @param  string       $status             {@see self::STATUS_SUCCEEDED} or {@see self::STATUS_FAILED}.
+     * @param  string|null  $gatewayReference   The provider's refund id.
+     *
+     * @throws LogicException When the status is not a settled one or the row is no longer pending.
+     *
+     * @return void
+     */
+    public function settle( string $status, ?string $gatewayReference = null ): void
+    {
+        if ( ! in_array( $status, [ self::STATUS_SUCCEEDED, self::STATUS_FAILED ], true ) ) {
+            throw new LogicException( sprintf( 'A refund settles as succeeded or failed, not "%s".', $status ) );
+        }
+
+        $values = [ 'status' => $status, 'updated_at' => Carbon::now() ];
+
+        if ( null !== $gatewayReference ) {
+            $values['gateway_reference'] = $gatewayReference;
+        }
+
+        // The base query builder, not the append-only Eloquent one.
+        $updated = static::query()->toBase()
+            ->where( 'id', $this->getKey() )
+            ->where( 'status', self::STATUS_PENDING )
+            ->update( $values );
+
+        if ( 1 !== $updated ) {
+            throw new LogicException( sprintf( 'Refund %d is not pending and cannot be settled again.', $this->getKey() ) );
+        }
+
+        $this->forceFill( $values )->syncOriginal();
+    }
+
+    /**
+     * Scope: refunds that moved money.
+     *
+     * @since 1.0.0
+     *
+     * @param  Builder<Refund>  $query  Query.
+     *
+     * @return Builder<Refund>
+     */
+    public function scopeSucceeded( Builder $query ): Builder
+    {
+        return $query->where( 'status', self::STATUS_SUCCEEDED );
+    }
+
+    /**
+     * Scope: refunds that count against what can still be refunded (moved
+     * money, or may be moving it right now).
+     *
+     * @since 1.0.0
+     *
+     * @param  Builder<Refund>  $query  Query.
+     *
+     * @return Builder<Refund>
+     */
+    public function scopeCounting( Builder $query ): Builder
+    {
+        return $query->whereIn( 'status', [ self::STATUS_PENDING, self::STATUS_SUCCEEDED ] );
     }
 
     /**

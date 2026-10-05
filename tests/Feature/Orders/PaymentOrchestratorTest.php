@@ -39,8 +39,34 @@ final class OrchestratorFakeGateway implements PaymentGateway
 
     public ?PaymentResult $captureResult = null;
 
+    /**
+     * Provider-side sessions by reference, with their current status.
+     *
+     * @var array<string, PaymentSession>
+     */
+    public array $sessions = [];
+
     public function __construct( public string $keyName = 'orch-fake' )
     {
+    }
+
+    /** Seeds a session at the "provider", as a client-side confirm would leave it. */
+    public function seedSession( string $reference, int $amount, ?string $status, string $currency = 'USD' ): PaymentSession
+    {
+        return $this->sessions[ $reference ] = new PaymentSession(
+            gatewayKey: $this->keyName,
+            reference: $reference,
+            amount: new Money( $amount, new \Money\Currency( $currency ) ),
+            clientSecret: 'cs_' . $reference,
+            status: $status,
+        );
+    }
+
+    public function retrievePaymentSession( string $reference ): PaymentSession
+    {
+        $this->calls[] = 'retrievePaymentSession';
+
+        return $this->sessions[ $reference ] ?? throw new RuntimeException( "No session {$reference}." );
     }
 
     public function key(): string
@@ -72,7 +98,7 @@ final class OrchestratorFakeGateway implements PaymentGateway
     {
         $this->calls[] = 'createPaymentSession';
 
-        return new PaymentSession(
+        return $this->sessions[ 'ps_' . $cart->getKey() ] = new PaymentSession(
             gatewayKey: $this->keyName,
             reference: 'ps_' . $cart->getKey(),
             amount: Money::USD( 5_000 ),
@@ -88,7 +114,13 @@ final class OrchestratorFakeGateway implements PaymentGateway
             throw new RuntimeException( 'gateway timed out' );
         }
 
-        return $this->captureResult ?? PaymentResult::success( $session->amount, 'ch_captured' );
+        $result = $this->captureResult ?? PaymentResult::success( $session->amount, 'ch_captured' );
+
+        if ( $result->success && isset( $this->sessions[ $session->reference ] ) ) {
+            $this->seedSession( $session->reference, (int) $session->amount->getAmount(), PaymentSession::STATUS_SUCCEEDED, $session->amount->getCurrency()->getCode() );
+        }
+
+        return $result;
     }
 
     public function voidPendingPayment( Order $order ): void
@@ -100,8 +132,10 @@ final class OrchestratorFakeGateway implements PaymentGateway
         }
     }
 
-    public function refund( Order $order, Money $amount, ?string $reason = null ): RefundResult
+    public function refund( Order $order, Money $amount, ?string $reason = null, array $context = [] ): RefundResult
     {
+        $this->calls[] = 'refund';
+
         return RefundResult::success( $amount, 're_noop' );
     }
 
@@ -204,7 +238,9 @@ it( 'approves → captures → dispatches PaymentSucceeded, marks order paid', f
     $fresh = $order->fresh();
     expect( $fresh->payment_status )->toBe( 'paid' );
     expect( $fresh->system_status )->toBe( 'processing' );
-    expect( $fresh->payment_reference )->toBe( 'ch_captured' );
+    // The session reference stays (refunds and voids use it); the charge id goes to meta.
+    expect( $fresh->payment_reference )->toBe( 'ps_' . $cart->id );
+    expect( $fresh->meta['payment']['capture_reference'] )->toBe( 'ch_captured' );
 
     expect( $this->gateway->calls )->toEqual( [ 'createPaymentSession', 'capturePayment' ] );
 
@@ -608,4 +644,226 @@ it( 'still blocks the order when the fraud-path void is refused', function (): v
         ->and( $this->gateway->calls )->toEqual( [ 'createPaymentSession', 'voidPendingPayment' ] );
 
     Event::assertDispatched( FraudBlocked::class );
+} );
+
+/*
+ * Audit C1/C2/C3/C7, D4 — sessions confirmed client-side, claims, amounts,
+ * status machine, and stock.
+ */
+
+function orchPinnedOrder( OrchestratorFakeGateway $gateway, ?string $status = PaymentSession::STATUS_AUTHORIZED, int $amount = 5_000, array $overrides = [] ): array
+{
+    [ $order, $cart ] = orchMakeOrderAndCart();
+    $order->update( array_merge( [ 'payment_reference' => 'pi_confirmed_' . $order->id ], $overrides ) );
+    $gateway->seedSession( (string) $order->fresh()->payment_reference, $amount, $status );
+
+    return [ $order->fresh(), $cart ];
+}
+
+it( 'captures the session the shopper confirmed instead of creating a new one', function (): void {
+    orchRegisterFraud( FraudDecision::approve() );
+    [ $order, $cart ] = orchPinnedOrder( $this->gateway );
+
+    $result = app( PaymentOrchestrator::class )->finalize( $order, $cart, orchShipping() );
+
+    expect( $result->isCaptured() )->toBeTrue()
+        ->and( $this->gateway->calls )->toBe( [ 'retrievePaymentSession', 'capturePayment' ] )
+        ->and( $order->fresh()->payment_reference )->toBe( 'pi_confirmed_' . $order->id );
+} );
+
+it( 'creates one session and captures once across two finalizes of the same order', function (): void {
+    orchRegisterFraud( FraudDecision::approve() );
+    [ $order, $cart ] = orchMakeOrderAndCart();
+    $orch             = app( PaymentOrchestrator::class );
+
+    $first  = $orch->finalize( Order::query()->find( $order->id ), $cart, orchShipping() );
+    $second = $orch->finalize( Order::query()->find( $order->id ), $cart, orchShipping() );
+
+    expect( $first->isCaptured() )->toBeTrue()
+        ->and( $second->isCaptured() )->toBeTrue()
+        ->and( array_count_values( $this->gateway->calls ) )->toBe( [ 'createPaymentSession' => 1, 'capturePayment' => 1 ] );
+} );
+
+it( 'refuses a finalize while another attempt holds the order', function (): void {
+    orchRegisterFraud( FraudDecision::approve() );
+    [ $order, $cart ] = orchPinnedOrder( $this->gateway, PaymentSession::STATUS_AUTHORIZED, 5_000, [
+        'payment_status' => 'processing',
+        'meta'           => [ 'finalize_attempt' => [ 'id' => 'other', 'at' => now()->toIso8601String() ] ],
+    ] );
+
+    expect( fn () => app( PaymentOrchestrator::class )->finalize( $order, $cart, orchShipping() ) )
+        ->toThrow( ArtisanPackUI\Ecommerce\Exceptions\PaymentInProgressException::class );
+
+    expect( $this->gateway->calls )->toBe( [] );
+} );
+
+it( 'resumes an attempt whose claim expired after a crash', function (): void {
+    orchRegisterFraud( FraudDecision::approve() );
+    [ $order, $cart ] = orchPinnedOrder( $this->gateway, PaymentSession::STATUS_AUTHORIZED, 5_000, [
+        'payment_status' => 'processing',
+        'meta'           => [ 'finalize_attempt' => [ 'id' => 'crashed', 'at' => now()->subMinutes( 10 )->toIso8601String() ] ],
+    ] );
+
+    expect( app( PaymentOrchestrator::class )->finalize( $order, $cart, orchShipping() )->isCaptured() )->toBeTrue();
+} );
+
+it( 'never charges a cancelled or voided order', function ( array $state ): void {
+    orchRegisterFraud( FraudDecision::approve() );
+    [ $order, $cart ] = orchPinnedOrder( $this->gateway, PaymentSession::STATUS_AUTHORIZED, 5_000, $state );
+
+    expect( fn () => app( PaymentOrchestrator::class )->finalize( $order, $cart, orchShipping() ) )
+        ->toThrow( ArtisanPackUI\Ecommerce\Exceptions\PaymentNotAllowedException::class );
+
+    expect( $this->gateway->calls )->toBe( [] );
+} )->with( [
+    'cancelled' => [ [ 'system_status' => 'cancelled', 'payment_status' => 'voided' ] ],
+    'voided'    => [ [ 'payment_status' => 'voided' ] ],
+] );
+
+it( 'does not capture again when a retry follows a capture whose database write failed', function (): void {
+    orchRegisterFraud( FraudDecision::approve() );
+    [ $order, $cart ] = orchPinnedOrder( $this->gateway );
+
+    // The capture lands at the provider, then the transition write throws.
+    $fail = static function (): void {
+        throw new RuntimeException( 'database went away' );
+    };
+    Order::saving( static function ( Order $saving ) use ( &$fail ): void {
+        if ( 'paid' === $saving->payment_status && null !== $fail ) {
+            $fail();
+        }
+    } );
+
+    expect( fn () => app( PaymentOrchestrator::class )->finalize( $order, $cart, orchShipping() ) )->toThrow( RuntimeException::class, 'database went away' );
+    expect( $order->fresh()->payment_status )->toBe( 'pending' );
+
+    $fail = null;
+
+    $retry = app( PaymentOrchestrator::class )->finalize( $order->fresh(), $cart, orchShipping() );
+
+    expect( $retry->isCaptured() )->toBeTrue()
+        ->and( array_count_values( $this->gateway->calls )['capturePayment'] )->toBe( 1 )
+        ->and( $order->fresh()->payment_status )->toBe( 'paid' );
+} );
+
+it( 'refunds a capture that lands after the order was cancelled', function (): void {
+    orchRegisterFraud( FraudDecision::approve() );
+    [ $order, $cart ] = orchPinnedOrder( $this->gateway );
+
+    // The order is cancelled while the capture is in flight.
+    addAction( 'ap.ecommerce.payment.charging', static function ( $gateway, $amount, Order $charging ): void {
+        Order::query()->whereKey( $charging->id )->update( [ 'system_status' => 'cancelled' ] );
+    } );
+
+    $result = app( PaymentOrchestrator::class )->finalize( $order, $cart, orchShipping() );
+
+    expect( $result->isFailed() )->toBeTrue()
+        ->and( $this->gateway->calls )->toContain( 'capturePayment', 'refund' )
+        ->and( $order->fresh()->system_status )->toBe( 'cancelled' )
+        ->and( $order->fresh()->payment_status )->toBe( 'refunded' );
+} );
+
+it( 'returns the step-up token when the confirmed session needs 3DS, then captures once it is completed', function (): void {
+    $fraud            = orchRegisterFraud( FraudDecision::challenge( 60, [ 'elevated' ] ) );
+    [ $order, $cart ] = orchPinnedOrder( $this->gateway, PaymentSession::STATUS_REQUIRES_ACTION );
+    $orch             = app( PaymentOrchestrator::class );
+
+    $challenged = $orch->finalize( $order, $cart, orchShipping() );
+
+    expect( $challenged->isChallenged() )->toBeTrue()
+        ->and( $challenged->stepUpToken )->toBe( 'cs_pi_confirmed_' . $order->id )
+        ->and( $order->fresh()->payment_status )->toBe( 'pending' )
+        ->and( $fraud->calls )->toBe( [] );
+
+    // The shopper completes 3DS; the same session is now authorized.
+    $this->gateway->seedSession( 'pi_confirmed_' . $order->id, 5_000, PaymentSession::STATUS_AUTHORIZED );
+
+    $resumed = $orch->resume( $order->fresh() );
+
+    expect( $resumed->isCaptured() )->toBeTrue()
+        ->and( $resumed->fraud->reasons )->toContain( 'step_up_completed' )
+        ->and( array_count_values( $this->gateway->calls ) )->toBe( [ 'retrievePaymentSession' => 2, 'capturePayment' => 1 ] );
+} );
+
+it( 'holds a confirmed payment for review on a fraud challenge until an admin accepts it', function (): void {
+    orchRegisterFraud( FraudDecision::challenge( 60, [ 'elevated' ] ) );
+    [ $order, $cart ] = orchPinnedOrder( $this->gateway );
+    $orch             = app( PaymentOrchestrator::class );
+
+    $held = $orch->finalize( $order, $cart, orchShipping() );
+
+    expect( $held->isChallenged() )->toBeTrue()
+        ->and( $held->stepUpToken )->toBeNull()
+        ->and( $order->fresh()->meta['fraud_decision']['verdict'] )->toBe( 'challenge' );
+
+    // A shopper retrying can't get past it.
+    expect( $orch->resume( $order->fresh() )->isChallenged() )->toBeTrue();
+    expect( $this->gateway->calls )->not->toContain( 'capturePayment' );
+
+    expect( $orch->resume( $order->fresh(), [ PaymentOrchestrator::ACCEPT_CHALLENGE => true ] )->isCaptured() )->toBeTrue();
+} );
+
+it( 'refuses a session whose amount differs from the order total and voids it', function (): void {
+    orchRegisterFraud( FraudDecision::approve() );
+    [ $order, $cart ] = orchPinnedOrder( $this->gateway, PaymentSession::STATUS_AUTHORIZED, 4_999 );
+
+    expect( fn () => app( PaymentOrchestrator::class )->finalize( $order, $cart, orchShipping() ) )
+        ->toThrow( ArtisanPackUI\Ecommerce\Exceptions\PaymentAmountMismatchException::class );
+
+    expect( $this->gateway->calls )->toContain( 'voidPendingPayment' )->not->toContain( 'capturePayment' )
+        ->and( $order->fresh()->payment_status )->toBe( 'pending' )
+        ->and( $order->fresh()->payment_reference )->toBeNull();
+} );
+
+it( 'never marks paid a capture that moved a different amount', function (): void {
+    orchRegisterFraud( FraudDecision::approve() );
+    [ $order, $cart ]             = orchPinnedOrder( $this->gateway );
+    $this->gateway->captureResult = PaymentResult::success( Money::USD( 4_000 ), 'ch_short' );
+
+    $result = app( PaymentOrchestrator::class )->finalize( $order, $cart, orchShipping() );
+
+    expect( $result->isFailed() )->toBeTrue()
+        ->and( $order->fresh()->payment_status )->toBe( 'pending' )
+        ->and( $order->fresh()->meta['payment_review']['reason'] )->toBe( 'captured_amount_mismatch' );
+} );
+
+it( 'moves the order through the status machine on capture and on a fraud block', function (): void {
+    Event::fake( [ ArtisanPackUI\Ecommerce\Events\OrderStatusChanged::class ] );
+    $fraud            = orchRegisterFraud( FraudDecision::approve() );
+    [ $order, $cart ] = orchPinnedOrder( $this->gateway );
+
+    app( PaymentOrchestrator::class )->finalize( $order, $cart, orchShipping() );
+
+    Event::assertDispatched( ArtisanPackUI\Ecommerce\Events\OrderStatusChanged::class, fn ( $event ): bool => 'pending' === $event->from && 'processing' === $event->to );
+    expect( OrderTimelineEntry::query()->where( 'order_id', $order->id )->where( 'event_type', 'order.status_changed' )->exists() )->toBeTrue();
+
+    $fraud->decision           = FraudDecision::block( 99 );
+    [ $blocked, $blockedCart ] = orchPinnedOrder( $this->gateway );
+
+    app( PaymentOrchestrator::class )->finalize( $blocked, $blockedCart, orchShipping() );
+
+    Event::assertDispatched( ArtisanPackUI\Ecommerce\Events\OrderStatusChanged::class, fn ( $event ): bool => $event->order->id === $blocked->id && 'failed' === $event->to );
+} );
+
+it( 'commits the order\'s stock reservations when the payment is captured', function (): void {
+    orchRegisterFraud( FraudDecision::approve() );
+    [ $order, $cart ] = orchPinnedOrder( $this->gateway );
+    $item             = ArtisanPackUI\Ecommerce\Models\InventoryItem::factory()->create( [ 'quantity_on_hand' => 10 ] );
+    app( ArtisanPackUI\Ecommerce\Services\InventoryService::class )->reserve( $item, $order, 3, null, false );
+
+    expect( $item->fresh()->quantity_reserved )->toBe( 3 );
+
+    app( PaymentOrchestrator::class )->finalize( $order, $cart, orchShipping() );
+
+    expect( $item->fresh()->quantity_on_hand )->toBe( 7 )
+        ->and( $item->fresh()->quantity_reserved )->toBe( 0 )
+        ->and( ArtisanPackUI\Ecommerce\Models\InventoryReservation::query()->count() )->toBe( 0 );
+} );
+
+it( 'refunds instead of voiding when a fraud block lands on an already captured payment', function (): void {
+    orchRegisterFraud( FraudDecision::block( 99 ) );
+    [ $order, $cart ] = orchPinnedOrder( $this->gateway, PaymentSession::STATUS_SUCCEEDED );
+
+    expect( app( PaymentOrchestrator::class )->finalize( $order, $cart, orchShipping() )->isBlocked() )->toBeTrue()
+        ->and( $this->gateway->calls )->toContain( 'refund' )->not->toContain( 'voidPendingPayment' );
 } );

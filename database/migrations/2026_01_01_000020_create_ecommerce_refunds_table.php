@@ -33,9 +33,12 @@ return new class extends Migration {
             $table->string( 'reason', 255 )->nullable();
             $table->string( 'gateway_reference', 255 )->nullable();
             $table->unsignedBigInteger( 'issued_by_user_id' )->nullable();
+            // pending → succeeded | failed. Written pending before the
+            // gateway is called, settled after (RefundService).
+            $table->string( 'status', 20 )->default( 'succeeded' );
             $table->timestamps();
 
-            $table->index( 'order_id', 'ecommerce_refunds_order_idx' );
+            $table->index( [ 'order_id', 'status' ], 'ecommerce_refunds_order_idx' );
 
             $table->foreign( 'order_id', 'ecommerce_refunds_order_fk' )
                 ->references( 'id' )

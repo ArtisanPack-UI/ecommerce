@@ -19,6 +19,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Events;
 
 use ArtisanPackUI\Ecommerce\Models\LicenseKey;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 
 /**
  * @package    ArtisanPack_UI
@@ -26,7 +27,7 @@ use ArtisanPackUI\Ecommerce\Models\LicenseKey;
  *
  * @since      1.0.0
  */
-class LicenseRevoked
+class LicenseRevoked implements ShouldDispatchAfterCommit
 {
     /**
      * @since 1.0.0

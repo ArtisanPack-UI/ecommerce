@@ -20,6 +20,7 @@ namespace ArtisanPackUI\Ecommerce\Events;
 
 use ArtisanPackUI\Ecommerce\Models\LicenseKey;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 
 /**
  * @package    ArtisanPack_UI
@@ -27,7 +28,7 @@ use ArtisanPackUI\Ecommerce\Models\OrderItem;
  *
  * @since      1.0.0
  */
-class LicenseIssued
+class LicenseIssued implements ShouldDispatchAfterCommit
 {
     /**
      * @since 1.0.0

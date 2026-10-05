@@ -25,6 +25,7 @@ namespace ArtisanPackUI\Ecommerce\Events;
 
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\ValueObjects\RefundResult;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 
 /**
  * @package    ArtisanPack_UI
@@ -32,7 +33,7 @@ use ArtisanPackUI\Ecommerce\ValueObjects\RefundResult;
  *
  * @since      1.0.0
  */
-class PaymentRefunded
+class PaymentRefunded implements ShouldDispatchAfterCommit
 {
     /**
      * @since 1.0.0
