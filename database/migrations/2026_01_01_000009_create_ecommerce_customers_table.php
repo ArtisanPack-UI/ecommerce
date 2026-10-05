@@ -32,6 +32,8 @@ return new class extends Migration {
             $table->string( 'first_name', 120 )->nullable();
             $table->string( 'last_name', 120 )->nullable();
             $table->string( 'phone', 50 )->nullable();
+            // Preferred language for notifications (H1).
+            $table->string( 'locale', 12 )->nullable();
             $table->boolean( 'accepts_marketing' )->default( false );
             $table->timestamp( 'accepts_marketing_at' )->nullable();
             $table->bigInteger( 'total_spent_amount' )->default( 0 );

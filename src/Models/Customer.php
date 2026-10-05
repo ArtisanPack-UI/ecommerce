@@ -21,6 +21,7 @@ namespace ArtisanPackUI\Ecommerce\Models;
 
 use ArtisanPackUI\Ecommerce\Database\Factories\CustomerFactory;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Translation\HasLocalePreference;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -42,6 +43,7 @@ use Illuminate\Support\Carbon;
  * @property string|null                                                             $first_name
  * @property string|null                                                             $last_name
  * @property string|null                                                             $phone
+ * @property string|null                                                             $locale
  * @property bool                                                                    $accepts_marketing
  * @property Carbon|null                                                             $accepts_marketing_at
  * @property int                                                                     $total_spent_amount
@@ -54,7 +56,7 @@ use Illuminate\Support\Carbon;
  * @property \Illuminate\Database\Eloquent\Collection<int, CustomerNotificationPreference>  $notificationPreferences
  * @property \Illuminate\Database\Eloquent\Collection<int, CustomerNote>             $notes
  */
-class Customer extends Model
+class Customer extends Model implements HasLocalePreference
 {
     use HasFactory;
     use Notifiable;
@@ -77,6 +79,7 @@ class Customer extends Model
         'first_name',
         'last_name',
         'phone',
+        'locale',
         'accepts_marketing',
         'accepts_marketing_at',
         'total_spent_amount',
@@ -171,6 +174,19 @@ class Customer extends Model
     public function notes(): HasMany
     {
         return $this->hasMany( CustomerNote::class );
+    }
+
+    /**
+     * The language notifications to this customer are sent in (null: the
+     * app locale). Laravel's notification sender reads this.
+     *
+     * @since 1.0.0
+     *
+     * @return string|null
+     */
+    public function preferredLocale(): ?string
+    {
+        return '' === (string) $this->locale ? null : (string) $this->locale;
     }
 
     /**

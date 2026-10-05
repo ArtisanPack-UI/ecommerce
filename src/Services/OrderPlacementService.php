@@ -62,6 +62,7 @@ use ArtisanPackUI\Ecommerce\Fulfillment\LineAllocator;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
 use ArtisanPackUI\Ecommerce\Models\Coupon;
+use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
 use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
@@ -310,8 +311,8 @@ class OrderPlacementService
             'customer_note'           => isset( $context['customer_note'] ) ? mb_substr( trim( (string) $context['customer_note'] ), 0, 2_000 ) : null,
             'is_claimed'              => null !== $cart->customer_id,
             'placed_at'               => Carbon::now(),
+            'locale'                  => $cart->locale,
             'meta'                    => array_filter( [
-                'locale'             => $cart->locale,
                 'coupon_code'        => $meta[ StorefrontCartService::COUPON_META_KEY ] ?? null,
                 'shipping_rate'      => is_array( $rate ) ? array_diff_key( $rate, [ 'fingerprint' => true ] ) : null,
                 'prices_include_tax' => (bool) ( $tax['prices_include_tax'] ?? false ),
@@ -328,6 +329,12 @@ class OrderPlacementService
         $filtered            = applyFilters( 'ap.ecommerce.order.number', $number, $order );
         $order->order_number = is_string( $filtered ) && '' !== trim( $filtered ) ? mb_substr( trim( $filtered ), 0, 50 ) : $number;
         $order->save();
+
+        // A customer without a language preference takes the one they
+        // shopped in, for later notifications that aren't about an order.
+        if ( null !== $cart->customer_id && '' !== (string) $cart->locale ) {
+            Customer::query()->whereKey( $cart->customer_id )->whereNull( 'locale' )->update( [ 'locale' => $cart->locale ] );
+        }
 
         return $order;
     }

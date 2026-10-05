@@ -122,7 +122,7 @@ class SendCatalogNotifications
      */
     public function paymentSucceeded( mixed $payment, Order $order ): void
     {
-        $this->notifications->send( NotificationCatalog::ORDER_PAID_ADMIN, $this->notifications->adminRecipients(), [ 'Order' => $this->context->order( $order ) ], $order );
+        $this->notifications->send( NotificationCatalog::ORDER_PAID_ADMIN, $this->notifications->adminRecipients(), [ 'Order' => $this->context->order( $order ) ], $order, locale: $this->notifications->adminLocale() );
     }
 
     /**
@@ -218,7 +218,7 @@ class SendCatalogNotifications
                 'Product'  => $this->context->product( $event->product ),
                 'File'     => $this->context->file( $event->file ),
                 'Customer' => $this->context->customer( $order->customer, $order->email, (array) ( $order->billing_address ?? [] ) ),
-            ], $event->file );
+            ], $event->file, locale: $order->locale );
         }
     }
 
@@ -243,7 +243,7 @@ class SendCatalogNotifications
             'License'    => $this->context->license( $license ),
             'Activation' => $this->context->activation( $activation ),
             'Customer'   => $this->context->customer( $order->customer, $order->email, (array) ( $order->billing_address ?? [] ) ),
-        ], $activation );
+        ], $activation, locale: $order->locale );
     }
 
     /**
@@ -289,7 +289,7 @@ class SendCatalogNotifications
         $this->notifications->send( NotificationCatalog::REVIEW_AWAITING_MODERATION_ADMIN, $this->notifications->adminRecipients(), [
             'Product' => $this->context->product( $review->product ),
             'Review'  => $this->context->review( $review ),
-        ], $review );
+        ], $review, locale: $this->notifications->adminLocale() );
     }
 
     /**
@@ -338,7 +338,7 @@ class SendCatalogNotifications
      */
     protected function toCustomer( string $templateKey, Order $order, array $variables = [], ?DateTimeInterface $delay = null ): void
     {
-        $this->notifications->send( $templateKey, $this->notifications->orderRecipients( $order ), [ 'Order' => $this->context->order( $order ) ] + $variables, $order, $delay );
+        $this->notifications->send( $templateKey, $this->notifications->orderRecipients( $order ), [ 'Order' => $this->context->order( $order ) ] + $variables, $order, $delay, $order->locale );
     }
 
     /**
@@ -357,6 +357,6 @@ class SendCatalogNotifications
         $this->notifications->send( $templateKey, $this->notifications->adminRecipients(), [
             'Product'       => $this->context->product( $this->context->productForInventory( $item ) ),
             'InventoryItem' => $this->context->inventoryItem( $item, $level ),
-        ], $item );
+        ], $item, locale: $this->notifications->adminLocale() );
     }
 }

@@ -10,6 +10,7 @@ use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
 use ArtisanPackUI\Ecommerce\Models\Coupon;
+use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\InventoryItem;
 use ArtisanPackUI\Ecommerce\Models\InventoryReservation;
 use ArtisanPackUI\Ecommerce\Models\Order;
@@ -119,6 +120,23 @@ it( 'marks digital lines for delivery in their snapshot', function (): void {
     $order = $this->placement->place( $cart );
 
     expect( $order->items->sole()->product_snapshot['digital_delivery']['expected'] )->toBeTrue();
+} );
+
+it( 'records the shopper\'s language on the order and on a customer without one (H1)', function (): void {
+    $customer = Customer::factory()->create( [ 'email' => 'ada@example.test', 'locale' => null ] );
+    $cart     = readyCart( $this->product, 1, app( StorefrontCartService::class )->create( 'USD', null, $customer, 'de' ) );
+
+    $order = $this->placement->place( $cart );
+
+    expect( $order->locale )->toBe( 'de' )
+        ->and( $order->meta )->not->toHaveKey( 'locale' )
+        ->and( $customer->refresh()->locale )->toBe( 'de' );
+
+    // An existing preference is never overwritten.
+    $customer->forceFill( [ 'locale' => 'fr' ] )->save();
+    $this->placement->place( readyCart( $this->product, 1, app( StorefrontCartService::class )->create( 'USD', null, $customer, 'es' ) ) );
+
+    expect( $customer->refresh()->locale )->toBe( 'fr' );
 } );
 
 it( 'runs the order number through the order.number filter', function (): void {

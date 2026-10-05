@@ -8,6 +8,11 @@
  * of these; satellites can use it too rather than writing a class per
  * template.
  *
+ * The label, subject, and body may be strings or closures taking the
+ * locale (`fn ( ?string $locale ): string => __( '…', [], $locale )`), so
+ * copy is translated when it's used — in the recipient's language — not
+ * once when the catalog is registered.
+ *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
  *
@@ -21,6 +26,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Notifications;
 
 use ArtisanPackUI\Ecommerce\Contracts\NotificationTemplate;
+use Closure;
 
 /**
  * @package    ArtisanPack_UI
@@ -33,23 +39,23 @@ class CatalogNotificationTemplate implements NotificationTemplate
     /**
      * @since 1.0.0
      *
-     * @param  string                $key             Registry key.
-     * @param  string                $label           Editor label.
-     * @param  string                $category        Preference category.
-     * @param  array<int, string>    $variables       Declared variable paths.
-     * @param  array<string, mixed>  $previewData     Sample context.
-     * @param  string|null           $defaultSubject  Default subject source.
-     * @param  string                $defaultBody     Default body source.
-     * @param  string                $channel         Delivery channel.
+     * @param  string                                            $key             Registry key.
+     * @param  Closure(string|null): string|string                $label           Editor label.
+     * @param  string                                            $category        Preference category.
+     * @param  array<int, string>                                $variables       Declared variable paths.
+     * @param  array<string, mixed>                              $previewData     Sample context.
+     * @param  Closure(string|null): (string|null)|string|null  $defaultSubject  Default subject source.
+     * @param  Closure(string|null): string|string                $defaultBody     Default body source.
+     * @param  string                                            $channel         Delivery channel.
      */
     public function __construct(
         protected string $key,
-        protected string $label,
+        protected Closure|string $label,
         protected string $category,
         protected array $variables,
         protected array $previewData,
-        protected ?string $defaultSubject,
-        protected string $defaultBody,
+        protected Closure|string|null $defaultSubject,
+        protected Closure|string $defaultBody,
         protected string $channel = 'mail',
     ) {
     }
@@ -71,7 +77,7 @@ class CatalogNotificationTemplate implements NotificationTemplate
      */
     public function label(): string
     {
-        return $this->label;
+        return $this->label instanceof Closure ? (string) ( $this->label )( null ) : $this->label;
     }
 
     /**
@@ -117,20 +123,30 @@ class CatalogNotificationTemplate implements NotificationTemplate
     /**
      * @since 1.0.0
      *
+     * @param  string|null  $locale  Locale (null: the current app locale).
+     *
      * @return string|null
      */
-    public function defaultSubject(): ?string
+    public function defaultSubject( ?string $locale = null ): ?string
     {
+        if ( $this->defaultSubject instanceof Closure ) {
+            $subject = ( $this->defaultSubject )( $locale );
+
+            return null === $subject ? null : (string) $subject;
+        }
+
         return $this->defaultSubject;
     }
 
     /**
      * @since 1.0.0
      *
+     * @param  string|null  $locale  Locale (null: the current app locale).
+     *
      * @return string
      */
-    public function defaultBody(): string
+    public function defaultBody( ?string $locale = null ): string
     {
-        return $this->defaultBody;
+        return $this->defaultBody instanceof Closure ? (string) ( $this->defaultBody )( $locale ) : $this->defaultBody;
     }
 }

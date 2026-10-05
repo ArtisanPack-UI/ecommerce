@@ -597,7 +597,7 @@ return [
         'version'          => env( 'ECOMMERCE_API_VERSION', 'v1' ),
         'default_per_page' => (int) env( 'ECOMMERCE_API_DEFAULT_PER_PAGE', 25 ),
         'max_per_page'     => (int) env( 'ECOMMERCE_API_MAX_PER_PAGE', 100 ),
-        'middleware'       => [ 'api', 'ecommerce.request-id' ],
+        'middleware'       => [ 'api', 'ecommerce.request-id', 'ecommerce.locale' ],
         'auth_middleware'  => [ 'ecommerce.service-signature', 'auth:sanctum' ],
 
         'services' => [],
@@ -731,7 +731,7 @@ return [
     */
 
     'graphql' => [
-        'middleware'     => [ 'api', 'ecommerce.request-id', 'ecommerce.graphql-batch', 'ecommerce.service-signature', 'ecommerce.optional-auth', 'ecommerce.idempotency:optional' ],
+        'middleware'     => [ 'api', 'ecommerce.request-id', 'ecommerce.locale', 'ecommerce.graphql-batch', 'ecommerce.service-signature', 'ecommerce.optional-auth', 'ecommerce.idempotency:optional' ],
         'max_depth'      => (int) env( 'ECOMMERCE_GRAPHQL_MAX_DEPTH', 10 ),
         'max_complexity' => (int) env( 'ECOMMERCE_GRAPHQL_MAX_COMPLEXITY', 5_000 ),
 
@@ -911,11 +911,17 @@ return [
     |                not do this for JSON keys on its own; the engine wraps
     |                the translation loader to add it. Applies app-wide.
     |
+    | `supported_locales` — Locales the REST and GraphQL APIs negotiate from
+    |                `Accept-Language` (`ecommerce.locale` middleware), and
+    |                that notifications use the catalog copy for. Requests
+    |                without the header keep the app locale.
+    |
     */
 
     'localization' => [
         'tax_labels'        => [],
         'regional_fallback' => (bool) env( 'ECOMMERCE_REGIONAL_LOCALE_FALLBACK', true ),
+        'supported_locales' => [ 'en', 'es', 'fr', 'de' ],
     ],
 
     /*

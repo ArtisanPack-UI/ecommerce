@@ -62,6 +62,7 @@ use ArtisanPackUI\Ecommerce\Http\Middleware\EnsureEcommerceAbility;
 use ArtisanPackUI\Ecommerce\Http\Middleware\ForceJsonResponse;
 use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Middleware\LimitGraphQLBatch;
+use ArtisanPackUI\Ecommerce\Http\Middleware\NegotiateLocale;
 use ArtisanPackUI\Ecommerce\Http\Middleware\RateLimitEcommerce;
 use ArtisanPackUI\Ecommerce\Http\Middleware\RequestIdMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Middleware\ServiceSignatureMiddleware;
@@ -594,6 +595,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $router = $this->app->make( Router::class );
 
         $router->aliasMiddleware( 'ecommerce.request-id', RequestIdMiddleware::class );
+        $router->aliasMiddleware( 'ecommerce.locale', NegotiateLocale::class );
 
         $reset  = static fn (): null => RequestContext::reset();
         $events = $this->app->make( Dispatcher::class );
@@ -1367,10 +1369,12 @@ class EcommerceServiceProvider extends ServiceProvider
         }
 
         $router->prefix( trim( (string) $config->get( 'artisanpack.ecommerce.api_prefix', 'api/ecommerce' ), '/' ) . '/' . $config->get( 'artisanpack.ecommerce.api.version', 'v1' ) )
-            ->middleware( array_merge(
+            ->middleware( array_values( array_unique( array_merge(
                 [ 'ecommerce.json' ],
                 (array) $config->get( 'artisanpack.ecommerce.api.middleware', [ 'api', 'ecommerce.request-id' ] ),
-            ) )
+                // Added even to an older published middleware list (H2).
+                [ 'ecommerce.locale' ],
+            ) ) ) )
             ->name( 'ecommerce.api.' )
             ->group( __DIR__ . '/../../routes/api.php' );
     }
@@ -1400,7 +1404,7 @@ class EcommerceServiceProvider extends ServiceProvider
 
         $config->set( 'graphql.schemas.' . EcommerceSchema::NAME, [
             'method'               => [ 'GET', 'POST' ],
-            'middleware'           => (array) $config->get( 'artisanpack.ecommerce.graphql.middleware', [] ),
+            'middleware'           => array_values( array_unique( [ ...(array) $config->get( 'artisanpack.ecommerce.graphql.middleware', [] ), 'ecommerce.locale' ] ) ),
             'execution_middleware' => [
                 ValidateOperationParamsMiddleware::class,
                 AutomaticPersistedQueriesMiddleware::class,

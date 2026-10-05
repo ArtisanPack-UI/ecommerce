@@ -32,6 +32,7 @@ use ArtisanPackUI\Ecommerce\Registries\NotificationTemplateRegistry;
 use ArtisanPackUI\Ecommerce\Services\NotificationPreferenceService;
 use ArtisanPackUI\Ecommerce\Services\NotificationTemplateService;
 use DateTimeInterface;
+use Illuminate\Contracts\Translation\HasLocalePreference;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
@@ -70,10 +71,13 @@ class NotificationDispatcher
      * @param  array<string, mixed>      $variables    Render context (`Store` is added).
      * @param  mixed                     $subject      Domain object the notification is about (for filters).
      * @param  DateTimeInterface|null    $delay        Send no earlier than this.
+     * @param  string|null               $locale       Language to send in (an order's `locale`); each
+     *                                                 customer's own preference otherwise, else the
+     *                                                 app locale at delivery.
      *
      * @return int Number of notifications handed off.
      */
-    public function send( string $templateKey, mixed $recipients, array $variables, mixed $subject = null, ?DateTimeInterface $delay = null ): int
+    public function send( string $templateKey, mixed $recipients, array $variables, mixed $subject = null, ?DateTimeInterface $delay = null, ?string $locale = null ): int
     {
         if ( ! (bool) config( 'artisanpack.ecommerce.notifications.enabled', true ) ) {
             return 0;
@@ -111,6 +115,12 @@ class NotificationDispatcher
                 $notification->delay( $delay );
             }
 
+            $language = '' !== (string) $locale ? $locale : ( $recipient instanceof HasLocalePreference ? $recipient->preferredLocale() : null );
+
+            if ( null !== $language && '' !== $language ) {
+                $notification->locale( $language );
+            }
+
             Notification::send( $recipient, $notification );
             $sent++;
         }
@@ -135,6 +145,19 @@ class NotificationDispatcher
         }
 
         return '' === (string) $order->email ? [] : [ Notification::route( 'mail', $order->email ) ];
+    }
+
+    /**
+     * The language staff notifications are sent in: the store's
+     * notification default, whatever language triggered them.
+     *
+     * @since 1.0.0
+     *
+     * @return string
+     */
+    public function adminLocale(): string
+    {
+        return $this->templates->defaultLocale();
     }
 
     /**

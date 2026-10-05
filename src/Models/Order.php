@@ -47,6 +47,7 @@ use Illuminate\Support\Carbon;
  * @property string                                                                 $payment_status
  * @property string                                                                 $fulfillment_status
  * @property string                                                                 $currency
+ * @property string|null                                                            $locale
  * @property string                                                                 $base_currency
  * @property int                                                                    $fx_rate_to_base_e8
  * @property int                                                                    $subtotal_amount
@@ -109,6 +110,7 @@ class Order extends Model
         'payment_status',
         'fulfillment_status',
         'currency',
+        'locale',
         'base_currency',
         'fx_rate_to_base_e8',
         'subtotal_amount',

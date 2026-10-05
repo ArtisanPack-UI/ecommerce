@@ -52,6 +52,7 @@ class CustomerResource extends EcommerceResource
             'first_name'           => $this->resource->first_name,
             'last_name'            => $this->resource->last_name,
             'phone'                => $this->resource->phone,
+            'locale'               => $this->resource->locale,
             'accepts_marketing'    => $this->resource->accepts_marketing,
             'accepts_marketing_at' => $this->resource->accepts_marketing_at,
             'total_spent'          => $this->money( 'total_spent_amount' ),

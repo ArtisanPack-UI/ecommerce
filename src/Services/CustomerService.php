@@ -273,7 +273,8 @@ class CustomerService
 
     /**
      * Updates the profile fields a shopper manages themselves: `first_name`,
-     * `last_name`, `phone`, and `accepts_marketing`. Turning marketing on
+     * `last_name`, `phone`, `locale` (the language notifications are sent
+     * in), and `accepts_marketing`. Turning marketing on
      * records when consent was given (`accepts_marketing_at`); turning it
      * off clears it. Other keys are ignored. Fires
      * `ap.ecommerce.customer.updated` with the changed fields.
@@ -287,12 +288,12 @@ class CustomerService
      */
     public function updateProfile( Customer $customer, array $profile ): Customer
     {
-        $fields = array_intersect_key( $profile, array_flip( [ 'first_name', 'last_name', 'phone', 'accepts_marketing' ] ) );
+        $fields = array_intersect_key( $profile, array_flip( [ 'first_name', 'last_name', 'phone', 'locale', 'accepts_marketing' ] ) );
 
         return DB::transaction( function () use ( $customer, $fields ): Customer {
             $locked = Customer::query()->lockForUpdate()->findOrFail( $customer->id );
 
-            foreach ( [ 'first_name', 'last_name', 'phone' ] as $field ) {
+            foreach ( [ 'first_name', 'last_name', 'phone', 'locale' ] as $field ) {
                 if ( array_key_exists( $field, $fields ) ) {
                     $value            = null === $fields[ $field ] ? null : trim( (string) $fields[ $field ] );
                     $locked->{$field} = '' === $value ? null : $value;

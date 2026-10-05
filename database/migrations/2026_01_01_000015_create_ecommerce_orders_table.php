@@ -36,6 +36,8 @@ return new class extends Migration {
             $table->string( 'payment_status', 60 );
             $table->string( 'fulfillment_status', 60 );
             $table->char( 'currency', 3 );
+            // The shopper's locale when they ordered (notifications, H1).
+            $table->string( 'locale', 12 )->nullable();
             $table->char( 'base_currency', 3 );
             $table->bigInteger( 'fx_rate_to_base_e8' );
             $table->bigInteger( 'subtotal_amount' );
