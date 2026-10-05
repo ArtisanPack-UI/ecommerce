@@ -80,15 +80,15 @@ it( 'opens a signed order link until it expires, and refuses a tampered one', fu
 
     expect( OrderViewToken::verify( $token )?->is( $this->order ) )->toBeTrue();
 
-    $this->getJson( GUEST_API . "/view/{$token}" )->assertOk()->assertJsonPath( 'data.order_number', 'K7QM2XW9' );
+    $this->getJson( "/api/ecommerce/v1/order-views/{$token}" )->assertOk()->assertJsonPath( 'data.order_number', 'K7QM2XW9' );
 
     $other  = Order::factory()->create();
     $forged = preg_replace( '/^\d+/', (string) $other->id, $token );
 
-    $this->getJson( GUEST_API . "/view/{$forged}" )->assertNotFound();
+    $this->getJson( "/api/ecommerce/v1/order-views/{$forged}" )->assertNotFound();
 
     Carbon::setTestNow( now()->addDays( 2 ) );
-    $this->getJson( GUEST_API . "/view/{$token}" )->assertNotFound();
+    $this->getJson( "/api/ecommerce/v1/order-views/{$token}" )->assertNotFound();
     Carbon::setTestNow();
 } );
 

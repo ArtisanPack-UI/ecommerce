@@ -5,7 +5,7 @@
  *
  * Guest access to an order (#175): look one up by email and order number
  * (`GET orders/guest-lookup`), or open a signed link from the confirmation
- * email (`GET orders/view/{token}`). Both answer the order with its lines
+ * email (`GET order-views/{token}`). Both answer the order with its lines
  * and shipments; neither reveals whether an order number exists.
  *
  * @package    ArtisanPack_UI

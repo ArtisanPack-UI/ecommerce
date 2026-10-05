@@ -232,3 +232,11 @@ it( 'documents maps as objects and file downloads as binary', function (): void 
         ->and( array_keys( $stream['200']['content'] ) )->toBe( [ 'application/octet-stream' ] )
         ->and( array_keys( $stream['206']['content'] ) )->toBe( [ 'application/octet-stream' ] );
 } );
+
+it( 'never emits an empty list where a schema object belongs', function (): void {
+    $json = json_encode( app( OpenApiGenerator::class )->generate(), JSON_THROW_ON_ERROR );
+
+    expect( $json )->not->toContain( '"schema":[]' )
+        ->and( $json )->not->toContain( '"properties":[]' )
+        ->and( $json )->not->toMatch( '/"items":\[\]/' );
+} );

@@ -191,7 +191,7 @@ return [
     | `order_view_url`  — Storefront page showing a guest their order, with a
     |                    `{token}` placeholder (`https://shop.test/order/{token}`).
     |                    Guest confirmation emails link to it. Unset: the
-    |                    REST `orders/view/{token}` endpoint.
+    |                    REST `order-views/{token}` endpoint.
     |
     | `order_view_ttl_days` — How long those links work.
     |

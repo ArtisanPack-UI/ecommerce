@@ -93,7 +93,7 @@ final class OrderViewToken
 
         return is_string( $template ) && str_contains( $template, '{token}' )
             ? str_replace( '{token}', $token, $template )
-            : route( 'ecommerce.api.orders.view', [ 'token' => $token ] );
+            : route( 'ecommerce.api.order-views.show', [ 'token' => $token ] );
     }
 
     /**

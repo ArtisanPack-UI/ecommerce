@@ -5,6 +5,7 @@ declare( strict_types=1 );
 use ArtisanPackUI\Ecommerce\Listeners\LinkCustomerOnUserVerified;
 use ArtisanPackUI\Ecommerce\Models\Customer;
 use Illuminate\Auth\Events\Verified;
+use Illuminate\Auth\MustVerifyEmail as MustVerifyEmailTrait;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Fixtures\ApiUser;
@@ -52,24 +53,21 @@ it( 'keeps an existing link and never steals another user\'s customer', function
 it( 'ignores a user without an email and one that isn\'t an auth user', function (): void {
     app( LinkCustomerOnUserVerified::class )->handle( new Verified( covVerifiedUser( 46, null ) ) );
 
+    // Not an auth user; the framework trait keeps the contract complete on
+    // every supported Laravel version.
     $notAuthenticatable = new class implements MustVerifyEmail {
-        public function hasVerifiedEmail(): bool
+        use MustVerifyEmailTrait;
+
+        public string $email = 'ghost@example.test';
+
+        public function forceFill( array $attributes ): static
+        {
+            return $this;
+        }
+
+        public function save(): bool
         {
             return true;
-        }
-
-        public function markEmailAsVerified(): bool
-        {
-            return true;
-        }
-
-        public function sendEmailVerificationNotification(): void
-        {
-        }
-
-        public function getEmailForVerification(): string
-        {
-            return 'ghost@example.test';
         }
     };
 

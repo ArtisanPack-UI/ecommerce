@@ -129,7 +129,7 @@ Route::where( [ 'token' => '[A-Za-z0-9]{64}' ] )
 // Guest order access (#175): email + order number, or a signed link.
 Route::middleware( [ 'ecommerce.rate-limit:ecommerce.lookup.attempt', 'ecommerce.cache:private' ] )->group( function (): void {
     Route::get( 'orders/guest-lookup', [ GuestOrderController::class, 'lookup' ] )->name( 'orders.guest-lookup' );
-    Route::get( 'orders/view/{token}', [ GuestOrderController::class, 'view' ] )->where( 'token', '[0-9a-f-]+' )->name( 'orders.view' );
+    Route::get( 'order-views/{token}', [ GuestOrderController::class, 'view' ] )->where( 'token', '[0-9a-f-]+' )->name( 'order-views.show' );
 } );
 
 // Storefronts report product views (#179).

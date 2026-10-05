@@ -65,7 +65,7 @@ final class ResponseSchemas
             'adminSettingsUpdate'               => self::object( [
                 'key'      => self::string(),
                 'label'    => self::string(),
-                'settings' => self::listOf( self::object( [ 'key' => self::string(), 'type' => self::string(), 'label' => self::string(), 'value' => [], 'stored' => [ 'type' => 'boolean' ] ], [], true ) ),
+                'settings' => self::listOf( self::object( [ 'key' => self::string(), 'type' => self::string(), 'label' => self::string(), 'value' => [ 'description' => 'The setting value (any JSON type).' ], 'stored' => [ 'type' => 'boolean' ] ], [], true ) ),
                 'secrets'  => self::listOf( self::open() ),
             ], [], true ),
             'adminNotificationTemplatesPreview'     => self::object( [ 'subject' => self::string(), 'html' => self::string(), 'text' => self::string() ], [], true ),

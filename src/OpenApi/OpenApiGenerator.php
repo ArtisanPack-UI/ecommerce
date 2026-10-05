@@ -304,7 +304,7 @@ class OpenApiGenerator
         if ( true === $meta?->collection && ( [] !== $sorts || [] !== $meta->filters ) ) {
             $filters = [
                 'type'                 => 'object',
-                'properties'           => array_map( self::filterSchema( ... ), $meta->filters ),
+                'properties'           => [] === $meta->filters ? (object) [] : array_map( self::filterSchema( ... ), $meta->filters ),
                 'additionalProperties' => false,
             ];
 
@@ -329,7 +329,7 @@ class OpenApiGenerator
                     'name'     => (string) $name,
                     'in'       => 'query',
                     'required' => in_array( $name, $required, true ) ? true : null,
-                    'style'    => 'object' === ( $property['type'] ?? null ) ? 'deepObject' : null,
+                    'style'    => is_array( $property ) && 'object' === ( $property['type'] ?? null ) ? 'deepObject' : null,
                     'schema'   => $property,
                 ], static fn ( mixed $value ): bool => null !== $value );
             }

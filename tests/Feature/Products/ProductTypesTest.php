@@ -9,7 +9,6 @@ use ArtisanPackUI\Ecommerce\ProductTypes\DigitalProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\MissingProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use InvalidArgumentException;
 
 uses( RefreshDatabase::class );
 

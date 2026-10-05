@@ -339,7 +339,7 @@ final class NotificationCatalog
                 'total'            => MoneyFormatter::format( 5036, 'USD' ),
                 'shipping_address' => 'Ada Lovelace, 12 Analytical Way, London, NW1 6XE, GB',
                 'customer'         => [ 'name' => 'Ada Lovelace', 'first_name' => 'Ada', 'email' => 'ada@example.com' ],
-                'view_url'         => 'https://shop.example.com/orders/view/sample-token',
+                'view_url'         => 'https://shop.example.com/order/sample-token',
                 'items'            => [
                     [ 'name' => 'Difference Engine Poster', 'sku' => 'POSTER-01', 'quantity' => 2, 'unit_price' => MoneyFormatter::format( 1200, 'USD' ), 'total' => MoneyFormatter::format( 2400, 'USD' ) ],
                     [ 'name' => 'Notes on the Engine (PDF)', 'sku' => 'EBOOK-01', 'quantity' => 1, 'unit_price' => MoneyFormatter::format( 1800, 'USD' ), 'total' => MoneyFormatter::format( 1800, 'USD' ) ],

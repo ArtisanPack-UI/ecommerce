@@ -207,7 +207,8 @@ final class RuleSchema
     private static function tidy( array $schema ): array
     {
         if ( isset( $schema['properties'] ) ) {
-            $schema['properties'] = array_map( self::tidy( ... ), $schema['properties'] );
+            // A field with no type rule accepts any JSON value: `{}`, not `[]`.
+            $schema['properties'] = array_map( static fn ( array $property ): array|object => [] === $property ? (object) [] : self::tidy( $property ), $schema['properties'] );
 
             if ( [] === $schema['properties'] ) {
                 $schema['properties'] = (object) [];

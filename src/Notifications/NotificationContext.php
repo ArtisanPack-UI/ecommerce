@@ -393,7 +393,7 @@ class NotificationContext
     {
         $template = config( 'artisanpack.ecommerce.checkout.order_view_url' );
 
-        if ( ( ! is_string( $template ) || ! str_contains( $template, '{token}' ) ) && ! Route::has( 'ecommerce.api.orders.view' ) ) {
+        if ( ( ! is_string( $template ) || ! str_contains( $template, '{token}' ) ) && ! Route::has( 'ecommerce.api.order-views.show' ) ) {
             return null;
         }
 

@@ -113,7 +113,9 @@ abstract class SearchProviderContractTest extends TestCase
 
         $this->assertSame( [ $tent->id ], $result->items->pluck( 'id' )->all() );
         $this->assertIsArray( $result->facets );
-        $this->assertContainsOnly( 'string', $result->suggestions );
+        foreach ( $result->suggestions as $suggestion ) {
+            $this->assertIsString( $suggestion );
+        }
     }
 
     /**
