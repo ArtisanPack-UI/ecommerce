@@ -83,7 +83,7 @@ it( 'documents auth, abilities, and token scopes for admin endpoints', function 
     $refund = $this->spec['paths']['/orders/{order}/refunds']['post'];
 
     expect( $refund['x-ecommerce-ability'] )->toBe( 'ecommerce.order.refund' )
-        ->and( $refund['x-token-scopes'] )->toBe( [ 'ecommerce:admin', 'ecommerce:orders.write' ] )
+        ->and( $refund['x-token-scopes'] )->toBe( [ 'ecommerce:admin', 'ecommerce:orders.refund' ] )
         ->and( $refund['security'] )->toContain( [ 'sanctum' => [] ] )
         ->and( $refund['responses'] )->toHaveKeys( [ '201', '401', '403', '404', '422' ] )
         ->and( $refund['requestBody']['content']['application/json']['schema']['properties']['lines']['items']['required'] )

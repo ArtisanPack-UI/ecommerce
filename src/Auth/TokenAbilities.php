@@ -80,9 +80,27 @@ final class TokenAbilities
     public const READ_ACTIONS = [ 'viewAny', 'view' ];
 
     /**
+     * Actions that move money or destroy data, each with its own scope: a
+     * token needs that scope (or `ecommerce:admin`) — the resource's generic
+     * `.write` scope is not enough (audit F8).
+     *
+     * @since 1.0.0
+     *
+     * @var array<string, string>
+     */
+    public const DEDICATED = [
+        'order.refund'    => 'ecommerce:orders.refund',
+        'order.cancel'    => 'ecommerce:orders.cancel',
+        'customer.delete' => 'ecommerce:customers.delete',
+        'settings.update' => 'ecommerce:settings.write',
+    ];
+
+    /**
      * The per-resource scope required for `$action` on `$resource`, e.g.
-     * `( 'order', 'viewAny' )` → `ecommerce:orders.read` and
-     * `( 'taxRate', 'update' )` → `ecommerce:tax-rates.write`.
+     * `( 'order', 'viewAny' )` → `ecommerce:orders.read`,
+     * `( 'taxRate', 'update' )` → `ecommerce:tax-rates.write`, and for the
+     * {@see self::DEDICATED} actions their own scope
+     * (`( 'order', 'refund' )` → `ecommerce:orders.refund`).
      *
      * @since 1.0.0
      *
@@ -93,6 +111,12 @@ final class TokenAbilities
      */
     public static function forAction( string $resource, string $action ): string
     {
+        $dedicated = self::DEDICATED[ $resource . '.' . $action ] ?? null;
+
+        if ( null !== $dedicated ) {
+            return $dedicated;
+        }
+
         return self::scope( $resource, in_array( $action, self::READ_ACTIONS, true ) ? 'read' : 'write' );
     }
 

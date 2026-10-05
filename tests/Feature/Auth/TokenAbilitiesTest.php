@@ -24,7 +24,10 @@ it( 'derives per-resource scopes from resource and action', function ( string $r
 } )->with( [
     'order read'          => [ 'order', 'viewAny', 'ecommerce:orders.read' ],
     'order view'          => [ 'order', 'view', 'ecommerce:orders.read' ],
-    'order refund'        => [ 'order', 'refund', 'ecommerce:orders.write' ],
+    'order refund'        => [ 'order', 'refund', 'ecommerce:orders.refund' ],
+    'order cancel'        => [ 'order', 'cancel', 'ecommerce:orders.cancel' ],
+    'customer delete'     => [ 'customer', 'delete', 'ecommerce:customers.delete' ],
+    'customer update'     => [ 'customer', 'update', 'ecommerce:customers.write' ],
     'tax rate update'     => [ 'taxRate', 'update', 'ecommerce:tax-rates.write' ],
     'shipping zone read'  => [ 'shippingZone', 'viewAny', 'ecommerce:shipping-zones.read' ],
     'webhook sub create'  => [ 'webhookSubscription', 'create', 'ecommerce:webhook-subscriptions.write' ],
@@ -68,6 +71,18 @@ it( 'lets a write scope perform the write', function (): void {
     $this->patchJson( "/api/ecommerce/v1/orders/{$order->id}", [ 'customer_note' => 'Leave at door' ], idem() )
         ->assertOk()
         ->assertJsonPath( 'data.customer_note', 'Leave at door' );
+} );
+
+it( 'needs the dedicated scope, not the generic write, to refund or cancel (F8)', function (): void {
+    $order = Order::factory()->create( [ 'system_status' => 'pending' ] );
+    Sanctum::actingAs( ApiUser::make( 1 ), [ 'ecommerce:orders.write' ] );
+
+    $this->postJson( "/api/ecommerce/v1/orders/{$order->id}/refunds", [ 'lines' => [] ], idem() )->assertForbidden();
+    $this->postJson( "/api/ecommerce/v1/orders/{$order->id}/cancel", [ 'reason' => 'x' ], idem() )->assertForbidden();
+
+    Sanctum::actingAs( ApiUser::make( 1 ), [ 'ecommerce:orders.write', 'ecommerce:orders.cancel' ] );
+
+    $this->postJson( "/api/ecommerce/v1/orders/{$order->id}/cancel", [ 'reason' => 'Customer asked' ], idem() )->assertOk();
 } );
 
 it( 'never lets a token scope grant what the Gate denies', function (): void {
