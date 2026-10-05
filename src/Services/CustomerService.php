@@ -37,6 +37,7 @@ use ArtisanPackUI\Ecommerce\Models\CustomerNotificationPreference;
 use ArtisanPackUI\Ecommerce\Models\DigitalDownload;
 use ArtisanPackUI\Ecommerce\Models\DigitalDownloadEvent;
 use ArtisanPackUI\Ecommerce\Models\IdempotencyRecord;
+use ArtisanPackUI\Ecommerce\Models\InboundWebhookDelivery;
 use ArtisanPackUI\Ecommerce\Models\LicenseActivation;
 use ArtisanPackUI\Ecommerce\Models\LicenseKey;
 use ArtisanPackUI\Ecommerce\Models\Order;
@@ -394,6 +395,8 @@ class CustomerService
      * - Outbound webhook deliveries that reference those orders or the
      *   customer have the personal values in their payload redacted and their
      *   stored receiver response dropped.
+     * - Inbound provider webhooks about those orders' payments, or carrying
+     *   the customer's email, lose their stored payload and parsed body.
      * - Stored idempotent responses from the customer's own admin routes
      *   (customer update, address and note writes) are deleted.
      * - Addresses, notification preferences, and claim attempts are deleted.
@@ -479,6 +482,7 @@ class CustomerService
         ];
 
         $this->scrubWebhookDeliveries( $orders, (int) $customer->id );
+        $this->scrubInboundWebhooks( $orders, $email );
         $this->forgetIdempotentResponses( (int) $customer->id );
 
         $customer->delete();
@@ -730,6 +734,48 @@ class CustomerService
                     ] );
                 }
             } );
+    }
+
+    /**
+     * Drops the stored body of inbound provider webhooks (raw Stripe events
+     * carry billing names, emails, and addresses) about the anonymized
+     * orders' payments — matched on `session_reference` — or containing the
+     * customer's email. The rows, hashes, and sizes stay for the audit
+     * trail.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<int, int>  $orderIds  Anonymized order ids.
+     * @param  string           $email     The customer's normalized email.
+     *
+     * @return void
+     */
+    protected function scrubInboundWebhooks( array $orderIds, string $email ): void
+    {
+        $references = [] === $orderIds ? [] : Order::query()
+            ->whereKey( $orderIds )
+            ->whereNotNull( 'payment_reference' )
+            ->pluck( 'payment_reference' )
+            ->map( static fn ( $reference ): string => (string) $reference )
+            ->all();
+
+        if ( [] === $references && '' === $email ) {
+            return;
+        }
+
+        $escaped = str_replace( [ '!', '%', '_' ], [ '!!', '!%', '!_' ], mb_strtolower( $email ) );
+
+        InboundWebhookDelivery::query()
+            ->where( function ( Builder $query ) use ( $references, $email, $escaped ): void {
+                if ( [] !== $references ) {
+                    $query->whereIn( 'session_reference', $references );
+                }
+
+                if ( '' !== $email ) {
+                    $query->orWhereRaw( "LOWER(payload) LIKE ? ESCAPE '!'", [ '%' . $escaped . '%' ] );
+                }
+            } )
+            ->update( [ 'payload' => '', 'payload_truncated' => true, 'parsed' => null ] );
     }
 
     /**

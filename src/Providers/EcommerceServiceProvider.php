@@ -26,6 +26,7 @@ use ArtisanPackUI\Ecommerce\Console\Commands\LintPciColumnsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\LintTranslationsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\PruneCartsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\PruneIdempotencyRecordsCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\PruneLedgersCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\ReconcilePaymentsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\RefreshFxRatesCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\ReleaseExpiredReservationsCommand;
@@ -397,6 +398,7 @@ class EcommerceServiceProvider extends ServiceProvider
                 FlagAbandonedCartsCommand::class,
                 PruneCartsCommand::class,
                 PruneIdempotencyRecordsCommand::class,
+                PruneLedgersCommand::class,
                 ReconcilePaymentsCommand::class,
                 RefreshFxRatesCommand::class,
                 ReleaseExpiredReservationsCommand::class,
@@ -442,6 +444,10 @@ class EcommerceServiceProvider extends ServiceProvider
                     ->runInBackground();
                 $schedule->command( 'ecommerce:prune-carts' )
                     ->dailyAt( '03:30' )
+                    ->withoutOverlapping()
+                    ->runInBackground();
+                $schedule->command( 'ecommerce:prune-ledgers' )
+                    ->dailyAt( '03:45' )
                     ->withoutOverlapping()
                     ->runInBackground();
             } );

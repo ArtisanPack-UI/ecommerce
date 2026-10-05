@@ -38,6 +38,7 @@ return new class extends Migration {
             $table->timestamp( 'created_at' )->nullable();
 
             $table->index( 'digital_download_id', 'ecommerce_digital_download_events_download_idx' );
+            $table->index( 'created_at', 'ecommerce_digital_download_events_created_idx' );
 
             $table->foreign( 'digital_download_id', 'ecommerce_digital_download_events_download_fk' )
                 ->references( 'id' )

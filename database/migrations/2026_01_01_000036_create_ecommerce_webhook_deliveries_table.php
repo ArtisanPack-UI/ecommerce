@@ -54,6 +54,7 @@ return new class extends Migration {
             $table->index( 'next_retry_at', 'ecommerce_webhook_deliveries_retry_idx' );
             $table->index( 'order_id', 'ecommerce_webhook_deliveries_order_idx' );
             $table->index( 'customer_id', 'ecommerce_webhook_deliveries_customer_idx' );
+            $table->index( 'created_at', 'ecommerce_webhook_deliveries_created_idx' );
             $table->foreign( 'subscription_id', 'ecommerce_webhook_deliveries_subscription_fk' )
                 ->references( 'id' )
                 ->on( 'ecommerce_webhook_subscriptions' )

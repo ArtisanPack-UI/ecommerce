@@ -42,6 +42,7 @@ return new class extends Migration {
             $table->timestamp( 'created_at' )->nullable();
 
             $table->index( [ 'subject_type', 'subject_id', 'created_at' ], 'ecommerce_activity_log_subject_time_idx' );
+            $table->index( 'created_at', 'ecommerce_activity_log_created_idx' );
         } );
     }
 

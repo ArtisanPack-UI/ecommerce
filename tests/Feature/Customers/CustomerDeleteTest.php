@@ -12,6 +12,7 @@ use ArtisanPackUI\Ecommerce\Models\CustomerNotificationPreference;
 use ArtisanPackUI\Ecommerce\Models\DigitalDownload;
 use ArtisanPackUI\Ecommerce\Models\DigitalDownloadEvent;
 use ArtisanPackUI\Ecommerce\Models\IdempotencyRecord;
+use ArtisanPackUI\Ecommerce\Models\InboundWebhookDelivery;
 use ArtisanPackUI\Ecommerce\Models\LicenseActivation;
 use ArtisanPackUI\Ecommerce\Models\LicenseKey;
 use ArtisanPackUI\Ecommerce\Models\Order;
@@ -449,4 +450,53 @@ it( 'leaves the activity log untouched when it is disabled', function (): void {
     expect( Customer::query()->find( $this->customer->id ) )->toBeNull()
         ->and( ActivityLogEntry::query()->where( 'event_type', 'customer.deleted' )->count() )->toBe( 0 )
         ->and( app( ActivityLogService::class )->enabled() )->toBeFalse();
+} );
+
+it( 'drops the stored body of inbound provider webhooks about the customer\'s payments or carrying their email', function (): void {
+    $order = Order::factory()->forCustomer( $this->customer )->create( [ 'email' => 'jane@example.com', 'payment_reference' => 'pi_jane' ] );
+
+    $inbound = fn ( array $attributes ): InboundWebhookDelivery => InboundWebhookDelivery::query()->create( $attributes + [
+        'provider'        => 'stripe',
+        'verified'        => true,
+        'payload_hash'    => str_repeat( 'a', 64 ),
+        'payload_size'    => 10,
+        'parsed'          => [ 'billing' => 'Jane Doe' ],
+        'response_status' => 200,
+        'received_at'     => now(),
+    ] );
+
+    $bySession = $inbound( [ 'session_reference' => 'pi_jane', 'payload' => '{"name":"Jane Doe"}' ] );
+    $byEmail   = $inbound( [ 'session_reference' => 'pi_other_ref', 'payload' => '{"receipt_email":"JANE@example.com"}' ] );
+    $other     = $inbound( [ 'session_reference' => 'pi_someone', 'payload' => '{"receipt_email":"sam@example.com"}' ] );
+
+    $this->service->delete( $this->customer );
+
+    foreach ( [ $bySession, $byEmail ] as $row ) {
+        $row->refresh();
+
+        expect( $row->payload )->toBe( '' )
+            ->and( $row->parsed )->toBeNull()
+            ->and( $row->payload_truncated )->toBeTrue()
+            ->and( $row->payload_hash )->toBe( str_repeat( 'a', 64 ) );
+    }
+
+    expect( $other->refresh()->payload )->toBe( '{"receipt_email":"sam@example.com"}' )
+        ->and( $order->refresh()->email )->toBe( CustomerService::ANONYMIZED_EMAIL );
+} );
+
+it( 'matches LIKE wildcards in the email literally when scrubbing inbound webhooks', function (): void {
+    $customer = Customer::factory()->create( [ 'email' => 'j_ne%@example.com' ] );
+
+    $row = InboundWebhookDelivery::query()->create( [
+        'provider'        => 'stripe',
+        'verified'        => true,
+        'payload_hash'    => str_repeat( 'b', 64 ),
+        'payload'         => '{"receipt_email":"jane-other@example.com"}',
+        'response_status' => 200,
+        'received_at'     => now(),
+    ] );
+
+    $this->service->delete( $customer );
+
+    expect( $row->refresh()->payload )->toBe( '{"receipt_email":"jane-other@example.com"}' );
 } );

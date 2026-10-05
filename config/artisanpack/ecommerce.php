@@ -976,4 +976,33 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Retention
+    |--------------------------------------------------------------------------
+    |
+    | Days ledger rows are kept before `ecommerce:prune-ledgers` (daily)
+    | deletes them. 0 keeps them forever.
+    |
+    | `inbound_webhooks_days`   — Provider webhooks received (raw payloads may
+    |                             hold customer data).
+    | `webhook_deliveries_days` — Outbound deliveries that were delivered or
+    |                             ran out of attempts. Pending, retrying, and
+    |                             parked deliveries are never pruned.
+    | `activity_log_days`       — Admin activity entries.
+    | `download_events_days`    — Digital download events (IP, user agent).
+    |
+    | Expired idempotency records are pruned by
+    | `ecommerce:prune-idempotency-records`, and old carts by
+    | `ecommerce:prune-carts`.
+    |
+    */
+
+    'retention' => [
+        'inbound_webhooks_days'   => (int) env( 'ECOMMERCE_RETENTION_INBOUND_WEBHOOKS_DAYS', 90 ),
+        'webhook_deliveries_days' => (int) env( 'ECOMMERCE_RETENTION_WEBHOOK_DELIVERIES_DAYS', 90 ),
+        'activity_log_days'       => (int) env( 'ECOMMERCE_RETENTION_ACTIVITY_LOG_DAYS', 365 ),
+        'download_events_days'    => (int) env( 'ECOMMERCE_RETENTION_DOWNLOAD_EVENTS_DAYS', 365 ),
+    ],
+
 ];

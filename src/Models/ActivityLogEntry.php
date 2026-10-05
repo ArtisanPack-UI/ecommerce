@@ -6,9 +6,10 @@
  * Append-only activity log row for a product, customer, or promotion (orders
  * keep {@see OrderTimelineEntry}). Written by
  * {@see \ArtisanPackUI\Ecommerce\Services\ActivityLogService}; rows are
- * immutable after creation. The only sanctioned mutation is
+ * immutable after creation. The only sanctioned changes are
  * {@see \ArtisanPackUI\Ecommerce\Services\ActivityLogService::scrubCustomer()}
- * during customer delete-and-anonymize.
+ * during customer delete-and-anonymize and retention pruning by
+ * {@see \ArtisanPackUI\Ecommerce\Console\Commands\PruneLedgersCommand}.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
