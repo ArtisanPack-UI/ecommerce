@@ -23,7 +23,6 @@ namespace ArtisanPackUI\Ecommerce\Support;
 
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 
 /**
@@ -173,25 +172,25 @@ class RateLimitPolicyRegistrar
             return $limits;
         } );
 
+        // Every inbound webhook request counts against its caller's IP
+        // (G1): junk for made-up providers or with bad signatures is bounded
+        // per source instead of filling a shared bucket.
         RateLimiter::for( 'ecommerce.webhook.inbound', function ( Request $request ): array {
-            $provider = $request->route( 'provider' ) ?? $request->route( 'gateway' );
+            return [
+                Limit::perMinute( self::limit( 'webhook.inbound.per_ip', 120 ) )
+                    ->by( 'ecommerce:webhook:ip:' . sha1( (string) $request->ip() ) ),
+            ];
+        } );
 
-            if ( ! is_string( $provider ) || '' === $provider ) {
-                // A webhook route wired without a `{provider}`/`{gateway}`
-                // segment would silently pool every inbound provider into
-                // one shared 1000/min bucket. Fall back to the caller IP so
-                // the misconfiguration bounds itself while surfacing loudly
-                // in the log so operators notice.
-                Log::warning( 'ecommerce.rate_limit.webhook.missing_provider', [
-                    'route' => optional( $request->route() )->getName(),
-                ] );
-
-                $provider = 'ip:' . sha1( (string) $request->ip() );
-            }
+        // Signature-verified deliveries per registered provider, counted by
+        // the webhook controller after verification so unverified traffic
+        // can't use up a real provider's allowance.
+        RateLimiter::for( 'ecommerce.webhook.verified', function ( Request $request ): array {
+            $provider = $request->route( 'provider' );
 
             return [
                 Limit::perMinute( self::limit( 'webhook.inbound.per_provider', 1_000 ) )
-                    ->by( 'ecommerce:webhook:provider:' . sha1( $provider ) ),
+                    ->by( 'ecommerce:webhook:provider:' . sha1( is_string( $provider ) ? $provider : '' ) ),
             ];
         } );
 

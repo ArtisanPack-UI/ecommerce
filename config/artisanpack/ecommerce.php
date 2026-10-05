@@ -370,7 +370,11 @@ return [
             'per_ip'      => (int) env( 'ECOMMERCE_RATE_LICENSE_VALIDATE_PER_IP', 600 ),
         ],
 
+        // `per_ip` counts every inbound webhook request; `per_provider`
+        // counts only signature-verified ones, so junk can't starve a
+        // provider's real deliveries.
         'webhook.inbound' => [
+            'per_ip'       => (int) env( 'ECOMMERCE_RATE_WEBHOOK_INBOUND_PER_IP', 120 ),
             'per_provider' => (int) env( 'ECOMMERCE_RATE_WEBHOOK_INBOUND_PER_PROVIDER', 1_000 ),
         ],
 
@@ -635,6 +639,9 @@ return [
     |                            references, IP / user agent, product meta,
     |                            cost prices) in payloads. Off by default.
     | `connection` / `queue`   — Where `DeliverWebhookJob` is queued.
+    | `inbound_max_bytes`      — Largest inbound provider webhook body
+    |                            accepted (`POST ecommerce/webhooks/{provider}`);
+    |                            bigger bodies are a 413 and aren't stored.
     |
     */
 
@@ -665,6 +672,7 @@ return [
         'include_admin_fields'   => (bool) env( 'ECOMMERCE_WEBHOOK_INCLUDE_ADMIN_FIELDS', false ),
         'connection'             => env( 'ECOMMERCE_WEBHOOK_QUEUE_CONNECTION' ),
         'queue'                  => env( 'ECOMMERCE_WEBHOOK_QUEUE' ),
+        'inbound_max_bytes'      => (int) env( 'ECOMMERCE_WEBHOOK_INBOUND_MAX_BYTES', 524_288 ),
     ],
 
     /*

@@ -48,12 +48,16 @@ it( 'resolves license.validate with 600/min per IP + 60/min per license', functi
     expect( $limits[1]->maxAttempts )->toBe( 60 );
 } );
 
-it( 'resolves webhook.inbound with 1000/min per provider', function (): void {
-    $limits = ( RateLimiter::limiter( 'ecommerce.webhook.inbound' ) )( Request::create( '/x', 'POST' ) );
+it( 'resolves webhook.inbound with 120/min per IP and webhook.verified with 1000/min per provider', function (): void {
+    $inbound  = ( RateLimiter::limiter( 'ecommerce.webhook.inbound' ) )( Request::create( '/x', 'POST' ) );
+    $verified = ( RateLimiter::limiter( 'ecommerce.webhook.verified' ) )( Request::create( '/x', 'POST' ) );
 
-    expect( $limits )->toHaveCount( 1 );
-    expect( $limits[0]->maxAttempts )->toBe( 1_000 );
-    expect( $limits[0]->decaySeconds )->toBe( 60 );
+    expect( $inbound )->toHaveCount( 1 )
+        ->and( $inbound[0]->maxAttempts )->toBe( 120 )
+        ->and( $inbound[0]->decaySeconds )->toBe( 60 )
+        ->and( $inbound[0]->key )->toStartWith( 'ecommerce:webhook:ip:' )
+        ->and( $verified[0]->maxAttempts )->toBe( 1_000 )
+        ->and( $verified[0]->key )->toStartWith( 'ecommerce:webhook:provider:' );
 } );
 
 it( 'honours per-policy config overrides', function (): void {

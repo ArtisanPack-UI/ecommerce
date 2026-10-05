@@ -39,7 +39,10 @@ return new class extends Migration {
             $table->boolean( 'verified' );
             $table->boolean( 'duplicate' )->default( false );
             $table->string( 'error_code', 60 )->nullable();
+            $table->string( 'session_reference', 255 )->nullable();
             $table->char( 'payload_hash', 64 );
+            $table->unsignedInteger( 'payload_size' )->default( 0 );
+            $table->boolean( 'payload_truncated' )->default( false );
             $table->longText( 'payload' );
             $table->json( 'parsed' )->nullable();
             $table->unsignedSmallInteger( 'response_status' );
@@ -50,6 +53,7 @@ return new class extends Migration {
             $table->index( [ 'provider', 'event_id' ], 'ecommerce_inbound_webhook_deliveries_provider_event_idx' );
             $table->index( 'received_at', 'ecommerce_inbound_webhook_deliveries_received_idx' );
             $table->index( 'correlation_id', 'ecommerce_inbound_webhook_deliveries_correlation_idx' );
+            $table->index( 'session_reference', 'ecommerce_inbound_webhook_deliveries_session_idx' );
         } );
     }
 

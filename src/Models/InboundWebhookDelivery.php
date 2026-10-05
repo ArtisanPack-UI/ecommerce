@@ -5,6 +5,9 @@
  *
  * One row per inbound provider webhook the engine receives, verified or
  * not. Powers the audit / replay path off {@see \ArtisanPackUI\Ecommerce\Http\Controllers\WebhookController}.
+ * Unverified requests keep only their hash, size, and first
+ * {@see self::UNVERIFIED_PAYLOAD_BYTES} bytes; unknown providers and
+ * oversized bodies aren't stored at all.
  *
  * Idempotent dispatch is still gated by {@see IdempotencyRecord} — this
  * table's uniqueness is intentionally soft (index, not constraint) so a
@@ -39,7 +42,10 @@ use Illuminate\Support\Carbon;
  * @property bool                      $verified
  * @property bool                      $duplicate
  * @property string|null               $error_code
+ * @property string|null               $session_reference
  * @property string                    $payload_hash
+ * @property int                       $payload_size
+ * @property bool                      $payload_truncated
  * @property string                    $payload
  * @property array<string,mixed>|null  $parsed
  * @property int                       $response_status
@@ -50,6 +56,15 @@ use Illuminate\Support\Carbon;
  */
 class InboundWebhookDelivery extends Model
 {
+    /**
+     * Bytes of an unverified request's body kept for inspection.
+     *
+     * @since 1.0.0
+     *
+     * @var int
+     */
+    public const UNVERIFIED_PAYLOAD_BYTES = 1_024;
+
     /**
      * @since 1.0.0
      *
@@ -69,7 +84,10 @@ class InboundWebhookDelivery extends Model
         'verified',
         'duplicate',
         'error_code',
+        'session_reference',
         'payload_hash',
+        'payload_size',
+        'payload_truncated',
         'payload',
         'parsed',
         'response_status',
@@ -85,11 +103,13 @@ class InboundWebhookDelivery extends Model
     protected function casts(): array
     {
         return [
-            'verified'        => 'boolean',
-            'duplicate'       => 'boolean',
-            'parsed'          => 'array',
-            'response_status' => 'integer',
-            'received_at'     => 'datetime',
+            'verified'          => 'boolean',
+            'duplicate'         => 'boolean',
+            'payload_size'      => 'integer',
+            'payload_truncated' => 'boolean',
+            'parsed'            => 'array',
+            'response_status'   => 'integer',
+            'received_at'       => 'datetime',
         ];
     }
 }

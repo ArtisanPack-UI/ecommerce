@@ -37,12 +37,90 @@ final class WebhookControllerTest extends TestCase
         $response->assertNotFound();
         $response->assertJsonPath( 'code', 'gateway_not_registered' );
 
-        $this->assertDatabaseHas( 'ecommerce_inbound_webhook_deliveries', [
-            'provider'        => 'paypal',
-            'verified'        => false,
-            'error_code'      => 'gateway_not_registered',
-            'response_status' => 404,
-        ] );
+        // Unknown providers are never stored (audit G1).
+        $this->assertDatabaseCount( 'ecommerce_inbound_webhook_deliveries', 0 );
+    }
+
+    /**
+     * @return void
+     */
+    public function test_made_up_provider_names_write_no_rows(): void
+    {
+        foreach ( [ 'bogus-1', 'bogus-2', 'bogus-3' ] as $provider ) {
+            $this->postJson( '/ecommerce/webhooks/' . $provider, [ 'blob' => str_repeat( 'x', 10_000 ) ] )->assertNotFound();
+        }
+
+        $this->assertDatabaseCount( 'ecommerce_inbound_webhook_deliveries', 0 );
+    }
+
+    /**
+     * @return void
+     */
+    public function test_an_unverified_delivery_keeps_the_hash_and_size_but_not_the_payload(): void
+    {
+        $this->registerFakeGateway( 'fake', verified: false );
+
+        $body = json_encode( [ 'blob' => str_repeat( 'y', 5_000 ) ], JSON_THROW_ON_ERROR );
+
+        $this->call( 'POST', '/ecommerce/webhooks/fake', [], [], [], [ 'CONTENT_TYPE' => 'application/json' ], $body )->assertStatus( 400 );
+
+        $row = InboundWebhookDelivery::query()->sole();
+
+        $this->assertSame( hash( 'sha256', $body ), $row->payload_hash );
+        $this->assertSame( strlen( $body ), $row->payload_size );
+        $this->assertTrue( $row->payload_truncated );
+        $this->assertSame( InboundWebhookDelivery::UNVERIFIED_PAYLOAD_BYTES, strlen( $row->payload ) );
+        $this->assertNull( $row->parsed );
+    }
+
+    /**
+     * @return void
+     */
+    public function test_an_oversized_body_is_refused_before_anything_is_stored(): void
+    {
+        $this->registerFakeGateway( 'fake' );
+        config()->set( 'artisanpack.ecommerce.webhooks.inbound_max_bytes', 2_048 );
+
+        $this->postJson( '/ecommerce/webhooks/fake', [ 'id' => 'evt_big', 'blob' => str_repeat( 'z', 4_096 ) ] )
+            ->assertStatus( 413 )
+            ->assertJsonPath( 'code', 'payload_too_large' );
+
+        $this->assertDatabaseCount( 'ecommerce_inbound_webhook_deliveries', 0 );
+        $this->assertDatabaseCount( 'ecommerce_idempotency_records', 0 );
+    }
+
+    /**
+     * @return void
+     */
+    public function test_junk_from_one_ip_does_not_starve_a_verified_delivery_from_another(): void
+    {
+        $this->registerFakeGateway( 'fake', verified: null );
+
+        for ( $i = 0; $i < 1_000; $i++ ) {
+            $this->withServerVariables( [ 'REMOTE_ADDR' => '203.0.113.7' ] )->postJson( '/ecommerce/webhooks/fake', [ 'id' => 'junk' ] );
+        }
+
+        $this->withServerVariables( [ 'REMOTE_ADDR' => '203.0.113.7' ] )->postJson( '/ecommerce/webhooks/fake', [ 'id' => 'junk' ] )->assertStatus( 429 );
+
+        $this->withServerVariables( [ 'REMOTE_ADDR' => '198.51.100.20' ] )
+            ->postJson( '/ecommerce/webhooks/fake', [ 'id' => 'evt_real', 'type' => 'payment.captured' ], [ 'X-Fake-Signature' => 'ok' ] )
+            ->assertOk();
+
+        // Only the first 120 junk requests got past the per-IP limit.
+        $this->assertSame( 120, InboundWebhookDelivery::query()->where( 'verified', false )->count() );
+    }
+
+    /**
+     * @return void
+     */
+    public function test_verified_deliveries_count_against_the_provider_allowance(): void
+    {
+        $this->registerFakeGateway( 'fake' );
+        config()->set( 'artisanpack.ecommerce.rate_limits.webhook.inbound.per_provider', 2 );
+
+        $this->postJson( '/ecommerce/webhooks/fake', [ 'id' => 'evt_1' ] )->assertOk();
+        $this->postJson( '/ecommerce/webhooks/fake', [ 'id' => 'evt_2' ] )->assertOk();
+        $this->postJson( '/ecommerce/webhooks/fake', [ 'id' => 'evt_3' ] )->assertStatus( 429 )->assertHeader( 'Retry-After' );
     }
 
     /**
@@ -227,13 +305,16 @@ final class WebhookControllerTest extends TestCase
      *
      * @return void
      */
-    private function registerFakeGateway( string $key, bool $verified = true ): void
+    private function registerFakeGateway( string $key, ?bool $verified = true ): void
     {
         /** @var PaymentGatewayRegistry $registry */
         $registry = $this->app->make( PaymentGatewayRegistry::class );
 
         $registry->register( $key, new class( $key, $verified ) implements PaymentGateway {
-            public function __construct( private readonly string $registryKey, private readonly bool $verified )
+            /**
+             * `$verified` null: verified when `X-Fake-Signature: ok` is sent.
+             */
+            public function __construct( private readonly string $registryKey, private readonly ?bool $verified )
             {
             }
 
@@ -288,7 +369,9 @@ final class WebhookControllerTest extends TestCase
 
             public function handleWebhook( Request $request ): WebhookResult
             {
-                if ( ! $this->verified ) {
+                $verified = $this->verified ?? 'ok' === $request->headers->get( 'X-Fake-Signature' );
+
+                if ( ! $verified ) {
                     return WebhookResult::unverified();
                 }
 
