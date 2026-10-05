@@ -19,9 +19,12 @@ product row, so they never run a rating query per product.
 
 `ReviewService` owns every transition:
 
-1. **Submit.** The `ap.ecommerce.review.submitting` filter runs first. It can
-   rewrite the attributes, or return `null` to abort the submission. The
-   review is then saved as `pending`.
+1. **Submit.** The author must be eligible (see
+   [Who can review](#who-can-review)); otherwise `submit()` throws
+   `ReviewNotAllowedException` with the reason. The
+   `ap.ecommerce.review.submitting` filter runs next. It can rewrite the
+   attributes, or return `null` to abort the submission. The review is then
+   saved as `pending`, with any photos attached.
 2. **Automatic moderation.** The review passes through the
    `ap.ecommerce.review.moderating` filter. The bound `ReviewModerator` then
    returns `approve`, `reject`, `spam`, or `pending`, and the service applies
@@ -50,18 +53,46 @@ by one, and it holds a lock on the product row while it does. Concurrent
 moderation therefore can't make the aggregate drift. The product is saved
 through Eloquent, so Scout re-indexes the new rating.
 
+`ProductRatingAggregator::histogram( $product )` counts the approved reviews
+per star, `[ 5 => n, 4 => n, 3 => n, 2 => n, 1 => n ]`, for a "4.6 ★ — 5★ 80 ·
+4★ 12 · …" breakdown.
+
+## Who can review
+
+`ReviewService::eligibility( $product, ?$customer )` returns a
+`Reviews\ReviewEligibility` (`allowed`, `reason`, `verified_purchase`), so a
+product page can show "Write a review" only when it will be accepted:
+
+| Reason | When | Setting |
+|---|---|---|
+| `guests-not-allowed` | No signed-in customer, and guests can't review | `reviews.allow_guests` (default `true`) |
+| `purchase-required` | No paid order of the customer contains the product | `reviews.require_purchase` (default `false`) |
+| `already-reviewed` | The customer already has a live review of the product (a rejected or spam one doesn't count) | `reviews.allow_multiple` (default `false`) |
+
 ## Verified purchases
 
 A review is a verified purchase when the reviewer is a signed-in customer and
-cites an `order_id` that:
+an order proves it. The order must:
 
-- belongs to that customer,
-- is paid (`payment_status` is `paid` or `partially_refunded`), and
-- contains the reviewed product.
+- belong to that customer,
+- be paid (`payment_status` is `paid` or `partially_refunded`), and
+- contain the reviewed product.
 
-If a cited order doesn't meet all three, the service drops it and the review
-is stored as unverified. The review isn't rejected, so the response can't be
-used to check whether someone else's order exists. Guests are never verified.
+A cited `order_id` that doesn't meet all three is dropped and the review is
+stored as unverified. The review isn't rejected, so the response can't be
+used to check whether someone else's order exists. Without an `order_id`,
+the customer's latest paid order for the product is used, so buyers get the
+badge automatically. Guests are never verified.
+
+## Photos
+
+A submission may carry photos (`media[]`, images up to 5 MB each, at most
+`reviews.max_media`, default 5). `Reviews\ReviewMediaStore` stores each one
+through `artisanpack-ui/media-library` and links it in
+`product_review_media`. Without media-library installed, a request with
+photos is refused with a 422 on `media`. Bind your own `ReviewMediaStore`
+subclass to store them elsewhere. The `review` resource lists them as
+`media_ids`.
 
 ## Spam defense
 
@@ -82,8 +113,9 @@ used to check whether someone else's order exists. Guests are never verified.
 
 | Method | Path | Access |
 |---|---|---|
-| GET | `products/{product}/reviews` | public; approved reviews of a storefront-visible product. Filters: `rating`, `is_verified_purchase`. Sorts: `rating`, `created_at`. |
-| POST | `products/{product}/reviews` | signed-in shopper or guest, `ecommerce.review.submit`, Idempotency-Key |
+| GET | `products/{product}/reviews` | public; approved reviews of a storefront-visible product. Filters: `rating`, `is_verified_purchase`. Sorts: `rating`, `created_at`. Adds `meta.histogram` (counts per star) and `meta.average`. |
+| GET | `products/{product}/reviews/eligibility` | public or signed in; `{ allowed, reason, verified_purchase }` for the caller |
+| POST | `products/{product}/reviews` | signed-in shopper or guest, `ecommerce.review.submit`, Idempotency-Key. JSON, or multipart with `media[]`. An ineligible author gets a 403 whose `type` ends in the reason (`already-reviewed`, `purchase-required`), or a 401 when guests can't review. |
 | GET | `admin/reviews` | `ecommerce.review.viewAny`. Filters: `status`, `product_id`, `customer_id`, `rating`, `is_verified_purchase`. |
 | GET | `admin/reviews/{review}` | `ecommerce.review.view` |
 | POST | `admin/reviews/{review}/moderate` | `ecommerce.review.moderate`. Body: `{ action: approve\|reject\|spam\|pending, reason? }`. |

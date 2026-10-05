@@ -8,7 +8,7 @@ from a template. Customers choose which kinds of notification they receive.
 
 | Key | Sent when | To | Category |
 |---|---|---|---|
-| `order.confirmation.customer` | `ap.ecommerce.order.placed` (fired by the checkout service, which hasn't landed yet) | customer | transactional |
+| `order.confirmation.customer` | `ap.ecommerce.order.placed` (fired when `OrderPlacementService` places an order) | customer | transactional |
 | `order.paid.admin` | `ap.ecommerce.payment.succeeded` | staff | transactional |
 | `order.shipped.customer` | `ap.ecommerce.order.shipped` | customer | shipping-updates |
 | `order.delivered.customer` | `ap.ecommerce.order.delivered`, once every shipment on the order is delivered | customer | shipping-updates |
@@ -37,21 +37,37 @@ stops it.
 Satellites add catalog entries by registering a `NotificationTemplate`
 (engine spec §4.14) with `NotificationTemplateRegistry`, then sending with
 `NotificationDispatcher::send()`. The `CatalogNotificationTemplate` class
-builds a definition from plain values, so you don't need to write a class:
+builds a definition from plain values, so you don't need to write a class.
+The label, subject, and body may be strings or closures that take the locale;
+use closures so the copy is translated when it's sent, in the recipient's
+language, rather than once when the catalog is registered:
 
 ```php
 app( NotificationTemplateRegistry::class )->register( 'subscriptions.renewal-reminder.customer', new CatalogNotificationTemplate(
     'subscriptions.renewal-reminder.customer',
-    __( 'Renewal reminder' ),
+    static fn ( ?string $locale ): string => __( 'Renewal reminder', [], $locale ),
     'transactional',
     [ 'Store.name', 'Subscription.renews_at', 'Customer.first_name' ],
     [ 'Store' => [ … ], 'Subscription' => [ … ], 'Customer' => [ … ] ],
-    'Your subscription renews soon',
-    '<p>Hi {{ Customer.first_name }}, …</p>',
+    static fn ( ?string $locale ): string => __( 'Your subscription renews soon', [], $locale ),
+    static fn ( ?string $locale ): string => __( '<p>Hi {{ Customer.first_name }}, …</p>', [], $locale ),
 ) );
 
-app( NotificationDispatcher::class )->send( 'subscriptions.renewal-reminder.customer', $customer, [ 'Subscription' => [ … ], 'Customer' => [ … ] ], $subscription );
+app( NotificationDispatcher::class )->send(
+    'subscriptions.renewal-reminder.customer',
+    $customer,
+    [ 'Subscription' => [ … ], 'Customer' => [ … ] ],
+    $subscription,
+    locale: $subscription->order->locale, // optional
+);
 ```
+
+`NotificationTemplate::defaultSubject( ?string $locale = null )` and
+`defaultBody( ?string $locale = null )` take the locale to translate into
+(null means the current app locale). `send()` takes an optional `$locale`;
+without it, each customer recipient's own preference applies, and otherwise
+the app locale at delivery. Staff notifications are sent in the store default
+(`NotificationDispatcher::adminLocale()`).
 
 ## Editable templates
 
@@ -62,20 +78,42 @@ declared `variables`, `preview_data`, and `is_active`. Rows in the default
 locale (`notifications.default_locale`, falling back to
 `app.fallback_locale`) are seeded from the catalog the first time the
 templates are listed. Seeding keeps any edits already made. It also refreshes
-each row's declared variables from the catalog definition. At send time the
-engine uses the row for the notification's locale, then the default-locale
-row, then the catalog default. Rows with `is_active` set to false aren't sent.
+each row's declared variables from the catalog definition.
+
+At send time the copy for the notification's locale is, in order:
+
+1. the store's row in that locale;
+2. the catalog default translated into that locale, when the locale (or its
+   base language) is in `localization.supported_locales` and isn't the
+   default locale;
+3. the store's default-locale row;
+4. the catalog default.
+
+Rows with `is_active` set to false aren't sent. See
+[localization](./localization.md#the-shoppers-language) for how the locale is
+chosen.
 
 Templates see plain data, never models. Variables are nested arrays under a
 few roots: `Store`, `Order`, `Customer`, `Shipment`, `Refund`, `Review`,
 `Product`, `Downloads`, `Licenses`, `License`, `Activation`, `File`, and
 `InventoryItem`. Money arrives formatted (`$50.36`) and dates arrive as
-ISO 8601 strings, so use the `date` filter to format them. For example:
+ISO 8601 strings, so format them with the `localized_date` filter (Twig's own
+`date` filter always prints English month names). For example:
 
 ```twig
 Hi {{ Order.customer.first_name|default(Order.customer.name) }},
 {% for item in Order.items %}{{ item.name }} × {{ item.quantity }} — {{ item.total }}{% endfor %}
 ```
+
+Two variables are per recipient:
+
+- `Store.preferences_url` is the recipient's signed unsubscribe link when the
+  template's category can be turned off, and otherwise
+  `notifications.preferences_url` (your storefront's settings page, if set).
+- `Order.view_url` is set for guest orders only: a signed link that shows the
+  order without signing in (`checkout.order_view_url` with `{token}`
+  replaced, else the REST `order-views/{token}` endpoint). The order
+  confirmation links to it.
 
 ### The sandbox
 
@@ -86,7 +124,7 @@ every template:
   `macro`, `embed`, `extends`, or `set`. Repeating `{% set s = s ~ s %}`
   doubles a string until PHP runs out of memory.
 - **Filters:** `abs`, `capitalize`, `date`, `default`, `e` / `escape`,
-  `first`, `join`, `keys`, `last`, `length`, `lower`, `merge`, `nl2br`,
+  `first`, `join`, `keys`, `last`, `length`, `localized_date`, `lower`, `merge`, `nl2br`,
   `number_format`, `replace`, `round`, `slice`, `striptags`, `title`, `trim`,
   `upper`, `url_encode`. Filters that take a callable (`map`, `filter`,
   `reduce`, `sort`) are excluded, and so is `raw`. So are filters that can
@@ -109,6 +147,35 @@ reference **declared variables**. A declared variable's parents are allowed
 (`Order.customer` when `Order.customer.name` is declared), and so are the
 template's own `for` loop variables. Errors come back one per problem, with
 the line number.
+
+### The mail
+
+Each mail goes out as HTML plus a `text/plain` alternative:
+
+- The rendered body is wrapped in a minimal document with the recipient's
+  language and direction (`<html lang="de" dir="ltr">`, `dir="rtl"` for
+  right-to-left languages) and the subject as its `<title>`.
+- The text part is converted from the HTML: block elements become line
+  breaks, list items get a dash, and links keep their target as
+  `text (https://…)`.
+- The catalog's layout tables carry `role="presentation"` for screen readers.
+
+Mail in a category the recipient can turn off (anything but transactional)
+also carries one-click unsubscribe:
+
+- `List-Unsubscribe: <signed URL>` and `List-Unsubscribe-Post:
+  List-Unsubscribe=One-Click` headers (RFC 8058);
+- a footer link, "Unsubscribe from these emails", that the store's copy can't
+  remove.
+
+The signed URL never expires. `GET ecommerce/notifications/unsubscribe` shows
+a confirmation page with a button, so a mail scanner fetching the link
+changes nothing; `POST` to the same URL, which is what mail clients send for
+one-click, turns the category off. A guest who unsubscribes gets a customer
+record for their address so the choice sticks, and later mail to that
+address checks it. Both routes are rate-limited per IP
+(`rate_limits.notifications.unsubscribe.per_ip`, default 30 a minute) and
+answer in the `Accept-Language` language.
 
 ### Hooks
 
@@ -165,6 +232,8 @@ customer, channel, and category. The categories are `transactional`,
   customer's `accepts_marketing` consent.
 - **Transactional notifications always send.** An opt-out row is stored for
   the audit trail and never consulted.
+- Mail to a guest order's address follows the preferences of the customer
+  record with that email, if there is one (see the unsubscribe link above).
 
 | Method | Path | Access |
 |---|---|---|

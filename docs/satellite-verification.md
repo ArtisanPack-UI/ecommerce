@@ -2,9 +2,10 @@
 
 Satellites prove they honour the engine's contracts by extending the
 engine's abstract contract suites and running `ecommerce:verify-satellite`.
-The command writes a JSON report; CI signs it and attaches it to each tagged
-release, which is what earns the "contract-verified" badge on the
-[satellites page](satellites.md). Parent plan §15.2.
+The command writes a JSON report. On each tag, CI signs a passing report and
+the satellite's release job attaches it to the GitHub release, which is what
+earns the "contract-verified" badge on the [satellites page](satellites.md).
+Parent plan §15.2.
 
 Verification is advisory. The engine never refuses to boot an unverified
 satellite.
@@ -57,12 +58,17 @@ satellite.
 | `KanbanCardWidget` | `KanbanCardWidgetRegistry` | `KanbanCardWidgetContractTest` |
 | `KanbanAutomationTrigger` | `KanbanAutomationRegistry` | `KanbanAutomationTriggerContractTest` |
 | `NotificationTemplate` | `NotificationTemplateRegistry` | `NotificationTemplateContractTest` |
+| `SearchProvider` | `SearchProviderRegistry` | `SearchProviderContractTest` |
+| `SearchIndexer` | `SearchIndexerRegistry` | — (`no-suite`) |
 | `CartStorage` | container binding | `CartStorageContractTest` |
 | `OrderNumberGenerator` | container binding | `OrderNumberGeneratorContractTest` |
 | `ReviewModerator` | container binding | `ReviewModeratorContractTest` |
 
-Suites live in `ArtisanPackUI\Ecommerce\Testing\Contracts\`. A contract
-without a shared suite reports `no-suite`; that never fails verification.
+The engine ships fifteen suites in `ArtisanPackUI\Ecommerce\Testing\Contracts\`
+(see [contracts.md](contracts.md#contract-test-suites) for what each one
+checks). A contract without a shared suite reports `no-suite`; that never
+fails verification. The table above is
+[`ContractSuiteMap`](../src/Testing/Verification/ContractSuiteMap.php).
 
 ### Statuses
 
@@ -228,11 +234,19 @@ php -r '$k = sodium_crypto_sign_keypair(); echo "secret: ", base64_encode(sodium
 - Publish the **public** key with your satellite's listing on the
   [satellites page](satellites.md).
 
-In CI, sign with `vendor/bin/ecommerce-sign-report [report] [signature]`
-rather than `--sign`. It loads only the engine's `ReportSigner` (no
-autoloader, no service providers, no satellite or dependency code), so the
-signing key never shares a process with code under test. It refuses to sign
-a report whose `verified` flag isn't `true`. `--sign` remains for local use.
+In CI, sign with `ecommerce-sign-report [report] [signature]` rather than
+`--sign`. It reads the key from `ECOMMERCE_VERIFY_SIGNING_KEY` and loads only
+the engine's `ReportSigner` (no autoloader, no service providers, no satellite
+or dependency code). It refuses to sign a report whose `verified` flag isn't
+`true`. `--sign` remains for local use.
+
+Running the signer in a separate process is not enough on its own. On the
+runner that ran `composer install` and your tests, a dependency or Composer
+plugin could have changed `vendor/bin/ecommerce-sign-report` or read the key
+from the environment. The [reusable workflow](#ci) avoids that by signing in
+a separate job on a fresh runner, with a copy of the signer checked out from
+the engine repository. If you build your own pipeline, do the same: give the
+key only to a job that never installs or runs satellite code.
 
 Check a signature locally:
 
@@ -243,41 +257,97 @@ vendor/bin/testbench ecommerce:verify-satellite --check-signature --public-key=<
 ## CI
 
 The engine ships a reusable workflow at
-`.github/workflows/verify-satellite.yml` (`workflow_call` only). Copy
+[`.github/workflows/verify-satellite.yml`](../.github/workflows/verify-satellite.yml)
+(`workflow_call` only, so it never runs on the engine's own pushes). Copy
 [`stubs/workflows/verify-satellite.yml`](../stubs/workflows/verify-satellite.yml)
 into your satellite as `.github/workflows/verify-satellite.yml`:
 
 ```yaml
+on:
+  pull_request:
+  push:
+    tags:
+      - 'v*'
+
 jobs:
   verify:
     uses: ArtisanPack-UI/ecommerce/.github/workflows/verify-satellite.yml@v1.0.0
     permissions:
-      contents: write
+      contents: read
     with:
       php-version: '8.4'
     secrets:
       ECOMMERCE_VERIFY_SIGNING_KEY: ${{ secrets.ECOMMERCE_VERIFY_SIGNING_KEY }}
+
+  release:
+    needs: verify
+    if: ${{ startsWith(github.ref, 'refs/tags/') && needs.verify.outputs.signed == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecommerce-verify-signature
+          path: verification
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            verification/.ecommerce-verify-report.json
+            verification/verify-report.sig
 ```
 
-Keep the reference pinned to an engine release tag (or a commit SHA) — the
+Keep the reference pinned to an engine release tag (or a commit SHA). The
 job passes the workflow your signing key, so never point it at a moving
 branch such as `@main`. The reusable workflow SHA-pins every third-party
 action it uses.
 
-On pull requests the workflow verifies and uploads the report as a workflow
-artifact. On `v*` tags it also signs the report — in a separate step that
-receives the signing key and runs `ecommerce-sign-report`, while the step
-that runs your tests never sees it — and attaches
-`.ecommerce-verify-report.json` and `verify-report.sig` to the tag's GitHub
-release (creating the release if needed).
+### How the workflow runs
+
+The reusable workflow has two jobs, so the signing key never shares a runner
+with your satellite's code:
+
+1. **`verify`** runs on every call, with no secrets and read-only
+   permissions. It checks out your repository, runs `composer install`, and
+   runs `vendor/bin/ecommerce-verify-satellite --package-version=<ref name>`
+   plus `extra-args`. It then uploads `.ecommerce-verify-report.json` as the
+   `ecommerce-verify-report` artifact, even when verification fails.
+2. **`sign`** runs only on tag refs, and only after `verify` succeeds. A
+   report that isn't verified fails `verify`, so it's never signed. On a fresh
+   runner, `sign` downloads only the report artifact and does a sparse checkout
+   of the engine at the exact commit of the workflow file
+   (`bin/ecommerce-sign-report` and `ReportSigner.php`, with no
+   `composer install`). It then runs `php engine/bin/ecommerce-sign-report`
+   with `ECOMMERCE_VERIFY_SIGNING_KEY`, and uploads the report and
+   `verify-report.sig` as the `ecommerce-verify-signature` artifact. With no
+   key passed, it logs a notice and skips signing.
+
+The workflow's `signed` output is `true` when the
+`ecommerce-verify-signature` artifact exists.
+
+The workflow never creates or edits a GitHub release. Under immutable
+releases, a release it created would lock before your own release step could
+attach anything. Instead, the stub's `release` job downloads the
+`ecommerce-verify-signature` artifact and attaches both files when it creates
+the release. If you already have a release workflow, move that job's two
+steps into it and make it `needs: verify`.
 
 | Input | Default | Purpose |
 |---|---|---|
-| `php-version` | `8.4` | PHP version for the run. |
+| `php-version` | `8.4` | PHP version for the `verify` job. |
 | `php-extensions` | `dom, curl, libxml, mbstring, zip, pdo, sqlite, pdo_sqlite` | Extensions to install (`intl` and `sodium` are always added). |
 | `working-directory` | `.` | Satellite root in a monorepo. |
 | `extra-args` | `''` | Extra verifier arguments, e.g. `--allow-empty`. |
-| `upload-release-assets` | `true` | Attach the report and signature to the release on tags. |
+| `upload-release-assets` | `false` | **Deprecated and ignored.** Setting it only logs a warning. Attach the `ecommerce-verify-signature` artifact from your own release step instead. |
+
+| Secret | Required | Purpose |
+|---|---|---|
+| `ECOMMERCE_VERIFY_SIGNING_KEY` | No | Base64 Ed25519 secret key. Only the `sign` job receives it. |
+
+| Output | Purpose |
+|---|---|
+| `signed` | `true` when a signature was produced. |
 
 ## Building on the verifier
 

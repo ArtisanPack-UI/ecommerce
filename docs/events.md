@@ -16,12 +16,20 @@ Event::listen( OrderRefunded::class, function ( OrderRefunded $event ): void {
 
 ## Dispatch semantics
 
-- Events are dispatched with `Event::dispatch()` once the change is
-  committed, usually right after the matching `doAction()` hook. Exceptions
-  with no paired hook: `FraudChallenged`, and `PaymentFailed` when it is
-  raised by a fraud block or a gateway exception in `PaymentOrchestrator`. None of the event classes
-  implement `ShouldQueue` or `ShouldBroadcast`. To do the work
-  asynchronously, make **your listener** implement `ShouldQueue`.
+- **After commit.** Every class implements `ShouldDispatchAfterCommit`. An
+  event dispatched inside a database transaction reaches its listeners only
+  once the outermost transaction commits, and never if it rolls back.
+  Outside a transaction it is delivered immediately.
+- Events are dispatched with `Event::dispatch()`, usually right after the
+  matching `doAction()` hook. The exceptions, with no paired hook, are
+  `FraudChallenged`, `PaymentFailed` when a fraud block raises it,
+  `CustomerRegistered` and `CustomerUpdated` (fired from the `Customer`
+  model, so every write path raises them), and `CartCompleted`,
+  `PromotionApplied`, and `CouponRedeemed` (they follow
+  `ap.ecommerce.order.placed`).
+- None of the event classes implement `ShouldQueue` or `ShouldBroadcast`.
+  To do the work asynchronously, make **your listener** implement
+  `ShouldQueue`.
 - Every public property is `readonly` and set through the constructor.
 - **Webhooks.** Each class listed in `artisanpack.ecommerce.webhooks.events`
   is delivered to outbound webhook subscribers by the `DispatchWebhooksForEvent`
@@ -29,7 +37,8 @@ Event::listen( OrderRefunded::class, function ( OrderRefunded $event ): void {
   name is the snake-cased, dot-separated class name
   (`WebhookPayloadFactory::eventName()`), so `OrderStatusChanged` becomes
   `order.status.changed`. Any event class can be added to that config list.
-  See [webhooks.md](webhooks.md).
+  The list is read at boot. A host that published the config before 1.0.0
+  must add the new classes to its copy. See [webhooks.md](webhooks.md#events).
 - **Broadcasts.** When `artisanpack.ecommerce.graphql.subscriptions` is on,
   some events are re-broadcast as `GraphQLSubscriptionBroadcast` (which *is*
   `ShouldBroadcast`) on `private-ecommerce.admin`. When
@@ -45,24 +54,37 @@ All events are available since **1.0.0** and live in the
 | Event | Dispatched by | Webhook by default | Wire name | Broadcast as |
 |---|---|---|---|---|
 | `CartCreated` | `CartService::create()` | | `cart.created` | |
-| `CartUpdated` | `CartService` (add, set quantity, remove, token rotation) | | `cart.updated` | |
+| `CartUpdated` | `CartService` (add, set quantity, remove, clear, token rotation), `StorefrontCartService` (customer attached, currency changed) | | `cart.updated` | |
 | `CartMerged` | `CartMergeService` (guest cart merged at sign-in) | | `cart.merged` | |
+| `CartAbandoned` | `ecommerce:flag-abandoned-carts` | yes | `cart.abandoned` | |
+| `CartCompleted` | `OrderPlacementService` (cart converted to an order) | yes | `cart.completed` | |
+| `OrderPlaced` | `OrderPlacementService` | yes | `order.placed` | |
+| `PromotionApplied` | `OrderPlacementService` (once per applied promotion) | yes | `promotion.applied` | |
+| `CouponRedeemed` | `OrderPlacementService` | yes | `coupon.redeemed` | |
 | `OrderStatusChanged` | `OrderStatusMachine::transition()` | yes | `order.status.changed` | `orderStatusChanged` |
 | `OrderSubstatusChanged` | `OrderStatusMachine::setSubstatus()` | yes | `order.substatus.changed` | |
 | `OrderEdited` | `OrderEditService` | yes | `order.edited` | |
 | `OrderCancelled` | `OrderCancellationService::cancel()` | yes | `order.cancelled` | |
 | `OrderRefunded` | `RefundService` | yes | `order.refunded` | |
 | `PaymentSucceeded` | `PaymentOrchestrator` (capture) | yes | `payment.succeeded` | `paymentSucceeded` |
-| `PaymentFailed` | `PaymentOrchestrator` (gateway threw, capture declined, or fraud block) | yes | `payment.failed` | |
+| `PaymentFailed` | `PaymentOrchestrator` (gateway threw, capture declined or mismatched, or fraud block) | yes | `payment.failed` | |
 | `PaymentRefunded` | `RefundService` | yes | `payment.refunded` | |
 | `FraudBlocked` | `PaymentOrchestrator` | yes | `fraud.blocked` | |
 | `FraudChallenged` | `PaymentOrchestrator` | | `fraud.challenged` | |
+| `ShipmentCreated` | `ShipmentService::create()` | yes | `shipment.created` | |
+| `ShipmentDelivered` | `ShipmentService` (created or tracked as delivered), `LocalPickupHandoff::redeem()` | yes | `shipment.delivered` | |
+| `OrderFulfilled` | `ShipmentService::create()` (every line fulfilled) | yes | `order.fulfilled` | |
+| `CustomerRegistered` | `Customer` model (`created`) | yes | `customer.registered` | |
+| `CustomerUpdated` | `Customer` model (`updated`) | yes | `customer.updated` | |
+| `ProductStockLow` | `InventoryService` (on-hand crossed the low-stock threshold) | yes | `product.stock.low` | |
+| `ProductOutOfStock` | `InventoryService` (on-hand reached zero) | yes | `product.out.of.stock` | |
 | `ReviewSubmitted` | `ReviewService::submit()` | | `review.submitted` | `reviewSubmitted` |
 | `ReviewApproved` | `ReviewService::approve()` | | `review.approved` | |
 | `DigitalDownloadTokenIssued` | `DigitalDownloadService` | | `digital.download.token.issued` | |
 | `DigitalProductUpdated` | `DigitalFileService` (new file version) | | `digital.product.updated` | |
 | `LicenseIssued` | `LicenseService` | | `license.issued` | |
 | `LicenseActivated` | `LicenseService` | | `license.activated` | |
+| `LicenseDeactivated` | `LicenseService::deactivate()` | | `license.deactivated` | |
 | `LicenseRevoked` | `LicenseService` | | `license.revoked` | |
 | `KanbanCardMoved` | `KanbanBoardService` | | `kanban.card.moved` | `kanbanCardMoved` (board channel) |
 | `KanbanAutomationTriggered` | `KanbanAutomationRunner` | | `kanban.automation.triggered` | |
@@ -92,8 +114,15 @@ A new cart row was persisted.
 public function __construct( public readonly Cart $cart, public readonly array $changes = [] )
 ```
 
-`$changes` describes the mutation: `[ 'item_id' => int, 'action' => 'added' | 'quantity_summed' | 'quantity_set' | 'removed' ]`,
-or `[ 'action' => 'token_rotated' ]`. `$cart` is re-read after the change.
+`$changes` describes the mutation:
+
+- `[ 'item_id' => int, 'action' => 'added' | 'quantity_summed' | 'quantity_set' | 'removed' ]`
+- `[ 'action' => 'cleared', 'reason' => string ]` (`converted` when the cart became an order)
+- `[ 'action' => 'token_rotated' ]`
+- `[ 'action' => 'customer_attached', 'customer_id' => int ]`
+- `[ 'action' => 'currency_changed', 'currency' => string ]`
+
+`$cart` is re-read after the change.
 
 ### `CartMerged`
 
@@ -105,7 +134,53 @@ A guest cart was merged into a customer's cart at sign-in. Fires for every
 merge resolution except `CancelMerge`, including merges that carried over no
 lines (`guestItemsMerged` is then `0`).
 
+### `CartAbandoned`
+
+```php
+public function __construct( public readonly Cart $cart )
+```
+
+`ecommerce:flag-abandoned-carts` flagged the cart: checkout started, an
+email is known, no order was placed, and the cart has been untouched for
+`cart.abandoned_after_minutes`. Each cart is flagged once (`abandoned_at`).
+Fires after `ap.ecommerce.cart.abandoned`.
+
+### `CartCompleted`
+
+```php
+public function __construct( public readonly Cart $cart, public readonly Order $order )
+```
+
+The cart was converted into `$order`. Fires after `OrderPlaced`.
+
 ## Orders
+
+### `OrderPlaced`
+
+```php
+public function __construct( public readonly Order $order )
+```
+
+An order was placed from a cart through `OrderPlacementService`. Fires once
+the placement commits, right after `ap.ecommerce.order.placed`.
+
+### `PromotionApplied`
+
+```php
+public function __construct( public readonly Promotion $promotion, public readonly Cart $cart, public readonly Money $amount )
+```
+
+Fires once per promotion applied to a placed order, after `OrderPlaced`.
+`$amount` is the discount that promotion granted.
+
+### `CouponRedeemed`
+
+```php
+public function __construct( public readonly Coupon $coupon, public readonly Order $order, public readonly Money $amount )
+```
+
+A coupon code was redeemed by a placed order. `$amount` is the discount
+granted by the coupon's promotion.
 
 ### `OrderStatusChanged`
 
@@ -161,6 +236,78 @@ public function __construct( public readonly Order $order, public readonly Refun
 
 A refund (full or partial) was recorded against the order.
 
+### `OrderFulfilled`
+
+```php
+public function __construct( public readonly Order $order )
+```
+
+A shipment fulfilled the order's last unfulfilled line. Fires after
+`ap.ecommerce.order.fulfilled`.
+
+## Shipping
+
+### `ShipmentCreated`
+
+```php
+public function __construct( public readonly Shipment $shipment, public readonly Order $order )
+```
+
+Fires after `ap.ecommerce.shipping.shipmentCreated`.
+
+### `ShipmentDelivered`
+
+```php
+public function __construct( public readonly Shipment $shipment, public readonly Order $order )
+```
+
+A shipment was created as delivered, a tracking update marked it
+delivered, or a local-pickup code was redeemed. Fires after
+`ap.ecommerce.order.delivered`.
+
+## Customers
+
+### `CustomerRegistered`
+
+```php
+public function __construct( public readonly Customer $customer )
+```
+
+A customer row was created, by any write path (the model's `created`
+event), so it also covers rows that `ap.ecommerce.customer.registered`
+doesn't see.
+
+### `CustomerUpdated`
+
+```php
+public function __construct( public readonly Customer $customer, public readonly array $changes )
+```
+
+A customer row was updated. `$changes` lists the changed column names,
+without the engine-maintained ones (`total_spent_amount`,
+`total_spent_currency`, `orders_count`, `last_ordered_at`, `updated_at`,
+`created_at`). An update that only touched those doesn't fire.
+
+## Inventory
+
+### `ProductStockLow`
+
+```php
+public function __construct( public readonly InventoryItem $item, public readonly int $onHand )
+```
+
+On-hand stock crossed the item's `low_stock_threshold`. Fires after
+`ap.ecommerce.inventory.lowStock`.
+
+### `ProductOutOfStock`
+
+```php
+public function __construct( public readonly InventoryItem $item )
+```
+
+On-hand stock dropped from above zero to zero or below. Fires after
+`ap.ecommerce.inventory.outOfStock`.
+
 ## Payments and fraud
 
 ### `PaymentSucceeded`
@@ -170,6 +317,7 @@ public function __construct( public readonly Order $order, public readonly Payme
 ```
 
 The gateway captured the payment. `orders.payment_status` is now `paid`.
+Fires after `ap.ecommerce.payment.succeeded` and `ap.ecommerce.order.paid`.
 
 ### `PaymentFailed`
 
@@ -177,8 +325,9 @@ The gateway captured the payment. `orders.payment_status` is now `paid`.
 public function __construct( public readonly ?Order $order, public readonly PaymentGateway $gateway, public readonly Throwable $reason )
 ```
 
-Capture failed. The gateway threw, declined the capture, or the fraud provider
-blocked the order (the authorization was voided).
+Capture failed. The gateway threw, declined the capture, the captured amount or
+currency didn't match the order, or the fraud provider blocked the order (the
+authorization was voided).
 
 ### `PaymentRefunded`
 
@@ -253,6 +402,15 @@ public function __construct( public readonly LicenseKey $key, public readonly Or
 public function __construct( public readonly LicenseActivation $activation )
 ```
 
+### `LicenseDeactivated`
+
+```php
+public function __construct( public readonly LicenseKey $license, public readonly string $fingerprint )
+```
+
+An activation was released for the machine `$fingerprint`. Fires after
+`ap.ecommerce.license.deactivated`.
+
 ### `LicenseRevoked`
 
 ```php
@@ -318,13 +476,7 @@ failures and was switched off.
 
 ## Planned, not yet dispatched
 
-Parent plan §6.4 lists these events. They have no class or dispatch site in
-1.0.0: `OrderPlaced`, `OrderCancelled`, `OrderFulfilled`, `CartAbandoned`,
-`CartCompleted`, `ShipmentCreated`, `ShipmentDelivered`, `CustomerRegistered`,
-`CustomerUpdated`, `ProductCreated`, `ProductUpdated`, `ProductStockLow`,
-`ProductOutOfStock`, `PromotionApplied`, and `CouponRedeemed`. Several of these
-moments already fire a [hook](hooks.md) you can listen to instead:
-`ap.ecommerce.order.fulfilled`, `ap.ecommerce.shipping.shipmentCreated`,
-`ap.ecommerce.order.delivered`, `ap.ecommerce.customer.registered`,
-`ap.ecommerce.inventory.lowStock`, `ap.ecommerce.inventory.outOfStock`, and
-`ap.ecommerce.pricing.discountApplied`.
+Parent plan §6.4 also lists `ProductCreated` and `ProductUpdated`. They have
+no class in 1.0.0. Listen to the `ap.ecommerce.product.saved`,
+`ap.ecommerce.product.published`, and `ap.ecommerce.product.unpublished`
+[hooks](hooks.md#products-and-search) instead.

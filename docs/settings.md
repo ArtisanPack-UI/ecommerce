@@ -29,7 +29,9 @@ app( SettingsRepository::class )->forget( 'checkout', [ 'checkout.reservation_tt
 
 `update()` and `forget()` throw `SettingsWriteException` (422
 `settings-write-failed` over REST) for an unknown group or key, a value that
-fails its rules, or an unconfirmed base-currency change. Values are coerced to
+fails its rules, a combination that can't work (below), or an unconfirmed
+base-currency change. The exception's `errors` list each problem as
+`{ field, code, message }`, and the REST response carries them. Values are coerced to
 their type first, so `"15"` stores as `15` and `"0"` as `false`.
 
 Some values are read once at boot, so a change takes effect on the next
@@ -40,8 +42,8 @@ notification listeners are wired.
 
 | Group | Keys |
 |---|---|
-| `general` | `notifications.store_name`, `notifications.support_email`, `base_currency`, `timezone` |
-| `checkout` | `checkout.reservation_ttl_minutes` |
+| `general` | `notifications.store_name`, `notifications.support_email`, `base_currency`, `currency.enabled`, `timezone` |
+| `checkout` | `checkout.reservation_ttl_minutes`, `checkout.guest_checkout` (`allowed`, `required_account`, `disabled`), `checkout.account_creation`, `cart.abandoned_after_minutes` |
 | `tax` | `tax.provider`, `tax.prices_include_tax`, `tax.default_class`, `tax.shipping_tax_class`, `localization.tax_labels` |
 | `shipping` | `fulfillment.allocation_strategy` |
 | `payments` | `gateways.stripe.enabled`, `gateways.stripe.capture_method`, `fraud.provider`; secrets: Stripe secret key, publishable key, webhook signing secret |
@@ -51,8 +53,21 @@ notification listeners are wired.
 | `licenses` | `licenses.activations_limit`, `licenses.expires_in_days` |
 | `kanban` | `kanban.auto_route`, `kanban.stale_after_days`, `kanban.default_card_widgets` |
 
-Keys are relative to `artisanpack.ecommerce`. `timezone` is new in this
-release: the store time zone reports bucket by (`null` uses `app.timezone`).
+Keys are relative to `artisanpack.ecommerce`. `timezone` is the store time
+zone that reports bucket by and dates are shown in (`null` uses
+`app.timezone`). `currency.enabled` lists the currencies shoppers can pay in
+besides the base currency.
+
+Some payment settings only work together. They are checked on the combined
+values before every write:
+
+| Code | Field | When |
+|---|---|---|
+| `gateway-not-configured` | `gateways.stripe.enabled` | Stripe is turned on but `ECOMMERCE_STRIPE_SECRET_KEY` isn't set |
+| `fraud-provider-unavailable` | `fraud.provider` | The fraud chain names Stripe Radar while Stripe is off |
+
+A satellite can add its own check with
+`app( SettingsRepository::class )->constrain( 'paypal', fn ( array $values ): array => [ /* errors */ ] )`.
 
 Types tell an admin how to render a key: `string`, `text`, `email`, `integer`,
 `boolean`, `select`, `multiselect`, `list`, `map`, `currency`, `timezone`.

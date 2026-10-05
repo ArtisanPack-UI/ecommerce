@@ -41,7 +41,11 @@ See parent plan §16.6 and engine spec §3.32 / §5 row 16.
 
    `register()` only keeps the descriptor in memory — nothing is written per
    request. The `ecommerce:satellite:*` commands persist it to the
-   `ecommerce_satellites` table (`SatelliteRegistry::sync()`).
+   `ecommerce_satellites` table (`SatelliteRegistry::sync()`). Registering the
+   same package twice replaces the first descriptor; it throws in
+   `local`/`testing` and logs a warning elsewhere. When a synced satellite's
+   `version` changes, its recorded verification hash is cleared (see
+   [satellite-verification.md](satellite-verification.md)).
 
    | Key               | Meaning                                                                                              |
    |-------------------|------------------------------------------------------------------------------------------------------|
@@ -60,7 +64,11 @@ See parent plan §16.6 and engine spec §3.32 / §5 row 16.
    `down()` must be idempotent (`Schema::dropIfExists`, `hasColumn` guards) and
    safe on any prior schema version — `--purge` runs it.
 
-3. **Ship a `SatelliteUninstaller`** when you own long-lived services:
+3. **Ship a `SatelliteUninstaller`** when you own long-lived services. A
+   satellite that declares none gets the engine's no-op
+   `NullSatelliteUninstaller`. So does one whose class no longer exists or
+   doesn't implement the contract (for example, after `composer remove`); the
+   uninstall command then warns that it is skipping service teardown.
 
    ```php
    use ArtisanPackUI\Ecommerce\Contracts\SatelliteUninstaller;
@@ -92,7 +100,9 @@ unreachable, every satellite counts as active.
 
 As a safety net, the product types an inactive satellite declares are removed
 from the `ProductTypeRegistry` once the app has booted, even if the satellite
-registered them without checking `register()`'s result.
+registered them without checking `register()`'s result. Account and admin menu
+entries that name the satellite in their `satellite` key are hidden while it
+is inactive (see [contracts.md](contracts.md#other-registries)).
 
 ## Commands
 
@@ -107,6 +117,20 @@ php artisan ecommerce:satellite:uninstall acme/ecommerce-subscriptions
 php artisan ecommerce:satellite:uninstall acme/ecommerce-subscriptions --purge
 ```
 
+Every lifecycle command first syncs the registered descriptors to
+`ecommerce_satellites`. An unknown package fails with a pointer to
+`ecommerce:satellite:audit`.
+
+| Option | Purpose |
+|---|---|
+| `--purge` | Also roll back the satellite's migrations, dropping its tables and columns. |
+| `--force` | Skip the confirmation prompt. Required in production and in non-interactive runs. |
+
+The steps run in this order: validate the purge paths, confirm, run the
+satellite's uninstaller (`uninstall( $descriptor, $purge )`), roll back the
+migrations when purging, mark the satellite uninstalled, and clear the config
+and route caches if they're cached.
+
 - Prompts for confirmation unless `--force` is given. Non-interactive runs
   (`-n`, deploy scripts, CI) and production refuse without `--force`.
 - With `--purge`, validates every migration path before anything runs and
@@ -119,14 +143,17 @@ php artisan ecommerce:satellite:uninstall acme/ecommerce-subscriptions --purge
 - `--purge` rolls back every migration found in the satellite's stored
   `migration_paths`, so the migration files must still be on disk: **purge
   before `composer remove`**. Missing paths are skipped with a warning.
-- Running it again with `--purge` on an already-uninstalled satellite purges it.
+- Running it again without `--purge` on an already-uninstalled satellite does
+  nothing. Running it again with `--purge` purges it.
 
 Then remove the package: `composer remove acme/ecommerce-subscriptions`.
 
 ### `ecommerce:satellite:reinstall {package}`
 
-Clears the uninstalled mark. The satellite re-attaches to its preserved data on
-the next boot. If it was purged, run `php artisan migrate` first.
+Clears the uninstalled mark and clears the config and route caches if they're
+cached, so the satellite re-wires on the next boot. It then re-attaches to its
+preserved data. A satellite that isn't uninstalled is left as it is. If it was
+purged, run `php artisan migrate` first. The command takes no options.
 
 ### `ecommerce:satellite:audit`
 
@@ -141,6 +168,18 @@ php artisan ecommerce:satellite:audit
 php artisan ecommerce:satellite:audit --json
 php artisan ecommerce:satellite:audit --fail-on-orphans   # exit 1 when anything is orphaned
 ```
+
+| Option | Purpose |
+|---|---|
+| `--json` | Print `{ "satellites": [...], "orphans": [...] }` instead of tables. |
+| `--fail-on-orphans` | Exit non-zero when anything is orphaned. |
+
+Each satellite row has `package`, `version`, `status`, and `verified` (whether a
+verification hash is recorded). Each orphan row from
+[`SatelliteOrphanAuditor`](../src/Satellites/SatelliteOrphanAuditor.php) has
+`package`, `reason` (`uninstalled` or `not-registered`), `kind` (`table` or
+`column`), `table`, and `column` (`null` for a table). A declared table or
+column only counts when it still exists in the schema.
 
 The audit is advisory: orphans are harmless (Eloquent ignores unknown columns),
 and reinstalling the satellite claims them again.

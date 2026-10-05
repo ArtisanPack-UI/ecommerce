@@ -25,6 +25,12 @@ The actor defaults to the signed-in user when their id is numeric, else
 Turn recording off with `ECOMMERCE_ACTIVITY_LOG_ENABLED=false`
 (`artisanpack.ecommerce.activity_log.enabled`).
 
+`subject_type` stores a morph alias, not a class name: `ecommerce.product`,
+`ecommerce.customer`, or `ecommerce.promotion`. The engine adds its aliases
+to Eloquent's morph map without calling `enforceMorphMap()`, so the column
+stays stable if classes move, and hosts that enforce their own map keep
+working.
+
 ## Payloads
 
 Created and deleted entries carry a short summary of the row. Updated
@@ -118,6 +124,14 @@ See [customers.md](customers.md#deleting-a-customer) for everything it
 changes.
 
 Price entries never include `cost_amount`.
+
+## Retention
+
+Entries are kept for `retention.activity_log_days` (default 365,
+`ECOMMERCE_RETENTION_ACTIVITY_LOG_DAYS`). Schedule `ecommerce:prune-ledgers`
+to delete older ones; 0 keeps them forever. The command deletes through the
+base query builder in batches, because the model refuses Eloquent deletes.
+Retention and `scrubCustomer()` are the only ways entries change.
 
 ## Hooks
 

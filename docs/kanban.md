@@ -131,7 +131,9 @@ whether the move comes from a drag, an external event, or a rule. A move:
 
 1. Runs `ap.ecommerce.kanban.cardMoving`. The filter can return `null` to veto
    the move or change `to_column_id` to redirect it.
-2. Checks the target column's `wip_limit`.
+2. Checks the target column's `wip_limit`. The order, its card, and then the
+   target column are locked first, so two moves can't both take a column's
+   last slot.
 3. Recalculates the order's status from all of its boards and transitions the
    order if that status changed (see below).
 4. Updates the card. This fires `ap.ecommerce.order.substatusChanged` and
@@ -177,9 +179,9 @@ Core triggers:
 |---|---|---|
 | `send-email` | `to` (`"customer"`, an address, or a list), `subject`, `body` | Queues a mail. The subject and body accept `{order_number}`, `{order_id}`, `{email}`, `{status}`, `{board}`, and `{column}`. |
 | `dispatch-job` | `job` | Queues `new $job( $orderId )`. The class must be listed in `artisanpack.ecommerce.kanban.dispatchable_jobs`. |
-| `webhook` | `url`, optional `secret` | Queues a `POST` of the order. The URL must be `https` and resolve to a public host, as outbound webhooks must. The request is signed with `X-ArtisanPack-Signature` when a secret is set. |
+| `webhook` | `url`, optional `secret` | Queues a `POST` of the order. The URL must be `https` and resolve to a public host, as outbound webhooks must (unless `webhooks.allow_insecure_urls` / `webhooks.allow_private_hosts` are on). The request is signed with `X-ArtisanPack-Signature` when a secret is set. |
 | `update-order-field` | `field`, `value` | Sets `meta.<path>`, or a top-level column listed by `ap.ecommerce.kanban.updatableOrderFields`. Nothing is listed by default. |
-| `create-shipment` | `method_key` (defaults to the order's), `carrier`, `service` | Ships every unshipped unit. |
+| `create-shipment` | `method_key` (defaults to the order's), `carrier`, `service` | Ships every unshipped unit. Fails when nothing is left to ship. |
 | `print-shipping-label` | `provider`, `method_key` | Buys a label through a `ShippingLabelProvider` satellite. If there's no unlabelled shipment yet, it creates one first. |
 
 To add a trigger from a satellite:
@@ -252,6 +254,12 @@ A refused move returns `422 problem+json`. The problem `type` ends in one of:
 - `column-not-on-board`
 - `invalid-status-transition`
 - `incompatible-column`
+
+Adding a card by hand (`POST boards/{board}/assignments/{order}`) is refused
+with `no-entry-column` when the board has no column that can hold the order's
+status, or `column-not-on-board` when `column_id` belongs to another board.
+Adding and removing cards fire `ap.ecommerce.kanban.boardAssignmentAdded` and
+`ap.ecommerce.kanban.boardAssignmentRemoved` after commit.
 
 An automation's `trigger_config.secret` is never returned in responses;
 `has_secret` shows whether one is set. A `PATCH` that leaves out the secret

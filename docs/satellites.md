@@ -19,7 +19,7 @@ See [what a badge does and doesn't prove](satellite-verification.md).
 | Badge | Meaning |
 |---|---|
 | ![contract-verified](https://img.shields.io/badge/contract-verified-brightgreen) | The latest tag has a `.ecommerce-verify-report.json` release asset with `"verified": true`, and its `verify-report.sig` checks out against the satellite's registered public key. |
-| ![contract-failing](https://img.shields.io/badge/contract-failing-red) | The latest tag has a signed report, but the report says `"verified": false`. |
+| ![contract-failing](https://img.shields.io/badge/contract-failing-red) | The latest tag has a signed report, but the report says `"verified": false`. The engine's signing tools refuse to sign a failing report, so a failing tag normally has no signed report and shows as unverified. |
 | ![unverified](https://img.shields.io/badge/contract-unverified-lightgrey) | No valid signed report for the latest tag. The satellite may still work — it just hasn't proven it. |
 
 ### How a badge is granted
@@ -27,8 +27,10 @@ See [what a badge does and doesn't prove](satellite-verification.md).
 1. The satellite runs the reusable
    [`verify-satellite.yml`](../.github/workflows/verify-satellite.yml) workflow
    on every tag (see [Satellite verification](satellite-verification.md)).
-2. The workflow attaches the report and its Ed25519 signature to the GitHub
-   release for that tag.
+2. On a tag, the workflow signs a passing report with Ed25519 in a separate
+   job and hands the report and signature over as a workflow artifact. The
+   satellite's own release job attaches both files to the GitHub release for
+   that tag.
 3. The docs site downloads both assets for the satellite's **latest** tag and
    checks that:
    - the signature is valid for the satellite's registered public key
@@ -48,6 +50,55 @@ their signatures against.
 
 The docs site lets store owners filter this list to verified-only
 satellites. In this file, search for `contract-verified`.
+
+## Building a satellite
+
+A satellite plugs into the engine from its service provider's `boot()`. It
+registers implementations in the engine's registries, hooks actions and
+filters, and declares itself in `SatelliteRegistry` so it can be uninstalled
+cleanly ([satellite-lifecycle.md](satellite-lifecycle.md)).
+[contracts.md](contracts.md) lists every contract, its registry, and its
+contract-test suite. The registries satellites use most:
+
+| Registry | What a satellite registers | Docs |
+|---|---|---|
+| `ProductTypeRegistry` | Product types, optionally with `ExpandsInventory` and `ProvidesStorefrontOptions` | [contracts.md](contracts.md#contract-reference) |
+| `PaymentGatewayRegistry` | Payment gateways, optionally with `RendersClientPayment` | [contracts.md](contracts.md#contract-notes) |
+| `TaxProviderRegistry`, `ShippingRateProviderRegistry`, `ShippingMethodTypeRegistry`, `ShippingLabelProviderRegistry`, `FraudProviderRegistry`, `CurrencyRateProviderRegistry`, `FulfillmentAllocationStrategyRegistry` | Providers and strategies | [contracts.md](contracts.md#contract-reference) |
+| `PromotionConditionRegistry`, `PromotionActionRegistry` | Promotion rules, with a config schema | [contracts.md](contracts.md#config-schemas-describesconfig) |
+| `KanbanCardWidgetRegistry`, `KanbanAutomationRegistry` | Kanban card widgets and automation triggers | [kanban.md](kanban.md) |
+| `NotificationTemplateRegistry`, `NotificationChannelRegistry` | Notification templates and channels | [notifications.md](notifications.md), [contracts.md](contracts.md#other-registries) |
+| `SearchProviderRegistry`, `SearchIndexerRegistry` | Search providers and indexers | [search.md](search.md#writing-a-search-satellite) |
+| `AccountMenuRegistry` | Links in the shopper's account menu (every storefront reads it, REST through `GET me/account-menu`) | [contracts.md](contracts.md#other-registries) |
+| `AdminMenuRegistry` | Links in the admin navigation | [contracts.md](contracts.md#other-registries) |
+| `ReportRegistry`, `SettingsRegistry` | Admin reports and store settings | [reports.md](reports.md), [settings.md](settings.md) |
+| `SatelliteRegistry` | The satellite's own lifecycle descriptor | [satellite-lifecycle.md](satellite-lifecycle.md) |
+
+Give every account or admin menu entry a `satellite` package name, so the
+entry disappears while the satellite is uninstalled.
+
+### Storefront signals
+
+Storefronts call `ProductViews::record( $product, $customer )` when a product
+page is shown, and REST storefronts post to `POST products/{product}/views`
+(answers `202`). Both fire `ap.ecommerce.product.viewed` with
+`(Product $product, ?Customer $customer)`. The customer is set only when the
+shopper is signed in. The engine stores nothing itself, so a satellite such as
+`ecommerce-recently-viewed` listens to the action to hear about views from
+every storefront family. See [hooks.md](hooks.md).
+
+### Search satellites
+
+A search satellite moves the catalog to a dedicated engine. It sets the
+Scout driver (`artisanpack.ecommerce.search.driver`), registers a
+`SearchProvider` that uses the engine's filters, facets, and suggestions, and
+asks the host to select it with `ECOMMERCE_SEARCH_PROVIDER`. An unregistered
+key falls back to the core `default` provider. It may also register a
+`SearchIndexer` for an index Scout doesn't manage; the engine pushes every
+storefront product change to it. Verify the provider with
+`SearchProviderContractTest` and override its `index()` hook to push the test
+products to your engine. `GET search` uses the provider, but the GraphQL
+`search` field still queries Scout directly. See [search.md](search.md).
 
 ## Catalogue
 

@@ -84,6 +84,11 @@ command output, registry misuse (`InvalidArgumentException` when a satellite
 registers a bad entry), and internal invariant exceptions that are never
 rendered to a user.
 
+`InvalidArgumentException` is user-facing only where its message reaches an
+API client: the reports (`src/Reports/`) and the refund, cancellation, order
+and customer note, and shipment services. The lint treats it that way only in
+those paths (`LintTranslationsCommand::USER_FACING_EXCEPTIONS_IN`).
+
 ## The translation lint
 
 ```bash
@@ -100,9 +105,11 @@ The command fails (non-zero exit) when:
    form request's `messages()`; and the value of any `label`, `title`,
    `message`, `description`, `subject`, or `heading` array key. A literal is
    flagged when it reads as prose (a word plus whitespace), so slugs, keys,
-   and type names pass. OpenAPI and GraphQL schema descriptions are
-   developer documentation and exempt; so are factories, demo data,
-   contract-test scaffolding, and console commands.
+   and type names pass. `title` and `description` keys under `OpenApi/`, and
+   `description` keys under `GraphQL/`, are developer documentation and
+   exempt; so are factories, demo data, contract-test scaffolding, and
+   console commands (`Database/Factories/`, `Demo/`, `Testing/`,
+   `Console/`). Keys used there are still checked against the catalogues.
 2. **A key is missing from a shipped catalogue.** Every literal passed to
    `__()` / `trans_choice()` must exist in all four `lang/*.json` files.
 
@@ -112,6 +119,7 @@ Options:
 |---|---|
 | `--path=*` | Extra source directories to scan (relative to `base_path()` or absolute). |
 | `--lang=` | Catalogue directory to check instead of the engine's `lang/`. |
+| `--no-engine` | Scan only the `--path` directories, not the engine's own `src/` (for linting a satellite). |
 | `--sync` | Adds every missing key to `en.json` (English as its own translation). The lint keeps failing until `es`, `fr`, and `de` are filled in. |
 
 When a prose literal in a sink is genuinely not interface copy (sample store
@@ -124,6 +132,53 @@ is required:
 ```
 
 CI runs the lint on every pull request (`.github/workflows/translation-lint.yml`).
+
+## Negotiating the language
+
+The REST and GraphQL APIs pick the response language from `Accept-Language`
+(the `ecommerce.locale` middleware, added to both stacks even when a
+published config lists older middleware). It chooses the best match among
+`localization.supported_locales` (default `en`, `es`, `fr`, `de`), uses it as
+the app locale for the request, and answers with `Content-Language` and
+`Vary: Accept-Language`. A request without the header keeps the app locale.
+The previous locale is restored afterwards, so long-lived workers don't leak
+it.
+
+```bash
+curl -s -X POST "$BASE/carts/$TOKEN/coupons" \
+  -H "Accept-Language: de-DE,de;q=0.9" -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $(uuidgen)" -d '{"code":"NOPE"}'
+# → 422 problem+json whose detail is in German; Content-Language: de
+```
+
+So problem details, validation messages, and labels come back in the
+shopper's language. A cart created during such a request records the
+negotiated locale in `carts.locale`.
+
+## The shopper's language
+
+Orders and customers carry a `locale` column:
+
+- **Orders** copy it from the cart at placement (`orders.locale`).
+- **Customers** take the locale of their first order when they have none, and
+  shoppers set it themselves with `PATCH me` (`{ "locale": "es" }`, one of
+  the supported locales). `Customer` implements `HasLocalePreference`.
+
+Both are exposed on the REST resources and the GraphQL `Order` and
+`Customer` types.
+
+Notifications go out in the recipient's language: the order's `locale`,
+else the customer's preference, else the app locale. Staff notifications
+always use the store default (`notifications.default_locale`, else
+`app.fallback_locale`). Catalog copy is resolved in this order:
+
+1. the store's own template row in that locale;
+2. the shipped catalog copy translated into that locale, when the locale (or
+   its base language) is in `supported_locales` and isn't the default;
+3. the store's default-locale row;
+4. the shipped catalog copy.
+
+See [notifications](./notifications.md).
 
 ## Money
 
@@ -142,14 +197,19 @@ MoneyFormatter::formatMoney( $money );          // a Money\Money instance
 
 Fraction digits follow the currency (`JPY` has none, `KWD` has three). When a
 locale has no localized symbol for a currency, the ISO code is used with the
-locale's grouping — `CHF 1,234.56` in `en`, `CHF 1.234,56` in `de`. The kanban
+locale's grouping — `CHF 1,234.56` in `en`, `CHF 1.234,56` in `de`. A locale
+ICU has no data for (`xx`) formats as `en`, whatever the ICU build: newer ICU
+rejects it, older ICU silently resolves it to another locale, and both are
+treated as unknown. The kanban
 `total` widget and every notification money variable (`Order.total`,
 `Refund.amount`, …) use it.
 
 ## Dates
 
 `ArtisanPackUI\Ecommerce\Support\LocalizedDate::format( $date, ?$format, ?$locale )`
-wraps `Carbon::translatedFormat()`, so month and day names are translated. The
+wraps `Carbon::translatedFormat()`, so month and day names are translated.
+Moments are shown in the store time zone (`artisanpack.ecommerce.timezone`,
+else `app.timezone`); bare `Y-m-d` dates are left as they are. The
 default pattern is itself a translatable string (`F j, Y` in English,
 `j \d\e F \d\e Y` in Spanish, `j F Y` in French, `j. F Y` in German).
 
@@ -183,3 +243,5 @@ An override for a base locale (`en`) also applies to its regional variants
 RTL locales are not shipped in v1. Engine-provided markup uses logical CSS
 properties (`inline-start` / `inline-end`, `text-align: start`), so adding an
 RTL locale is a stylesheet concern rather than a template rewrite.
+Notification mail already sets `dir="rtl"` on its `<html>` element for
+right-to-left languages (Arabic, Hebrew, Persian, Urdu, and others).

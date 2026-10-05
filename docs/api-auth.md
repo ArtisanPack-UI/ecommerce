@@ -34,9 +34,18 @@ Gate::define( 'ecommerce.order.refund', fn ( User $user, $subject ): bool => $us
 The decision then runs through the
 `ap.ecommerce.abilities.{resource}.{action}` filter, which gets
 `(bool $allowed, $user, Request $request, mixed $subject)`. That lets role
-satellites grant or revoke without defining a Gate. `$subject` is the model when
-the check comes from a policy or GraphQL, and the request when it comes from the
-REST middleware.
+satellites grant or revoke without defining a Gate. The Gate callback and the
+filter get the same `$subject`:
+
+- From a policy, the model being checked.
+- From a REST route, the first route parameter bound to a model (the `Order`
+  on `orders/{order}`, the `Product` on `admin/products/{product}`), or `null`
+  on routes without one, such as lists and creates. It's never the request.
+- From GraphQL, the model the field acts on (the order for `issueRefund`), or
+  `null` when there isn't one.
+
+So a Gate typed on a model (`fn ( User $user, Order $order )`) works on every
+surface, and a Gate with no subject parameter gets none.
 
 ### Policies
 
@@ -55,6 +64,7 @@ Gate::authorize( 'viewAny', Product::class );
 | `OrderPolicy` | `Order` | `viewAny`, `view`, `create`, `update`, `edit-fulfilled`, `cancel`, `refund` |
 | `RefundPolicy` | `Refund` | `view`, `create` |
 | `CustomerPolicy` | `Customer` | `viewAny`, `view`, `update`, `delete` |
+| `CustomerAddressPolicy` | `CustomerAddress` | `view`, `update`, `delete` (the `customer.view` / `customer.update` abilities, or the shopper's own address) |
 | `PromotionPolicy` | `Promotion` | `viewAny`, `view`, `create`, `update`, `delete` |
 | `CouponPolicy` | `Coupon` | `create`, `update`, `delete` |
 | `TaxRatePolicy` | `TaxRate`, `TaxClass` | `viewAny`, `create`, `update`, `delete` |
@@ -72,8 +82,10 @@ Gate::authorize( 'viewAny', Product::class );
 | `ReportPolicy` | `Reports\Report` | `view` |
 
 `inventory` is separate from `product`, so warehouse staff can count stock
-without editing products: `admin/inventory`, `POST admin/products/{product}/stock`,
-and a `stock_adjustment` inside a product or variant update all need it.
+without editing products: `admin/inventory`, `PATCH admin/inventory/{item}`,
+`POST admin/inventory/{item}/adjust`, `POST admin/products/{product}/stock`,
+GraphQL's `adjustInventory`, and a `stock_adjustment` inside a product or
+variant update all need it.
 Settings and reports have no rows to authorize against, so check them by class:
 `$user->can( 'update', EcommerceSetting::class )`,
 `$user->can( 'view', Report::class )`.
@@ -83,12 +95,23 @@ customer is linked to their user id) when their token allows storefront access.
 A policy the host app already registered for one of these models takes
 precedence.
 
-A few endpoints aren't admin endpoints: `GET downloads/{token}` and
-`…/stream` (the token is the credential), `POST license/validate` (public,
-rate-limited per key and IP), `POST products/{product}/reviews` (signed-in
-shoppers, or guests when `reviews.allow_guests` is on), and
-`me/notification-preferences` (the signed-in shopper, with a
-storefront-capable token).
+Several endpoints aren't admin endpoints and check no ability:
+
+- **The token is the credential:** `GET downloads/{token}` and `…/stream`,
+  `GET order-views/{token}` (a signed order link), and every `carts/{cart}…`
+  and `checkout/{cart}…` route. Cart and checkout routes also resolve a
+  signed-in shopper when one is present. A cart that belongs to a customer
+  account only opens for that account; anyone else gets a 404.
+- **Public:** `POST license/validate` and `POST license/deactivate`
+  (rate-limited per key and IP), and `GET orders/guest-lookup` (rate-limited
+  per IP, with a lockout per order number after repeated failures).
+- **Optional auth:** `POST products/{product}/reviews` (signed-in shoppers, or
+  guests when `reviews.allow_guests` is on),
+  `GET products/{product}/reviews/eligibility`, and
+  `POST products/{product}/views`.
+- **The signed-in shopper:** every `me/*` route. These act on the customer
+  record linked to the user, so a Sanctum token needs `ecommerce:storefront`
+  or `ecommerce:admin`.
 
 ## Sanctum token abilities
 
@@ -98,12 +121,25 @@ user's abilities allow:
 | Token ability | Reaches |
 |---|---|
 | `ecommerce:admin` | Every admin endpoint the user is allowed |
-| `ecommerce:storefront` | Shopper surfaces only (`me`, `myOrders`, own `order`), never an admin endpoint, even for an admin user |
+| `ecommerce:storefront` | Shopper surfaces only (REST `me/*`, review submission, GraphQL `me`, `myOrders`, own `order`), never an admin endpoint, even for an admin user |
 | `ecommerce:{resources}.read` / `.write` | One resource family, e.g. `ecommerce:orders.read`, `ecommerce:tax-rates.write`, `ecommerce:inventories.write`, `ecommerce:settings.read`, `ecommerce:reports.read` |
+| `ecommerce:orders.refund`, `ecommerce:orders.cancel`, `ecommerce:customers.delete` | One action that moves money or destroys data (see below) |
 | `*` | Sanctum's default when no abilities are given: behaves like `ecommerce:admin` |
 
-`view` / `viewAny` need `.read`; every other action needs `.write`.
-`TokenAbilities::scope()` builds the names:
+`view` / `viewAny` need `.read`; every other action needs `.write`, with
+these exceptions, which each need their own scope:
+
+| Action | Token scope |
+|---|---|
+| `order.refund` | `ecommerce:orders.refund` |
+| `order.cancel` | `ecommerce:orders.cancel` |
+| `customer.delete` | `ecommerce:customers.delete` |
+
+`ecommerce:orders.write` alone can't refund or cancel an order, and
+`ecommerce:customers.write` alone can't delete a customer. `ecommerce:admin`
+covers all of them. `TokenAbilities::forAction()` returns the scope an action
+needs (`TokenAbilities::DEDICATED` lists the exceptions), and
+`TokenAbilities::scope()` builds the per-resource names:
 
 ```php
 use ArtisanPackUI\Ecommerce\Auth\TokenAbilities;
@@ -164,10 +200,15 @@ covered headers are wrong, the `Date` isn't an RFC 7231 date
 (`Tue, 29 Sep 2026 12:00:00 GMT`) within the tolerance, the `Digest` doesn't match the body, the signature
 doesn't match, or the same signature was already used. The authenticated
 principal is a `ServiceActor`. It's decided by its configured abilities alone,
-so host Gate callbacks written for user rows never see it. Idempotency records
-are keyed to `service:{name}`.
+so host Gate callbacks written for user rows never see it. Its abilities use
+the same token scopes, so a service that refunds orders needs
+`ecommerce:orders.refund` as well as `ecommerce:orders.write`. Idempotency
+records are keyed to `service:{name}`.
 
-Replay protection is recorded in the default cache store. On more than one
-server, that store must be shared (Redis, database, Memcached); otherwise a
-captured request could be replayed against another node within the tolerance
-window.
+Replay protection remembers each used signature in the cache store named by
+`api.signature_cache_store` (env `ECOMMERCE_SERVICE_SIGNATURE_CACHE_STORE`),
+or the default store when it's unset. On more than one server, that store must
+be shared (Redis, database, Memcached); otherwise a captured request could be
+replayed against another node within the tolerance window. When services are
+configured and the store uses the `array` driver in production, the engine
+logs a warning to the `ecommerce` channel.

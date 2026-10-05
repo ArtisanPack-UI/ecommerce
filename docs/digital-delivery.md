@@ -8,10 +8,10 @@ Digital products deliver files, license keys, or both (parent plan §5.13).
 |---|---|
 | `digital_files` | A deliverable attached to a product or a variant. Its bytes live on a filesystem disk (`disk` + `path`), or in the media library (`media_id`, resolved when `artisanpack-ui/media-library` is installed). `is_streaming_only` files can be streamed but never downloaded. |
 | `digital_downloads` | One entitlement for an order line and file: `downloads_remaining` (null means unlimited), `expires_at`, `download_count`, and first / last download times. |
-| `digital_download_events` | An audit row for every `download`, `stream`, and `forbidden` hit. |
+| `digital_download_events` | An audit row for every `download`, `stream`, and `forbidden` hit, with the IP and user agent. `ecommerce:prune-ledgers` deletes rows older than `retention.download_events_days` (default 365). |
 
 An order line is entitled to its variant's files plus the product's product-wide
-(variant-less) files.
+(variant-less) files. Archived files are left out of new entitlements.
 
 ### Issuing
 
@@ -88,6 +88,23 @@ The file is always read from its disk and piped through PHP. Neither
 endpoint exposes its disk path or a storage URL, which is how a
 streaming-only file never leaks a direct link.
 
+### From the account area
+
+A signed-in shopper can reach their files without the emailed link.
+`DigitalDownloadService::forCustomer( $customer )` lists the entitlements on
+the customer's orders, and `redeemOwned( $customer, $downloadId, $mode, $request )`
+redeems one by id, after checking that it belongs to that customer.
+
+| Method | Path | Behaviour |
+|---|---|---|
+| GET | `me/downloads` | The customer's entitlements. Include: `file`, `order_item`. Sorts: `created_at`, `expires_at`. |
+| GET | `me/downloads/{download}` | Like `downloads/{token}`: spends one download and sends the file. |
+| GET | `me/downloads/{download}/stream` | Like `downloads/{token}/stream`, with the same `Range` rules. |
+
+These routes need a signed-in shopper and apply the same limits, expiry, and
+refusal codes as the token links. Another customer's download id gets
+`download-not-found` (404).
+
 ### Hooks
 
 | Hook | Use |
@@ -106,6 +123,14 @@ streaming-only file never leaks a direct link.
 | POST | `admin/digital-files` | `ecommerce.digitalFile.create` |
 | PATCH | `admin/digital-files/{file}` | `ecommerce.digitalFile.update` |
 | DELETE | `admin/digital-files/{file}` | `ecommerce.digitalFile.delete` |
+
+A file that any customer has an entitlement for can't be deleted: the delete
+gets 409 `digital-file-in-use`. Archive it instead with
+`PATCH { "is_archived": true }`. That sets `archived_at`, keeps existing
+downloads working, and stops issuing the file to new orders. Send `false` to
+restore it.
+
+The resource shows `disk` and `path` to admins only. Customers never see them.
 
 `disk` must be one of `digital.allowed_disks` (default: the `digital.disk`
 disk only), so an admin can't attach, and then download, a file from any
@@ -129,6 +154,13 @@ quantity multiplies the activation limit, so 3 seats × 5 gives 15 machines.
 Keys are issued on `ap.ecommerce.payment.succeeded`, alongside the downloads,
 and listed in the same email.
 
+Keys are stored encrypted, next to a `key_hash` (an HMAC-SHA256 of the
+normalised key under `app.key`). Lookups go through `key_hash`, so a leaked
+database doesn't reveal working keys. Keys hashed under a key listed in
+`app.previous_keys` are still found after you rotate `APP_KEY`, and are
+re-hashed on the next lookup. Use `LicenseService::findByKey( $key )` to look
+one up.
+
 ### Validation
 
 `POST license/validate` is public. It needs an Idempotency-Key and uses the
@@ -145,8 +177,8 @@ POST /api/ecommerce/v1/license/validate
 { "data": { "valid": true, "expires_at": null, "product": { "id": 12, "name": "Pro Plugin" }, "revoked": false, "reason": null } }
 ```
 
-- The key is looked up by its index and its exact bytes are re-checked with
-  `hash_equals()`. Keys have about 125 bits of entropy, and validation is
+- The key is looked up by its `key_hash`, and the decrypted key is
+  re-checked with `hash_equals()`. Keys have about 125 bits of entropy, and validation is
   rate-limited per key and per IP, so they can't be guessed.
 - Fingerprints are trimmed and lower-cased, so the same machine always matches
   its activation.
@@ -155,10 +187,39 @@ POST /api/ecommerce/v1/license/validate
   `activations_limit`. A new activation fires `ap.ecommerce.license.activated`
   and `LicenseActivated`, and the customer gets `license.activated.customer`.
   That email identifies the key by its last group only.
+- `expires_at` is an RFC 3339 UTC timestamp, or `null` for a key that
+  never expires.
 - When `valid` is false, `reason` is one of `not-found`, `revoked`, `expired`,
   or `activation-limit-reached`.
 - The response runs through `ap.ecommerce.license.validating`
   `(array $result, string $key, string $fingerprint)`.
+
+### Deactivation
+
+When a customer moves to a new machine, their app frees the old slot:
+
+```http
+POST /api/ecommerce/v1/license/deactivate
+{ "key": "K7QM2-XW9RT-4HJ8P-LMN3Q-ZX2CV", "fingerprint": "sha256-of-old-machine-id" }
+```
+
+```json
+{ "data": { "deactivated": true, "activations_count": 2, "activations_limit": 5, "reason": null } }
+```
+
+It uses the same rate policy as validation and needs an Idempotency-Key.
+When nothing was freed, `reason` is `not-found` (no such key) or
+`not-activated` (the machine had no activation). Revoked and expired keys can
+be deactivated too. A freed slot fires `ap.ecommerce.license.deactivated` and
+`LicenseDeactivated`. In code, call `LicenseService::deactivate( $license, $fingerprint )`
+or `deactivateByKey( $key, $fingerprint )`.
+
+### The customer's keys
+
+`GET me/license-keys` lists the license keys on the signed-in customer's
+orders, newest first (`LicenseService::forCustomer()`). Include:
+`activations`, `order_item`. The owner sees the full key. `meta` is shown to
+admins only.
 
 ### Admin API
 
