@@ -46,7 +46,7 @@ it( 'shares buckets with the REST routes', function (): void {
 
     app( EcommerceRateLimiter::class )->attempt( 'ecommerce.coupon.attempt', RateLimitSubject::cart( $cart ), static fn () => null );
 
-    $this->postJson( "/api/ecommerce/v1/carts/{$cart->token}/coupons", [ 'code' => 'NOPE' ], [ 'Idempotency-Key' => 'k-' . uniqid() ] )
+    $this->postJson( "/api/ecommerce/v1/carts/{$cart->token}/coupons", [ 'code' => 'NOPE' ], [ 'Idempotency-Key' => 'k--0123456789abcdef' . uniqid() ] )
         ->assertStatus( 429 );
 } );
 

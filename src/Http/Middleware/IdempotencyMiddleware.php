@@ -100,6 +100,15 @@ class IdempotencyMiddleware
     public const REDACT_ALL = '*';
 
     /**
+     * Keys a guest (IP-scoped) caller must use.
+     *
+     * @since 1.0.0
+     *
+     * @var string
+     */
+    public const GUEST_KEY_PATTERN = '/^[A-Za-z0-9-]{16,255}$/';
+
+    /**
      * Runs the incoming request through the idempotency machinery.
      *
      * @since 1.0.0
@@ -122,6 +131,20 @@ class IdempotencyMiddleware
         }
 
         $actorScope  = $this->resolveActorScope( $request );
+
+        // A guest is told apart only by IP, which many shoppers can share
+        // (NAT, mobile carriers): their keys must be long and random enough
+        // that one can't guess another's (audit F10).
+        if ( str_starts_with( $actorScope, 'ip:' ) && 1 !== preg_match( self::GUEST_KEY_PATTERN, $key ) ) {
+            return $this->problem(
+                400,
+                'weak-idempotency-key',
+                'Idempotency-Key is too weak',
+                'Without a session or token, Idempotency-Key must be 16–255 letters, digits, or hyphens (a UUID works).',
+                $request,
+            );
+        }
+
         $endpointKey = $this->resolveEndpointKey( $request );
         $requestHash = $this->hashRequest( $request );
         $ttl         = $this->resolveTtl( $endpointKey );

@@ -51,3 +51,19 @@ it( 'names the failed rule in each validation error code (F7)', function (): voi
         ->assertJsonPath( 'errors.0.field', 'quantity' )
         ->assertJsonPath( 'errors.0.code', 'max' );
 } );
+
+it( 'makes guests use a strong idempotency key and never replays a guest cart token (F10)', function (): void {
+    $this->postJson( '/api/ecommerce/v1/carts', [], [ 'Idempotency-Key' => 'abc' ] )
+        ->assertStatus( 400 )
+        ->assertJsonPath( 'type', fn ( string $type ) => str_ends_with( $type, '/weak-idempotency-key' ) );
+
+    $key   = (string) Illuminate\Support\Str::uuid();
+    $first = $this->postJson( '/api/ecommerce/v1/carts', [], [ 'Idempotency-Key' => $key ] )->assertCreated();
+
+    expect( $first->json( 'data.token' ) )->toBeString();
+
+    $this->postJson( '/api/ecommerce/v1/carts', [], [ 'Idempotency-Key' => $key ] )
+        ->assertCreated()
+        ->assertHeader( 'Idempotent-Replay', 'true' )
+        ->assertJsonMissingPath( 'data.token' );
+} );

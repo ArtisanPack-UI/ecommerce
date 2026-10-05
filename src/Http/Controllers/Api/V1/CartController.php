@@ -21,6 +21,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
 use ArtisanPackUI\Ecommerce\Exceptions\CartCurrencyMismatchException;
+use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\AddCartItemRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ApplyCouponRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CreateCartRequest;
@@ -108,6 +109,12 @@ class CartController extends ApiController
     {
         $user     = $request->user();
         $customer = null === $user ? null : $this->customers->customerForUser( $user, true );
+
+        // A guest's replayed response never carries the token: guests share
+        // an IP-based idempotency scope (audit F10).
+        if ( null === $user ) {
+            request()->attributes->set( IdempotencyMiddleware::REDACT_ATTRIBUTE, [ 'token' ] );
+        }
         $cart     = $this->storefront->create( $request->validated( 'currency' ), $request->validated( 'email' ), $customer );
 
         return $this->resourceResponse( $cart, $request, CartResource::class, self::INCLUDES, 201 );

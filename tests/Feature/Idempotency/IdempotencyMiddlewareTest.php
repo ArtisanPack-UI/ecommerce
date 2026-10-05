@@ -37,14 +37,14 @@ it( 'returns 400 problem+json when the Idempotency-Key header is missing', funct
 } );
 
 it( 'runs the endpoint and stores the terminal response on first call', function (): void {
-    $response = $this->withHeader( 'Idempotency-Key', 'key-1' )
+    $response = $this->withHeader( 'Idempotency-Key', 'key-1-0123456789abcdef' )
         ->postJson( '/_test/idempotent-echo', [ 'quantity' => 2 ] );
 
     $response->assertStatus( 201 );
     expect( $response->headers->get( IdempotencyMiddleware::REPLAY_HEADER ) )->toBeNull();
 
     $record = IdempotencyRecord::query()->firstOrFail();
-    expect( $record->idempotency_key )->toBe( 'key-1' );
+    expect( $record->idempotency_key )->toBe( 'key-1-0123456789abcdef' );
     expect( $record->endpoint_key )->toBe( 'test.idempotent.echo' );
     expect( $record->response_status )->toBe( 201 );
     expect( $record->locked_at )->toBeNull();
@@ -52,10 +52,10 @@ it( 'runs the endpoint and stores the terminal response on first call', function
 } );
 
 it( 'replays the stored response byte-for-byte on the second call with the same key + payload', function (): void {
-    $first = $this->withHeader( 'Idempotency-Key', 'key-replay' )
+    $first = $this->withHeader( 'Idempotency-Key', 'key-replay-0123456789abcdef' )
         ->postJson( '/_test/idempotent-echo', [ 'quantity' => 3 ] );
 
-    $second = $this->withHeader( 'Idempotency-Key', 'key-replay' )
+    $second = $this->withHeader( 'Idempotency-Key', 'key-replay-0123456789abcdef' )
         ->postJson( '/_test/idempotent-echo', [ 'quantity' => 3 ] );
 
     $second->assertStatus( 201 );
@@ -68,11 +68,11 @@ it( 'replays the stored response byte-for-byte on the second call with the same 
 } );
 
 it( 'returns 409 problem+json when the same key is reused with a different payload', function (): void {
-    $this->withHeader( 'Idempotency-Key', 'key-conflict' )
+    $this->withHeader( 'Idempotency-Key', 'key-conflict-0123456789abcdef' )
         ->postJson( '/_test/idempotent-echo', [ 'quantity' => 1 ] )
         ->assertStatus( 201 );
 
-    $conflict = $this->withHeader( 'Idempotency-Key', 'key-conflict' )
+    $conflict = $this->withHeader( 'Idempotency-Key', 'key-conflict-0123456789abcdef' )
         ->postJson( '/_test/idempotent-echo', [ 'quantity' => 999 ] );
 
     $conflict->assertStatus( 409 );
@@ -83,11 +83,11 @@ it( 'returns 409 problem+json when the same key is reused with a different paylo
 } );
 
 it( 'ignores key ordering when hashing the payload', function (): void {
-    $this->withHeader( 'Idempotency-Key', 'key-order' )
+    $this->withHeader( 'Idempotency-Key', 'key-order-0123456789abcdef' )
         ->postJson( '/_test/idempotent-echo', [ 'a' => 1, 'b' => 2 ] )
         ->assertStatus( 201 );
 
-    $second = $this->withHeader( 'Idempotency-Key', 'key-order' )
+    $second = $this->withHeader( 'Idempotency-Key', 'key-order-0123456789abcdef' )
         ->postJson( '/_test/idempotent-echo', [ 'b' => 2, 'a' => 1 ] );
 
     $second->assertStatus( 201 );
@@ -109,13 +109,13 @@ it( 'returns 409 when an in-flight lock does not release inside wait_ms', functi
     IdempotencyRecord::query()->create( [
         'actor_scope'     => 'ip:127.0.0.1',
         'endpoint_key'    => 'test.idempotent.echo',
-        'idempotency_key' => 'key-inflight',
+        'idempotency_key' => 'key-inflight-0123456789abcdef',
         'request_hash'    => $requestHash,
         'locked_at'       => Carbon::now(),
         'expires_at'      => Carbon::now()->addHour(),
     ] );
 
-    $response = $this->withHeader( 'Idempotency-Key', 'key-inflight' )
+    $response = $this->withHeader( 'Idempotency-Key', 'key-inflight-0123456789abcdef' )
         ->postJson( '/_test/idempotent-echo', [ 'quantity' => 5 ] );
 
     $response->assertStatus( 409 );
@@ -147,7 +147,7 @@ it( 'hashes raw request bodies so distinct text/plain payloads do not collide', 
         'POST',
         '/_test/idempotent-raw',
         [], [], [],
-        [ 'CONTENT_TYPE' => 'text/plain', 'HTTP_IDEMPOTENCY_KEY' => 'key-raw' ],
+        [ 'CONTENT_TYPE' => 'text/plain', 'HTTP_IDEMPOTENCY_KEY' => 'key-raw-0123456789abcdef' ],
         'first-body',
     );
     $first->assertStatus( 201 );
@@ -157,7 +157,7 @@ it( 'hashes raw request bodies so distinct text/plain payloads do not collide', 
         'POST',
         '/_test/idempotent-raw',
         [], [], [],
-        [ 'CONTENT_TYPE' => 'text/plain', 'HTTP_IDEMPOTENCY_KEY' => 'key-raw' ],
+        [ 'CONTENT_TYPE' => 'text/plain', 'HTTP_IDEMPOTENCY_KEY' => 'key-raw-0123456789abcdef' ],
         'second-body',
     );
     $second->assertStatus( 409 );
@@ -179,7 +179,7 @@ it( 'hashes uploaded file contents so distinct uploads under the same field do n
         '/_test/idempotent-upload',
         [], [],
         [ 'attachment' => $fileA ],
-        [ 'HTTP_IDEMPOTENCY_KEY' => 'key-upload' ],
+        [ 'HTTP_IDEMPOTENCY_KEY' => 'key-upload-0123456789abcdef' ],
     )->assertStatus( 201 );
 
     $conflict = $this->call(
@@ -187,7 +187,7 @@ it( 'hashes uploaded file contents so distinct uploads under the same field do n
         '/_test/idempotent-upload',
         [], [],
         [ 'attachment' => $fileB ],
-        [ 'HTTP_IDEMPOTENCY_KEY' => 'key-upload' ],
+        [ 'HTTP_IDEMPOTENCY_KEY' => 'key-upload-0123456789abcdef' ],
     );
     $conflict->assertStatus( 409 );
 } );
@@ -203,7 +203,7 @@ it( 'does not crash when the authenticated user lacks Sanctum HasApiTokens', fun
     };
 
     $this->actingAs( $user )
-        ->withHeader( 'Idempotency-Key', 'key-no-sanctum' )
+        ->withHeader( 'Idempotency-Key', 'key-no-sanctum-0123456789abcdef' )
         ->postJson( '/_test/idempotent-echo', [ 'x' => 1 ] )
         ->assertStatus( 201 );
 
@@ -220,18 +220,18 @@ it( 'does not persist Set-Cookie into response_headers', function (): void {
         },
     )->name( 'test.idempotent.cookie' );
 
-    $this->withHeader( 'Idempotency-Key', 'key-cookie' )
+    $this->withHeader( 'Idempotency-Key', 'key-cookie-0123456789abcdef' )
         ->postJson( '/_test/idempotent-cookie' )
         ->assertStatus( 201 );
 
     $record = IdempotencyRecord::query()
-        ->where( 'idempotency_key', 'key-cookie' )
+        ->where( 'idempotency_key', 'key-cookie-0123456789abcdef' )
         ->firstOrFail();
 
     $headers = array_change_key_case( (array) $record->response_headers, CASE_LOWER );
     expect( array_key_exists( 'set-cookie', $headers ) )->toBeFalse();
 
-    $replay = $this->withHeader( 'Idempotency-Key', 'key-cookie' )
+    $replay = $this->withHeader( 'Idempotency-Key', 'key-cookie-0123456789abcdef' )
         ->postJson( '/_test/idempotent-cookie' );
 
     expect( $replay->headers->get( IdempotencyMiddleware::REPLAY_HEADER ) )->toBe( 'true' );
@@ -246,7 +246,7 @@ it( 'uses the per-endpoint TTL override when configured', function (): void {
 
     Carbon::setTestNow( '2026-06-01 00:00:00' );
 
-    $this->withHeader( 'Idempotency-Key', 'key-ttl' )
+    $this->withHeader( 'Idempotency-Key', 'key-ttl-0123456789abcdef' )
         ->postJson( '/_test/idempotent-echo', [ 'quantity' => 1 ] )
         ->assertStatus( 201 );
 
@@ -262,7 +262,7 @@ it( 'keys an unnamed route by its path template, swapping only whole parameter s
         fn () => response()->json( [ 'ok' => true ] ),
     );
 
-    $this->withHeader( 'Idempotency-Key', 'key-unnamed' )
+    $this->withHeader( 'Idempotency-Key', 'key-unnamed-0123456789abcdef' )
         ->postJson( '/_test/v1/things/1', [] )
         ->assertOk();
 
