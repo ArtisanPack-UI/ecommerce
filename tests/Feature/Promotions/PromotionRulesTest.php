@@ -2,9 +2,12 @@
 
 declare( strict_types=1 );
 
+use ArtisanPackUI\Ecommerce\Models\CartItem;
 use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\Product;
+use ArtisanPackUI\Ecommerce\Models\ProductCategory;
+use ArtisanPackUI\Ecommerce\Models\ProductTag;
 use ArtisanPackUI\Ecommerce\Models\Promotion;
 use ArtisanPackUI\Ecommerce\Models\PromotionUsage;
 use ArtisanPackUI\Ecommerce\Registries\PromotionActionRegistry;
@@ -46,9 +49,10 @@ it( 'registers the core sources, conditions, and actions', function (): void {
     expect( app( PromotionSourceRegistry::class )->keys() )->toBe( [ 'automatic', 'coupon' ] );
     expect( app( PromotionConditionRegistry::class )->keys() )->toBe( [
         'min-subtotal', 'cart-contains-product', 'cart-contains-product-type', 'customer-in-group', 'day-of-week', 'customer-first-order',
+        'min-quantity', 'cart-contains-category', 'cart-contains-tag', 'customer-lifetime-value-over', 'date-range', 'currency-is',
     ] );
     expect( app( PromotionActionRegistry::class )->keys() )->toBe( [
-        'percent-off-cart', 'fixed-off-cart', 'percent-off-product', 'free-shipping', 'buy-x-get-y', 'add-free-item', 'tiered-discount',
+        'percent-off-cart', 'fixed-off-cart', 'percent-off-product', 'free-shipping', 'buy-x-get-y', 'add-free-item', 'tiered-discount', 'fixed-off-product',
     ] );
 } );
 
@@ -236,3 +240,93 @@ it( 'flags free shipping', function (): void {
 it( 'rejects ledger writes in another currency', function (): void {
     ( new DiscountLedger( cartWithLines( [ [] ] ) ) )->discountCart( new Money( 100, new Currency( 'EUR' ) ) );
 } )->throws( InvalidArgumentException::class );
+
+it( 'counts paid units for min-quantity, optionally of listed products only', function (): void {
+    $mug  = Product::factory()->create();
+    $cart = cartWithLines( [ [ 'product' => $mug, 'qty' => 2 ], [ 'qty' => 3 ] ] );
+
+    // A free item a promotion added doesn't count.
+    CartItem::factory()->create( [ 'cart_id' => $cart->id, 'product_id' => $mug->id, 'quantity' => 5, 'meta' => [ 'free_item' => true, 'promotion_id' => 1 ] ] );
+    $cart->load( 'items.product' );
+
+    expect( condition( 'min-quantity' )->evaluate( $cart, [ 'quantity' => 5 ] ) )->toBeTrue()
+        ->and( condition( 'min-quantity' )->evaluate( $cart, [ 'quantity' => 6 ] ) )->toBeFalse()
+        ->and( condition( 'min-quantity' )->evaluate( $cart, [ 'quantity' => 2, 'product_ids' => [ $mug->id ] ] ) )->toBeTrue()
+        ->and( condition( 'min-quantity' )->evaluate( $cart, [ 'quantity' => 3, 'product_ids' => [ $mug->id ] ] ) )->toBeFalse()
+        ->and( condition( 'min-quantity' )->evaluate( $cart, [ 'quantity' => 0 ] ) )->toBeFalse();
+} );
+
+it( 'matches categories with their sub-categories, and tags, in any and all modes', function (): void {
+    $kitchen = ProductCategory::factory()->create();
+    $mugs    = ProductCategory::factory()->create( [ 'parent_id' => $kitchen->id ] );
+    $garden  = ProductCategory::factory()->create();
+    $sale    = ProductTag::factory()->create();
+    $new     = ProductTag::factory()->create();
+    $mug     = Product::factory()->create();
+    $mug->categories()->attach( $mugs->id );
+    $mug->tags()->attach( $sale->id );
+
+    $cart = cartWithLines( [ [ 'product' => $mug ] ] );
+
+    expect( condition( 'cart-contains-category' )->evaluate( $cart, [ 'category_ids' => [ $kitchen->id, $garden->id ] ] ) )->toBeTrue()
+        ->and( condition( 'cart-contains-category' )->evaluate( $cart, [ 'category_ids' => [ $kitchen->id, $garden->id ], 'match' => 'all' ] ) )->toBeFalse()
+        ->and( condition( 'cart-contains-category' )->evaluate( $cart, [ 'category_ids' => [ $kitchen->id ], 'include_descendants' => false ] ) )->toBeFalse()
+        ->and( condition( 'cart-contains-tag' )->evaluate( $cart, [ 'tag_ids' => [ $sale->id, $new->id ] ] ) )->toBeTrue()
+        ->and( condition( 'cart-contains-tag' )->evaluate( $cart, [ 'tag_ids' => [ $sale->id, $new->id ], 'match' => 'all' ] ) )->toBeFalse();
+
+    $order = Order::factory()->create();
+    ArtisanPackUI\Ecommerce\Models\OrderItem::factory()->create( [ 'order_id' => $order->id, 'product_id' => $mug->id ] );
+
+    expect( condition( 'cart-contains-category' )->evaluateOrder( $order, [ 'category_ids' => [ $kitchen->id ] ] ) )->toBeTrue();
+} );
+
+it( 'compares a customer\'s lifetime spend, and never matches guests', function (): void {
+    $customer = Customer::factory()->create();
+    $customer->forceFill( [ 'total_spent_amount' => 25_000, 'total_spent_currency' => 'USD' ] )->save();
+
+    expect( condition( 'customer-lifetime-value-over' )->evaluate( cartWithLines( [ [] ], 'USD', [ 'customer_id' => $customer->id ] ), [ 'amount' => 20_000 ] ) )->toBeTrue()
+        ->and( condition( 'customer-lifetime-value-over' )->evaluate( cartWithLines( [ [] ], 'USD', [ 'customer_id' => $customer->id ] ), [ 'amount' => 25_000 ] ) )->toBeFalse()
+        ->and( condition( 'customer-lifetime-value-over' )->evaluate( cartWithLines( [ [] ] ), [ 'amount' => 0 ] ) )->toBeFalse();
+} );
+
+it( 'checks date ranges with open ends in the store time zone', function (): void {
+    Carbon::setTestNow( '2026-10-05 12:00:00' );
+    $cart = cartWithLines( [ [] ] );
+
+    expect( condition( 'date-range' )->evaluate( $cart, [ 'starts_on' => '2026-10-05' ] ) )->toBeTrue()
+        ->and( condition( 'date-range' )->evaluate( $cart, [ 'ends_on' => '2026-10-05' ] ) )->toBeTrue()
+        ->and( condition( 'date-range' )->evaluate( $cart, [ 'starts_on' => '2026-10-06' ] ) )->toBeFalse()
+        ->and( condition( 'date-range' )->evaluate( $cart, [ 'starts_on' => 'not a date' ] ) )->toBeFalse()
+        ->and( condition( 'date-range' )->evaluate( $cart, [] ) )->toBeFalse()
+        ->and( condition( 'date-range' )->evaluateOrder( Order::factory()->create( [ 'placed_at' => '2026-09-01 10:00:00' ] ), [ 'ends_on' => '2026-09-30' ] ) )->toBeTrue();
+
+    Carbon::setTestNow();
+} );
+
+it( 'checks the cart and order currency', function (): void {
+    expect( condition( 'currency-is' )->evaluate( cartWithLines( [ [] ], 'EUR' ), [ 'currencies' => [ 'usd', 'eur' ] ] ) )->toBeTrue()
+        ->and( condition( 'currency-is' )->evaluate( cartWithLines( [ [] ], 'EUR' ), [ 'currencies' => [ 'USD' ] ] ) )->toBeFalse()
+        ->and( condition( 'currency-is' )->evaluateOrder( Order::factory()->create( [ 'currency' => 'USD' ] ), [ 'currencies' => [ 'USD' ] ] ) )->toBeTrue();
+} );
+
+it( 'takes a fixed amount off each unit or each line of the listed products, capped at the line', function (): void {
+    $mug  = Product::factory()->create();
+    $cart = cartWithLines( [ [ 'product' => $mug, 'unit' => 1_000, 'qty' => 3 ], [ 'unit' => 2_000 ] ] );
+
+    expect( lineDiscounts( applyAction( 'fixed-off-product', $cart, [ 'amount' => 250, 'product_ids' => [ $mug->id ] ] ) ) )->toBe( [ 750, 0 ] )
+        ->and( lineDiscounts( applyAction( 'fixed-off-product', $cart, [ 'amount' => 250, 'product_ids' => [ $mug->id ], 'per' => 'line' ] ) ) )->toBe( [ 250, 0 ] )
+        ->and( lineDiscounts( applyAction( 'fixed-off-product', $cart, [ 'amount' => 5_000, 'product_ids' => [ $mug->id ] ] ) ) )->toBe( [ 3_000, 0 ] )
+        ->and( lineDiscounts( applyAction( 'fixed-off-product', $cart, [ 'amount' => 250 ] ) ) )->toBe( [ 0, 0 ] );
+} );
+
+it( 'lists the new conditions and actions with translated labels in the admin API', function (): void {
+    Illuminate\Support\Facades\Gate::define( 'ecommerce.admin', fn (): bool => true );
+    Laravel\Sanctum\Sanctum::actingAs( Tests\Fixtures\ApiUser::make( 1 ), [ 'ecommerce:admin' ] );
+
+    $conditions = collect( $this->getJson( '/api/ecommerce/v1/admin/promotion-conditions', [ 'Accept-Language' => 'de' ] )->assertOk()->json( 'data' ) )->keyBy( 'key' );
+    $actions    = collect( $this->getJson( '/api/ecommerce/v1/admin/promotion-actions' )->assertOk()->json( 'data' ) )->keyBy( 'key' );
+
+    expect( $conditions->keys()->all() )->toContain( 'min-quantity', 'cart-contains-category', 'cart-contains-tag', 'customer-lifetime-value-over', 'date-range', 'currency-is' )
+        ->and( $conditions['date-range']['label'] )->toBe( __( 'Date range', [], 'de' ) )
+        ->and( $actions->keys()->all() )->toContain( 'fixed-off-product' );
+} );

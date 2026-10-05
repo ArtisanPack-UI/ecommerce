@@ -146,15 +146,22 @@ use ArtisanPackUI\Ecommerce\ProductTypes\VariableProductType;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\AddFreeItemAction;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\BuyXGetYAction;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\FixedOffCartAction;
+use ArtisanPackUI\Ecommerce\Promotions\Actions\FixedOffProductAction;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\FreeShippingAction;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\PercentOffCartAction;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\PercentOffProductAction;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\TieredDiscountAction;
+use ArtisanPackUI\Ecommerce\Promotions\Conditions\CartContainsCategoryCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\CartContainsProductCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\CartContainsProductTypeCondition;
+use ArtisanPackUI\Ecommerce\Promotions\Conditions\CartContainsTagCondition;
+use ArtisanPackUI\Ecommerce\Promotions\Conditions\CurrencyIsCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\CustomerFirstOrderCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\CustomerInGroupCondition;
+use ArtisanPackUI\Ecommerce\Promotions\Conditions\CustomerLifetimeValueOverCondition;
+use ArtisanPackUI\Ecommerce\Promotions\Conditions\DateRangeCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\DayOfWeekCondition;
+use ArtisanPackUI\Ecommerce\Promotions\Conditions\MinQuantityCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\MinSubtotalCondition;
 use ArtisanPackUI\Ecommerce\Registries\AdminMenuRegistry;
 use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
@@ -962,6 +969,12 @@ class EcommerceServiceProvider extends ServiceProvider
             CustomerInGroupCondition::class,
             DayOfWeekCondition::class,
             CustomerFirstOrderCondition::class,
+            MinQuantityCondition::class,
+            CartContainsCategoryCondition::class,
+            CartContainsTagCondition::class,
+            CustomerLifetimeValueOverCondition::class,
+            DateRangeCondition::class,
+            CurrencyIsCondition::class,
         ] as $condition ) {
             $conditions->register( $condition::KEY, $condition );
         }
@@ -977,6 +990,7 @@ class EcommerceServiceProvider extends ServiceProvider
             BuyXGetYAction::class,
             AddFreeItemAction::class,
             TieredDiscountAction::class,
+            FixedOffProductAction::class,
         ] as $action ) {
             $actions->register( $action::KEY, $action );
         }
