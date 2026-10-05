@@ -21,9 +21,8 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Policies;
 
-use ArtisanPackUI\Ecommerce\Auth\ServiceActor;
-use ArtisanPackUI\Ecommerce\Auth\TokenAbilities;
 use ArtisanPackUI\Ecommerce\Models\Order;
+use ArtisanPackUI\Ecommerce\Policies\Concerns\ChecksShopperOwnership;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 
@@ -35,6 +34,8 @@ use Illuminate\Database\Eloquent\Model;
  */
 class OrderPolicy extends EcommercePolicy
 {
+    use ChecksShopperOwnership;
+
     /**
      * @since 1.0.0
      *
@@ -158,15 +159,6 @@ class OrderPolicy extends EcommercePolicy
      */
     protected function owns( Authenticatable $user, Model $order ): bool
     {
-        if ( ! $order instanceof Order || $user instanceof ServiceActor || null === $order->customer_id ) {
-            return false;
-        }
-
-        $customer = $order->customer;
-
-        return null !== $customer
-            && null !== $customer->user_id
-            && (string) $customer->user_id === (string) $user->getAuthIdentifier()
-            && TokenAbilities::allowsStorefront( $user );
+        return $order instanceof Order && null !== $order->customer_id && $this->ownsCustomer( $user, $order->customer );
     }
 }

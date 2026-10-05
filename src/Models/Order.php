@@ -21,6 +21,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Models;
 
 use ArtisanPackUI\Ecommerce\Database\Factories\OrderFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -149,6 +150,21 @@ class Order extends Model
     ];
 
     /**
+     * Scope: orders that belong to `$customer`.
+     *
+     * @since 1.0.0
+     *
+     * @param  Builder<Order>  $query     Query.
+     * @param  Customer|int    $customer  Customer or id.
+     *
+     * @return Builder<Order>
+     */
+    public function scopeForCustomer( Builder $query, Customer|int $customer ): Builder
+    {
+        return $query->where( 'customer_id', $customer instanceof Customer ? $customer->getKey() : $customer );
+    }
+
+    /**
      * The customer this order belongs to, if claimed.
      *
      * @since 1.0.0
@@ -194,6 +210,18 @@ class Order extends Model
     public function notes(): HasMany
     {
         return $this->hasMany( OrderNote::class );
+    }
+
+    /**
+     * Notes the shopper may read (`is_customer_visible`).
+     *
+     * @since 1.0.0
+     *
+     * @return HasMany<OrderNote, $this>
+     */
+    public function customerNotes(): HasMany
+    {
+        return $this->notes()->where( 'is_customer_visible', true );
     }
 
     /**

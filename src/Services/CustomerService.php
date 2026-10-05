@@ -48,11 +48,13 @@ use ArtisanPackUI\Ecommerce\Models\ProductReview;
 use ArtisanPackUI\Ecommerce\Models\PromotionUsage;
 use ArtisanPackUI\Ecommerce\Models\Refund;
 use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
+use ArtisanPackUI\Ecommerce\Support\AfterCommit;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder as QueryBuilder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -263,6 +265,54 @@ class CustomerService
             $locked->save();
 
             doAction( 'ap.ecommerce.customer.userLinked', $locked, $user );
+
+            return $locked;
+        } );
+    }
+
+    /**
+     * Updates the profile fields a shopper manages themselves: `first_name`,
+     * `last_name`, `phone`, and `accepts_marketing`. Turning marketing on
+     * records when consent was given (`accepts_marketing_at`); turning it
+     * off clears it. Other keys are ignored. Fires
+     * `ap.ecommerce.customer.updated` with the changed fields.
+     *
+     * @since 1.0.0
+     *
+     * @param  Customer              $customer  Customer.
+     * @param  array<string, mixed>  $profile   Profile fields.
+     *
+     * @return Customer
+     */
+    public function updateProfile( Customer $customer, array $profile ): Customer
+    {
+        $fields = array_intersect_key( $profile, array_flip( [ 'first_name', 'last_name', 'phone', 'accepts_marketing' ] ) );
+
+        return DB::transaction( function () use ( $customer, $fields ): Customer {
+            $locked = Customer::query()->lockForUpdate()->findOrFail( $customer->id );
+
+            foreach ( [ 'first_name', 'last_name', 'phone' ] as $field ) {
+                if ( array_key_exists( $field, $fields ) ) {
+                    $value            = null === $fields[ $field ] ? null : trim( (string) $fields[ $field ] );
+                    $locked->{$field} = '' === $value ? null : $value;
+                }
+            }
+
+            if ( array_key_exists( 'accepts_marketing', $fields ) ) {
+                $accepts = (bool) $fields['accepts_marketing'];
+
+                if ( $accepts !== (bool) $locked->accepts_marketing ) {
+                    $locked->accepts_marketing    = $accepts;
+                    $locked->accepts_marketing_at = $accepts ? Carbon::now() : null;
+                }
+            }
+
+            $changes = array_keys( $locked->getDirty() );
+            $locked->save();
+
+            if ( [] !== $changes ) {
+                AfterCommit::action( 'ap.ecommerce.customer.updated', $locked, $changes );
+            }
 
             return $locked;
         } );

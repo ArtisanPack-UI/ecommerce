@@ -390,6 +390,7 @@ final class ResourceSchemas
                 'items'            => [ 'OrderItem', true, 'items' ],
                 'customer'         => [ 'Customer', false, 'customer' ],
                 'notes'            => [ 'OrderNote', true, 'notes', true ],
+                'customer_notes'   => [ 'OrderNote', true, 'customerNotes' ],
                 'timeline'         => [ 'OrderTimelineEntry', true, 'timelineEntries', true ],
                 'edits'            => [ 'OrderEdit', true, 'edits', true ],
                 'refunds'          => [ 'Refund', true, 'refunds' ],

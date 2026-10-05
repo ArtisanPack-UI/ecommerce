@@ -114,6 +114,18 @@ class Customer extends Model
     }
 
     /**
+     * Orders that belong to this customer.
+     *
+     * @since 1.0.0
+     *
+     * @return HasMany<Order, $this>
+     */
+    public function orders(): HasMany
+    {
+        return $this->hasMany( Order::class );
+    }
+
+    /**
      * Addresses saved for this customer.
      *
      * @since 1.0.0

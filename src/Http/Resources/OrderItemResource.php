@@ -58,7 +58,7 @@ class OrderItemResource extends EcommerceResource
             'shipping'           => $this->money( 'shipping_amount' ),
             'total'              => $this->money( 'total_amount' ),
             'fulfillment_status' => $this->resource->fulfillment_status,
-            'meta'               => $this->resource->meta,
+            'meta'               => $this->publicMetaFor( $request, 'ap.ecommerce.orderItem.publicMetaKeys', [ 'free_item', 'promotion_id' ] ),
         ];
     }
 }

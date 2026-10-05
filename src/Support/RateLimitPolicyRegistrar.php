@@ -56,6 +56,7 @@ class RateLimitPolicyRegistrar
         'ecommerce.coupon.attempt',
         'ecommerce.login',
         'ecommerce.review.submit',
+        'ecommerce.claim.attempt',
         'ecommerce.license.validate',
         'ecommerce.webhook.inbound',
         'ecommerce.admin.mutate',
@@ -136,6 +137,21 @@ class RateLimitPolicyRegistrar
                     ->by( 'ecommerce:review:customer:' . ( null !== $user ? (string) $user->getAuthIdentifier() : 'guest:' . sha1( (string) $request->ip() ) ) ),
                 Limit::perHour( self::limit( 'review.submit.per_ip', 10 ) )
                     ->by( 'ecommerce:review:ip:' . sha1( (string) $request->ip() ) ),
+            ];
+        } );
+
+        // Guest-order claims (#173): a claim checks an order number and postal
+        // code, so it is throttled per shopper and per IP. The per-shopper
+        // default follows `customers.claim_rate_limit` / `_window_minutes`.
+        RateLimiter::for( 'ecommerce.claim.attempt', function ( Request $request ): array {
+            $user    = $request->user();
+            $minutes = max( 1, (int) config( 'artisanpack.ecommerce.customers.claim_rate_window_minutes', 60 ) );
+
+            return [
+                Limit::perMinutes( $minutes, self::limit( 'claim.attempt.per_customer', max( 1, (int) config( 'artisanpack.ecommerce.customers.claim_rate_limit', 5 ) ) ) )
+                    ->by( 'ecommerce:claim:customer:' . ( null !== $user ? (string) $user->getAuthIdentifier() : 'guest:' . sha1( (string) $request->ip() ) ) ),
+                Limit::perHour( self::limit( 'claim.attempt.per_ip', 30 ) )
+                    ->by( 'ecommerce:claim:ip:' . sha1( (string) $request->ip() ) ),
             ];
         } );
 

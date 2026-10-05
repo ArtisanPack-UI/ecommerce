@@ -92,6 +92,7 @@ use ArtisanPackUI\Ecommerce\Listeners\UpdateCustomerStats;
 use ArtisanPackUI\Ecommerce\Logging\EcommerceLogFormatter;
 use ArtisanPackUI\Ecommerce\Models\Coupon;
 use ArtisanPackUI\Ecommerce\Models\Customer;
+use ArtisanPackUI\Ecommerce\Models\CustomerAddress;
 use ArtisanPackUI\Ecommerce\Models\DigitalFile;
 use ArtisanPackUI\Ecommerce\Models\EcommerceSetting;
 use ArtisanPackUI\Ecommerce\Models\InventoryItem;
@@ -114,6 +115,7 @@ use ArtisanPackUI\Ecommerce\Models\TaxRate;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
 use ArtisanPackUI\Ecommerce\Notifications\NotificationCatalog;
 use ArtisanPackUI\Ecommerce\Policies\CouponPolicy;
+use ArtisanPackUI\Ecommerce\Policies\CustomerAddressPolicy;
 use ArtisanPackUI\Ecommerce\Policies\CustomerPolicy;
 use ArtisanPackUI\Ecommerce\Policies\DigitalFilePolicy;
 use ArtisanPackUI\Ecommerce\Policies\InventoryPolicy;
@@ -1434,6 +1436,7 @@ class EcommerceServiceProvider extends ServiceProvider
             Order::class                => OrderPolicy::class,
             Refund::class               => RefundPolicy::class,
             Customer::class             => CustomerPolicy::class,
+            CustomerAddress::class      => CustomerAddressPolicy::class,
             Promotion::class            => PromotionPolicy::class,
             Coupon::class               => CouponPolicy::class,
             TaxRate::class              => TaxRatePolicy::class,

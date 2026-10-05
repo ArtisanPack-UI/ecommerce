@@ -57,7 +57,7 @@ class CustomerResource extends EcommerceResource
             'total_spent'          => $this->money( 'total_spent_amount' ),
             'orders_count'         => $this->resource->orders_count,
             'last_ordered_at'      => $this->resource->last_ordered_at,
-            'meta'                 => $this->resource->meta,
+            'meta'                 => $this->publicMetaFor( $request, 'ap.ecommerce.customer.publicMetaKeys', [] ),
             'created_at'           => $this->resource->created_at,
             'updated_at'           => $this->resource->updated_at,
         ];

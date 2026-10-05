@@ -208,4 +208,32 @@ abstract class EcommerceResource extends JsonResource
     {
         return $this->isAdmin( $request ) ? $value : new MissingValue();
     }
+
+    /**
+     * The model's `meta` for this request: all of it for admins; for
+     * everyone else only the keys `$hook` (a filter, given `$defaultKeys`
+     * and the model) allows — staff-internal entries such as fraud verdicts
+     * never reach a shopper (audit F1).
+     *
+     * @since 1.0.0
+     *
+     * @param  Request             $request      Request.
+     * @param  string              $hook         `ap.ecommerce.*.publicMetaKeys` filter.
+     * @param  array<int, string>  $defaultKeys  Keys shoppers see by default.
+     *
+     * @return array<string, mixed>
+     */
+    protected function publicMetaFor( Request $request, string $hook, array $defaultKeys ): array
+    {
+        $meta = (array) ( $this->resource->meta ?? [] );
+
+        if ( $this->isAdmin( $request ) ) {
+            return $meta;
+        }
+
+        $keys = applyFilters( $hook, $defaultKeys, $this->resource );
+        $keys = is_array( $keys ) ? array_values( array_filter( $keys, 'is_string' ) ) : $defaultKeys;
+
+        return array_intersect_key( $meta, array_flip( $keys ) );
+    }
 }

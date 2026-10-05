@@ -46,6 +46,7 @@ use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanCardController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanCatalogController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanColumnController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\LicenseKeyController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\MeController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\NotificationPreferenceController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\NotificationTemplateController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderCancelController;
@@ -204,6 +205,26 @@ Route::get( 'me/notification-preferences', [ NotificationPreferenceController::c
 Route::patch( 'me/notification-preferences', [ NotificationPreferenceController::class, 'update' ] )
     ->middleware( array_merge( $auth, [ 'ecommerce.rate-limit:ecommerce.admin.mutate', 'ecommerce.idempotency' ] ) )
     ->name( 'me.notification-preferences.update' );
+
+Route::where( [ 'order' => '[0-9]+', 'address' => '[0-9]+' ] )->group( function () use ( $auth ): void {
+    Route::middleware( array_merge( $auth, [ 'ecommerce.rate-limit:ecommerce.admin.mutate' ] ) )->group( function (): void {
+        Route::get( 'me', [ MeController::class, 'show' ] )->name( 'me.show' );
+        Route::get( 'me/addresses', [ MeController::class, 'addresses' ] )->name( 'me.addresses.index' );
+        Route::get( 'me/orders', [ MeController::class, 'orders' ] )->name( 'me.orders.index' );
+        Route::get( 'me/orders/{order}', [ MeController::class, 'order' ] )->name( 'me.orders.show' );
+    } );
+
+    Route::middleware( array_merge( $auth, [ 'ecommerce.rate-limit:ecommerce.admin.mutate', 'ecommerce.idempotency' ] ) )->group( function (): void {
+        Route::patch( 'me', [ MeController::class, 'update' ] )->name( 'me.update' );
+        Route::post( 'me/addresses', [ MeController::class, 'storeAddress' ] )->name( 'me.addresses.store' );
+        Route::patch( 'me/addresses/{address}', [ MeController::class, 'updateAddress' ] )->name( 'me.addresses.update' );
+        Route::delete( 'me/addresses/{address}', [ MeController::class, 'destroyAddress' ] )->name( 'me.addresses.destroy' );
+    } );
+
+    Route::post( 'me/claims', [ MeController::class, 'claim' ] )
+        ->middleware( array_merge( $auth, [ 'ecommerce.rate-limit:ecommerce.claim.attempt', 'ecommerce.idempotency' ] ) )
+        ->name( 'me.claims.store' );
+} );
 
 // Kanban (engine spec §9.10, parent plan §9.5).
 Route::prefix( 'kanban' )
