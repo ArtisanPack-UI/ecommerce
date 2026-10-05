@@ -187,8 +187,8 @@ class OpenApiGenerator
             'description' => $this->operationDescription( $meta, $ability, $policy, $idempotent ),
             'tags'        => [ $this->tag( $name ) ],
             'security'    => $auth ? [ [ 'sanctum' => [] ], [ 'serviceSignature' => [] ], [ 'sessionCookie' => [] ] ] : [],
-            'parameters'  => $this->operationParameters( $route, $action, $idempotent ),
-            'requestBody' => $this->requestBody( $action, $method, $route ),
+            'parameters'  => $this->operationParameters( $route, $action, $idempotent, $meta, $method ),
+            'requestBody' => in_array( $method, [ 'GET', 'HEAD' ], true ) ? null : $this->requestBody( $action, $method, $route ),
             'responses'   => $this->responses( $route, $meta, $auth, $policy, $idempotent, $action ),
         ];
 
@@ -256,7 +256,7 @@ class OpenApiGenerator
      *
      * @return array<int, array<string, mixed>>
      */
-    protected function operationParameters( Route $route, ?ReflectionMethod $action, bool $idempotent ): array
+    protected function operationParameters( Route $route, ?ReflectionMethod $action, bool $idempotent, ?ApiOperation $meta = null, string $method = 'GET' ): array
     {
         $parameters = [];
 
@@ -269,11 +269,122 @@ class OpenApiGenerator
             ];
         }
 
+        if ( in_array( $method, [ 'GET', 'HEAD' ], true ) ) {
+            $parameters = [ ...$parameters, ...$this->queryParameters( $route, $action, $meta ) ];
+        }
+
         if ( $idempotent ) {
             $parameters[] = [ '$ref' => '#/components/parameters/IdempotencyKey' ];
         }
 
         return $parameters;
+    }
+
+    /**
+     * Query parameters of a read (audit F2): lists get `filter`
+     * (deepObject), `sort`, `include`, `per_page`, and `cursor`; reads with
+     * includes get `include`; a GET form request's rules become parameters;
+     * and the operation's own `query` entries are added.
+     *
+     * @since 1.0.0
+     *
+     * @param  Route                  $route   Route.
+     * @param  ReflectionMethod|null  $action  Controller action.
+     * @param  ApiOperation|null      $meta    Operation metadata.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    protected function queryParameters( Route $route, ?ReflectionMethod $action, ?ApiOperation $meta ): array
+    {
+        $parameters = [];
+
+        $sorts    = self::names( $meta?->sorts ?? [] );
+        $includes = self::names( $meta?->includes ?? [] );
+
+        if ( true === $meta?->collection && ( [] !== $sorts || [] !== $meta->filters ) ) {
+            $filters = [
+                'type'                 => 'object',
+                'properties'           => array_map( self::filterSchema( ... ), $meta->filters ),
+                'additionalProperties' => false,
+            ];
+
+            $parameters[] = [ 'name' => 'filter', 'in' => 'query', 'style' => 'deepObject', 'explode' => true, 'schema' => $filters, 'description' => 'Filters as filter[field]=value; comma-separate values to match any. Unknown filters are a 400.' ];
+            $parameters[] = [ 'name' => 'sort', 'in' => 'query', 'schema' => [ 'type' => 'string' ], 'description' => 'One of: ' . implode( ', ', $sorts ) . '. Column sorts also take a - prefix for descending. Unknown sorts are a 400.' ];
+            $parameters[] = [ 'name' => 'per_page', 'in' => 'query', 'schema' => [ 'type' => 'integer', 'minimum' => 1, 'maximum' => max( 1, (int) config( 'artisanpack.ecommerce.api.max_per_page', 100 ) ) ] ];
+            $parameters[] = [ 'name' => 'cursor', 'in' => 'query', 'schema' => [ 'type' => 'string' ], 'description' => 'Opaque cursor from links.next / meta.next_cursor.' ];
+        }
+
+        if ( [] !== $includes ) {
+            $parameters[] = [ 'name' => 'include', 'in' => 'query', 'schema' => [ 'type' => 'string' ], 'description' => 'Comma-separated, from: ' . implode( ', ', $includes ) . '. Unknown includes are a 400.' ];
+        }
+
+        $rules = $this->formRequestRules( $action, 'GET', $route );
+
+        if ( null !== $rules ) {
+            $schema   = RuleSchema::fromRules( $rules );
+            $required = (array) ( $schema['required'] ?? [] );
+
+            foreach ( (array) ( $schema['properties'] ?? [] ) as $name => $property ) {
+                $parameters[] = array_filter( [
+                    'name'     => (string) $name,
+                    'in'       => 'query',
+                    'required' => in_array( $name, $required, true ) ? true : null,
+                    'style'    => 'object' === ( $property['type'] ?? null ) ? 'deepObject' : null,
+                    'schema'   => $property,
+                ], static fn ( mixed $value ): bool => null !== $value );
+            }
+        }
+
+        foreach ( $meta?->query ?? [] as $name => $definition ) {
+            $parameters = array_values( array_filter( $parameters, static fn ( array $parameter ): bool => $parameter['name'] !== $name ) );
+
+            if ( 'per_page' === $name ) {
+                $definition['schema']['maximum'] = max( 1, (int) config( 'artisanpack.ecommerce.api.max_per_page', 100 ) );
+            }
+
+            $parameters[] = array_filter( [
+                'name'        => $name,
+                'in'          => 'query',
+                'required'    => ( $definition['required'] ?? false ) ? true : null,
+                'style'       => $definition['style'] ?? null,
+                'description' => $definition['description'] ?? null,
+                'schema'      => $definition['schema'],
+            ], static fn ( mixed $value ): bool => null !== $value );
+        }
+
+        return $parameters;
+    }
+
+    /**
+     * The names in an allow-list: a list's values, or a map's keys (so a
+     * controller's include map can be passed as is).
+     *
+     * @since 1.0.0
+     *
+     * @param  array<int|string, mixed>  $allowed  Allow-list.
+     *
+     * @return array<int, string>
+     */
+    protected static function names( array $allowed ): array
+    {
+        return array_map( 'strval', array_is_list( $allowed ) ? $allowed : array_keys( $allowed ) );
+    }
+
+    /**
+     * Schema for one `filter[...]` value. `int-list` is one or more
+     * comma-separated whole numbers; anything else is a JSON type.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $type  Declared type.
+     *
+     * @return array<string, mixed>
+     */
+    protected static function filterSchema( string $type ): array
+    {
+        return 'int-list' === $type
+            ? [ 'type' => 'string', 'pattern' => '^[0-9]+(,[0-9]+)*$' ]
+            : [ 'type' => $type ];
     }
 
     /**
@@ -388,8 +499,16 @@ class OpenApiGenerator
         $type      = null === $meta?->resource ? null : ResourceSchemas::typeForResource( $meta->resource );
         $responses = [];
 
-        if ( null === $type ) {
-            $responses[ $status ] = [ 'description' => 'Success.', 'content' => [ 'application/json' => [ 'schema' => [ 'type' => 'object' ] ] ] ];
+        $operationId = Str::camel( str_replace( [ '.', '-' ], '_', Str::after( (string) $route->getName(), str_starts_with( (string) $route->getName(), self::ROUTE_PREFIX ) ? self::ROUTE_PREFIX : 'ecommerce.' ) ) );
+
+        if ( in_array( $operationId, ResponseSchemas::BINARY, true ) ) {
+            $binary = [ 'application/octet-stream' => [ 'schema' => [ 'type' => 'string', 'format' => 'binary' ] ] ];
+
+            $responses[ $status ] = [ 'description' => 'The file.', 'content' => $binary ];
+            $responses['206']     = [ 'description' => 'Part of the file (a Range request).', 'content' => $binary ];
+            $responses['416']     = [ 'description' => 'The requested range is not satisfiable.' ];
+        } elseif ( null === $type ) {
+            $responses[ $status ] = [ 'description' => ( $meta?->summary ?? 'Success' ) . '.', 'content' => [ 'application/json' => [ 'schema' => ResponseSchemas::for( $operationId ) ?? [ 'type' => 'object', 'additionalProperties' => true ] ] ] ];
         } else {
             $ref    = [ '$ref' => '#/components/schemas/' . $type ];
             $schema = $meta->collection

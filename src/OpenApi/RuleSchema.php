@@ -216,6 +216,29 @@ final class RuleSchema
 
         if ( isset( $schema['items'] ) ) {
             $schema['items'] = self::tidy( $schema['items'] );
+
+            // A `*` child with no type rule says nothing about the values;
+            // treat it like no child at all.
+            if ( [] === $schema['items'] ) {
+                unset( $schema['items'] );
+            }
+        }
+
+        // An `array` rule with no typed `*` children is a map (options,
+        // meta, config, …), not a list (audit F6).
+        $types = (array) ( $schema['type'] ?? [] );
+
+        if ( in_array( 'array', $types, true ) && ! isset( $schema['items'] ) ) {
+            $schema['type'] = 1 === count( $types ) ? 'object' : array_values( array_map( static fn ( string $type ): string => 'array' === $type ? 'object' : $type, $types ) );
+
+            $schema['additionalProperties'] ??= true;
+
+            foreach ( [ 'minItems' => 'minProperties', 'maxItems' => 'maxProperties' ] as $from => $to ) {
+                if ( isset( $schema[ $from ] ) ) {
+                    $schema[ $to ] = $schema[ $from ];
+                    unset( $schema[ $from ] );
+                }
+            }
         }
 
         if ( isset( $schema['required'] ) ) {

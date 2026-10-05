@@ -91,7 +91,7 @@ class CartController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Get a cart by token', resource: CartResource::class )]
+    #[ApiOperation( summary: 'Get a cart by token', resource: CartResource::class, includes: self::INCLUDES )]
     public function show( Request $request, string $cart ): JsonResponse
     {
         return $this->resourceResponse( $this->find( $cart ), $request, CartResource::class, self::INCLUDES );
@@ -104,7 +104,7 @@ class CartController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Create a cart', resource: CartResource::class, status: 201 )]
+    #[ApiOperation( summary: 'Create a cart', resource: CartResource::class, status: 201, includes: self::INCLUDES )]
     public function store( CreateCartRequest $request ): JsonResponse
     {
         $user     = $request->user();

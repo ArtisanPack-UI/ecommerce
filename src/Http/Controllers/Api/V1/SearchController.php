@@ -26,6 +26,7 @@ use ArtisanPackUI\Ecommerce\Http\Support\ListQuery;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
+use ArtisanPackUI\Ecommerce\OpenApi\CatalogParameters;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -53,7 +54,12 @@ class SearchController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Search products', resource: ProductResource::class, collection: true, description: 'Full-text product search through Laravel Scout. Page-number paginated via `page` and `per_page`.' )]
+    #[ApiOperation(
+        summary: 'Search products',
+        resource: ProductResource::class,
+        includes: ProductController::OPENAPI_INCLUDES,
+        query: CatalogParameters::SEARCH,
+    )]
     public function index( Request $request ): JsonResponse
     {
         $raw  = $request->query( 'q' );

@@ -52,7 +52,7 @@ class ProductTagController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List product tags', resource: ProductTagResource::class, collection: true )]
+    #[ApiOperation( summary: 'List product tags', resource: ProductTagResource::class, collection: true, filters: [ 'slug' => 'string', 'search' => 'string' ], sorts: [ 'name', 'created_at' ] )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(

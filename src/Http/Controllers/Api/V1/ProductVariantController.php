@@ -55,7 +55,7 @@ class ProductVariantController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Create a product variant', resource: ProductVariantResource::class, status: 201 )]
+    #[ApiOperation( summary: 'Create a product variant', resource: ProductVariantResource::class, status: 201, includes: [ 'prices' ] )]
     public function store( ProductVariantRequest $request, Product $product ): JsonResponse
     {
         return $this->resourceResponse( $this->products->createVariant( $product, $request->validated() ), $request, ProductVariantResource::class, [ 'prices' => 'prices' ], 201 );
@@ -70,7 +70,7 @@ class ProductVariantController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Update a product variant', resource: ProductVariantResource::class )]
+    #[ApiOperation( summary: 'Update a product variant', resource: ProductVariantResource::class, includes: [ 'prices' ] )]
     public function update( ProductVariantRequest $request, Product $product, ProductVariant $variant ): JsonResponse
     {
         if ( $request->has( 'stock_adjustment' ) && null !== ( $denied = $this->forbiddenUnless( $request, 'inventory', 'adjust' ) ) ) {

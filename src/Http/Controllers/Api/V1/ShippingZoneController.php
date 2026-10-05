@@ -46,7 +46,7 @@ class ShippingZoneController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List shipping zones', resource: ShippingZoneResource::class, collection: true )]
+    #[ApiOperation( summary: 'List shipping zones', resource: ShippingZoneResource::class, collection: true, filters: [ 'is_active' => 'boolean' ], sorts: [ 'priority', 'name' ], includes: self::INCLUDES )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse( ShippingZone::query(), $request, ShippingZoneResource::class, [ 'is_active' => [ 'is_active', 'bool' ] ], [ 'priority' => 'priority', 'name' => 'name' ], self::INCLUDES, 'priority' );
@@ -59,7 +59,7 @@ class ShippingZoneController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Create a shipping zone', resource: ShippingZoneResource::class, status: 201 )]
+    #[ApiOperation( summary: 'Create a shipping zone', resource: ShippingZoneResource::class, status: 201, includes: self::INCLUDES )]
     public function store( ShippingZoneRequest $request ): JsonResponse
     {
         return $this->resourceResponse( ShippingZone::query()->create( $request->validated() ), $request, ShippingZoneResource::class, self::INCLUDES, 201 );
@@ -73,7 +73,7 @@ class ShippingZoneController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Update a shipping zone', resource: ShippingZoneResource::class )]
+    #[ApiOperation( summary: 'Update a shipping zone', resource: ShippingZoneResource::class, includes: self::INCLUDES )]
     public function update( ShippingZoneRequest $request, ShippingZone $zone ): JsonResponse
     {
         $zone->fill( $request->validated() )->save();

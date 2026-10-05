@@ -26,6 +26,7 @@ use ArtisanPackUI\Ecommerce\Http\Support\ListQuery;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
+use ArtisanPackUI\Ecommerce\OpenApi\CatalogParameters;
 use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -59,6 +60,48 @@ class ProductController extends ApiController
     public const COMPUTED_SORTS = [ 'price', '-price', 'popularity', 'relevance', 'newest' ];
 
     /**
+     * `filter[...]` keys and their types, for the OpenAPI document.
+     *
+     * @since 1.0.0
+     *
+     * @var array<string, string>
+     */
+    public const OPENAPI_FILTERS = [
+        'type'        => 'string',
+        'sku'         => 'string',
+        'slug'        => 'string',
+        'search'      => 'string',
+        'category'    => 'string',
+        'descendants' => 'boolean',
+        'tag'         => 'string',
+        'price_min'   => 'integer',
+        'price_max'   => 'integer',
+        'in_stock'    => 'boolean',
+        'on_sale'     => 'boolean',
+        'featured'    => 'boolean',
+        'min_rating'  => 'number',
+        'ids'         => 'int-list',
+    ];
+
+    /**
+     * Accepted `sort` values, for the OpenAPI document.
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    public const OPENAPI_SORTS = [ 'position', 'name', 'created_at', 'rating', 'price', '-price', 'popularity', 'relevance', 'newest' ];
+
+    /**
+     * Accepted `include` values, for the OpenAPI document.
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    public const OPENAPI_INCLUDES = [ 'variants', 'variants.prices', 'prices', 'attributes', 'attributes.values', 'images', 'categories', 'tags' ];
+
+    /**
      * Storefront products through {@see CatalogQuery}.
      *
      * Filters (`filter[...]`): `type`, `sku`, `slug`, `search`, `category`
@@ -78,7 +121,15 @@ class ProductController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List storefront products', resource: ProductResource::class, collection: true )]
+    #[ApiOperation(
+        summary: 'List storefront products',
+        resource: ProductResource::class,
+        collection: true,
+        filters: self::OPENAPI_FILTERS,
+        sorts: self::OPENAPI_SORTS,
+        includes: self::OPENAPI_INCLUDES,
+        query: CatalogParameters::PRODUCT_LIST,
+    )]
     public function index( Request $request ): JsonResponse
     {
         $filters  = $request->query( 'filter', [] );
@@ -140,7 +191,7 @@ class ProductController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Get a storefront product', resource: ProductResource::class )]
+    #[ApiOperation( summary: 'Get a storefront product', resource: ProductResource::class, includes: self::OPENAPI_INCLUDES )]
     public function show( Request $request, int $product ): JsonResponse
     {
         return $this->resourceResponse( $this->visible()->findOrFail( $product ), $request, ProductResource::class, $this->includes() );
@@ -154,7 +205,7 @@ class ProductController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List the variants of a product', resource: ProductVariantResource::class, collection: true )]
+    #[ApiOperation( summary: 'List the variants of a product', resource: ProductVariantResource::class, collection: true, filters: [ 'sku' => 'string' ], sorts: [ 'position' ], includes: [ 'prices' ] )]
     public function variants( Request $request, int $product ): JsonResponse
     {
         $model = $this->visible()->findOrFail( $product );

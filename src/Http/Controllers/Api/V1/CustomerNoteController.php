@@ -56,7 +56,7 @@ class CustomerNoteController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List a customer\'s notes', resource: CustomerNoteResource::class, collection: true )]
+    #[ApiOperation( summary: 'List a customer\'s notes', resource: CustomerNoteResource::class, collection: true, sorts: [ 'created_at' ] )]
     public function index( Request $request, Customer $customer ): JsonResponse
     {
         return $this->listResponse(

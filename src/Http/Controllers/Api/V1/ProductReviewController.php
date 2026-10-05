@@ -65,7 +65,7 @@ class ProductReviewController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: "List a product's approved reviews", resource: ProductReviewResource::class, collection: true )]
+    #[ApiOperation( summary: "List a product's approved reviews", resource: ProductReviewResource::class, collection: true, filters: [ 'rating' => 'int-list', 'is_verified_purchase' => 'boolean' ], sorts: [ 'rating', 'created_at' ] )]
     public function index( Request $request, int $product ): JsonResponse
     {
         $model = Product::query()->storefrontVisible()->findOrFail( $product );

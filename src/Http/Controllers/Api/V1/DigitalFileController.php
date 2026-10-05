@@ -53,7 +53,7 @@ class DigitalFileController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List digital files', resource: DigitalFileResource::class, collection: true )]
+    #[ApiOperation( summary: 'List digital files', resource: DigitalFileResource::class, collection: true, filters: [ 'product_id' => 'int-list', 'product_variant_id' => 'int-list', 'is_streaming_only' => 'boolean' ], sorts: [ 'label', 'created_at' ] )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(

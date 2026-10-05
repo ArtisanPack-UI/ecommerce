@@ -68,7 +68,7 @@ class KanbanCardController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List the cards on a kanban board', resource: KanbanCardResource::class, collection: true )]
+    #[ApiOperation( summary: 'List the cards on a kanban board', resource: KanbanCardResource::class, collection: true, filters: [ 'column_id' => 'string' ], sorts: [ 'moved_at', 'assigned_at' ] )]
     public function index( Request $request, KanbanBoard $board ): JsonResponse
     {
         $columns = $board->columns()->with( 'board' )->get()->keyBy( 'substatus_id' );

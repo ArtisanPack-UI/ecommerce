@@ -51,7 +51,7 @@ class ProductCategoryController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List product categories', resource: ProductCategoryResource::class, collection: true )]
+    #[ApiOperation( summary: 'List product categories', resource: ProductCategoryResource::class, collection: true, filters: [ 'parent_id' => 'int-list', 'slug' => 'string' ], sorts: [ 'name', 'position' ], includes: [ 'parent', 'children' ] )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(

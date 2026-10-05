@@ -80,7 +80,7 @@ class LicenseKeyController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List license keys', resource: LicenseKeyResource::class, collection: true )]
+    #[ApiOperation( summary: 'List license keys', resource: LicenseKeyResource::class, collection: true, filters: [ 'key' => 'string', 'order_item_id' => 'int-list', 'is_revoked' => 'boolean' ], sorts: [ 'created_at' ], includes: [ 'activations' ] )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(

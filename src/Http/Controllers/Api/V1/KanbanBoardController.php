@@ -50,7 +50,7 @@ class KanbanBoardController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List kanban boards', resource: KanbanBoardResource::class, collection: true )]
+    #[ApiOperation( summary: 'List kanban boards', resource: KanbanBoardResource::class, collection: true, filters: [ 'is_active' => 'boolean', 'is_default' => 'boolean', 'key' => 'string' ], sorts: [ 'position', 'name' ], includes: self::INCLUDES )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(
@@ -74,7 +74,7 @@ class KanbanBoardController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Show a kanban board with its columns and WIP counts', resource: KanbanBoardResource::class )]
+    #[ApiOperation( summary: 'Show a kanban board with its columns and WIP counts', resource: KanbanBoardResource::class, includes: self::INCLUDES )]
     public function show( Request $request, KanbanBoard $board ): JsonResponse
     {
         $board->load( 'columns.substatus' );
@@ -100,7 +100,7 @@ class KanbanBoardController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Create a kanban board', resource: KanbanBoardResource::class, status: 201 )]
+    #[ApiOperation( summary: 'Create a kanban board', resource: KanbanBoardResource::class, status: 201, includes: self::INCLUDES )]
     public function store( KanbanBoardRequest $request ): JsonResponse
     {
         return $this->resourceResponse( KanbanBoard::query()->create( $request->validated() ), $request, KanbanBoardResource::class, self::INCLUDES, 201 );
@@ -114,7 +114,7 @@ class KanbanBoardController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Update a kanban board', resource: KanbanBoardResource::class )]
+    #[ApiOperation( summary: 'Update a kanban board', resource: KanbanBoardResource::class, includes: self::INCLUDES )]
     public function update( KanbanBoardRequest $request, KanbanBoard $board ): JsonResponse
     {
         $board->fill( $request->validated() )->save();

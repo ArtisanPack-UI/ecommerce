@@ -53,7 +53,7 @@ class OrderSubstatusController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List order sub-statuses', resource: OrderSubstatusResource::class, collection: true )]
+    #[ApiOperation( summary: 'List order sub-statuses', resource: OrderSubstatusResource::class, collection: true, filters: [ 'system_status' => 'string', 'key' => 'string' ], sorts: [ 'position', 'key', 'label' ] )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(

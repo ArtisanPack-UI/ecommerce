@@ -58,7 +58,7 @@ class OrderController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List orders', resource: OrderResource::class, collection: true )]
+    #[ApiOperation( summary: 'List orders', resource: OrderResource::class, collection: true, filters: [ 'system_status' => 'string', 'payment_status' => 'string', 'fulfillment_status' => 'string', 'customer_id' => 'int-list', 'email' => 'string', 'order_number' => 'string' ], sorts: [ 'created_at', 'total' ], includes: self::INCLUDES )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(
@@ -86,7 +86,7 @@ class OrderController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Get an order', resource: OrderResource::class )]
+    #[ApiOperation( summary: 'Get an order', resource: OrderResource::class, includes: self::INCLUDES )]
     public function show( Request $request, Order $order ): JsonResponse
     {
         return $this->resourceResponse( $order, $request, OrderResource::class, self::INCLUDES );
@@ -100,7 +100,7 @@ class OrderController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Update an order', resource: OrderResource::class )]
+    #[ApiOperation( summary: 'Update an order', resource: OrderResource::class, includes: self::INCLUDES )]
     public function update( UpdateOrderRequest $request, Order $order ): JsonResponse
     {
         $data = $request->validated();

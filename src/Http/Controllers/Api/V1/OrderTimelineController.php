@@ -42,7 +42,7 @@ class OrderTimelineController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List an order\'s timeline', resource: OrderTimelineEntryResource::class, collection: true )]
+    #[ApiOperation( summary: 'List an order\'s timeline', resource: OrderTimelineEntryResource::class, collection: true, filters: [ 'event_type' => 'string' ], sorts: [ 'id' ] )]
     public function index( Request $request, Order $order ): JsonResponse
     {
         return $this->listResponse(

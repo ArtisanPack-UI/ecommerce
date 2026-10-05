@@ -27,6 +27,7 @@ use ArtisanPackUI\Ecommerce\Http\Resources\ProductCategoryResource;
 use ArtisanPackUI\Ecommerce\Http\Resources\ProductResource;
 use ArtisanPackUI\Ecommerce\Models\ProductTag;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
+use ArtisanPackUI\Ecommerce\OpenApi\CatalogParameters;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -72,7 +73,7 @@ class CatalogController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Get a category', resource: ProductCategoryResource::class )]
+    #[ApiOperation( summary: 'Get a category', resource: ProductCategoryResource::class, includes: [ 'parent', 'children' ] )]
     public function category( Request $request, string $category ): JsonResponse
     {
         $model = $this->categories->find( $category );
@@ -93,7 +94,15 @@ class CatalogController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List the products in a category', resource: ProductResource::class, collection: true )]
+    #[ApiOperation(
+        summary: 'List the products in a category',
+        resource: ProductResource::class,
+        collection: true,
+        filters: ProductController::OPENAPI_FILTERS,
+        sorts: ProductController::OPENAPI_SORTS,
+        includes: ProductController::OPENAPI_INCLUDES,
+        query: CatalogParameters::PRODUCT_LIST,
+    )]
     public function categoryProducts( Request $request, string $category ): JsonResponse
     {
         $model = $this->categories->find( $category );

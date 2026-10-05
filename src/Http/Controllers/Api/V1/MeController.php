@@ -192,7 +192,7 @@ class MeController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List my orders', resource: OrderResource::class, collection: true )]
+    #[ApiOperation( summary: 'List my orders', resource: OrderResource::class, collection: true, filters: [ 'status' => 'string' ], sorts: [ 'placed_at' ], includes: [ 'items', 'shipments', 'refunds', 'customer_notes' ] )]
     public function orders( Request $request ): JsonResponse
     {
         return $this->forCustomer( $request, fn ( Customer $customer ): JsonResponse => $this->listResponse(
@@ -216,7 +216,7 @@ class MeController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Get one of my orders', resource: OrderResource::class )]
+    #[ApiOperation( summary: 'Get one of my orders', resource: OrderResource::class, includes: [ 'items', 'shipments', 'refunds', 'customer_notes' ] )]
     public function order( Request $request, int $order ): JsonResponse
     {
         return $this->forCustomer( $request, function ( Customer $customer ) use ( $request, $order ): JsonResponse {
