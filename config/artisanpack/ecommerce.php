@@ -65,10 +65,23 @@ return [
     |
     | `frankfurter` — Config for the Frankfurter-backed provider.
     |
+    | `enabled`    — Currencies the store sells in besides the base currency
+    |                (comma-separated in ECOMMERCE_CURRENCIES). Storefronts
+    |                offer these in a currency switcher; carts can only be
+    |                priced in an enabled currency.
+    | `cookie`     — Cookie the default CurrencyResolver reads a shopper's
+    |                choice from (storefronts without sessions set it).
+    | `session_key`— Session key the default CurrencyResolver reads and
+    |                remembers the choice under.
+    |
     */
 
     'currency' => [
         'provider' => env( 'ECOMMERCE_CURRENCY_PROVIDER', 'config' ),
+
+        'enabled'     => array_values( array_filter( array_map( 'trim', explode( ',', (string) env( 'ECOMMERCE_CURRENCIES', '' ) ) ) ) ),
+        'cookie'      => env( 'ECOMMERCE_CURRENCY_COOKIE', 'ecommerce_currency' ),
+        'session_key' => 'ecommerce.currency',
 
         'rates' => [],
 

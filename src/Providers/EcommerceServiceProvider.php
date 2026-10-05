@@ -24,6 +24,7 @@ use ArtisanPackUI\Ecommerce\Console\Commands\GenerateOpenApiCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\LintPciColumnsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\LintTranslationsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\PruneIdempotencyRecordsCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\RefreshFxRatesCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\ReleaseExpiredReservationsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\RetryWebhookDeliveriesCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\SatelliteAuditCommand;
@@ -33,6 +34,7 @@ use ArtisanPackUI\Ecommerce\Console\Commands\SeedDemoCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\SyncPermissionsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\VerifySatelliteCommand;
 use ArtisanPackUI\Ecommerce\Contracts\CartStorage;
+use ArtisanPackUI\Ecommerce\Contracts\CurrencyResolver;
 use ArtisanPackUI\Ecommerce\Contracts\OrderNumberGenerator;
 use ArtisanPackUI\Ecommerce\Contracts\ReviewModerator;
 use ArtisanPackUI\Ecommerce\CurrencyRates\ConfigRateProvider;
@@ -181,6 +183,7 @@ use ArtisanPackUI\Ecommerce\Services\Fraud\StripeRadarFraudProvider;
 use ArtisanPackUI\Ecommerce\Services\KanbanAutomationRunner;
 use ArtisanPackUI\Ecommerce\Services\KanbanRoutingService;
 use ArtisanPackUI\Ecommerce\Services\RandomEightCharGenerator;
+use ArtisanPackUI\Ecommerce\Services\SessionCurrencyResolver;
 use ArtisanPackUI\Ecommerce\Settings\CoreSettings;
 use ArtisanPackUI\Ecommerce\Settings\SettingsRepository;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\FlatRateMethod;
@@ -301,6 +304,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->app->scoped( SubStatusRegistry::class );
 
         $this->app->singleton( CartStorage::class, DatabaseCartStorage::class );
+        $this->app->singleton( CurrencyResolver::class, SessionCurrencyResolver::class );
         $this->app->singleton( OrderNumberGenerator::class, RandomEightCharGenerator::class );
         $this->app->singleton( ReviewModerator::class, NoopReviewModerator::class );
 
@@ -379,6 +383,7 @@ class EcommerceServiceProvider extends ServiceProvider
                 LintPciColumnsCommand::class,
                 LintTranslationsCommand::class,
                 PruneIdempotencyRecordsCommand::class,
+                RefreshFxRatesCommand::class,
                 ReleaseExpiredReservationsCommand::class,
                 RetryWebhookDeliveriesCommand::class,
                 SatelliteAuditCommand::class,
@@ -406,6 +411,10 @@ class EcommerceServiceProvider extends ServiceProvider
                     ->runInBackground();
                 $schedule->command( 'ecommerce:retry-webhook-deliveries' )
                     ->everyMinute()
+                    ->withoutOverlapping()
+                    ->runInBackground();
+                $schedule->command( 'ecommerce:refresh-fx-rates' )
+                    ->dailyAt( '05:30' )
                     ->withoutOverlapping()
                     ->runInBackground();
             } );

@@ -138,6 +138,7 @@ final class CoreSettings
             new SettingDefinition( 'notifications.store_name', 'general', 'string', __( 'Store name' ), [ 'nullable', 'max:120' ], __( 'Used in e-mails and on documents.' ), position: 10 ),
             new SettingDefinition( 'notifications.support_email', 'general', 'email', __( 'Support e-mail' ), [ 'nullable', 'max:255' ], __( 'Where customers are told to write for help.' ), position: 20 ),
             new SettingDefinition( 'base_currency', 'general', 'currency', __( 'Base currency' ), [ 'required' ], __( 'Reports are shown in this currency. Existing orders keep the base currency and exchange rate they were placed with.' ), position: 30 ),
+            new SettingDefinition( 'currency.enabled', 'general', 'list', __( 'Store currencies' ), [ 'nullable', 'max:50' ], __( 'Currencies shoppers can pay in besides the base currency. Prices without a row in a currency are converted from the base currency.' ), position: 35, itemRules: [ 'string', 'size:3', 'regex:/^[A-Za-z]{3}$/' ] ),
             new SettingDefinition( 'timezone', 'general', 'timezone', __( 'Store time zone' ), [ 'nullable' ], __( 'Report days, weeks, and months start at midnight in this time zone. Leave blank to use the application time zone.' ), position: 40 ),
 
             // Checkout.
