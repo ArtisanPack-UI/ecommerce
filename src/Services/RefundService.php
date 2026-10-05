@@ -47,7 +47,7 @@ use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
 use ArtisanPackUI\Ecommerce\Events\OrderRefunded;
 use ArtisanPackUI\Ecommerce\Events\PaymentRefunded;
 use ArtisanPackUI\Ecommerce\Exceptions\RefundNotAllowedException;
-use ArtisanPackUI\Ecommerce\Models\InventoryItem;
+use ArtisanPackUI\Ecommerce\Inventory\StockLevels;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
 use ArtisanPackUI\Ecommerce\Models\OrderTimelineEntry;
@@ -89,10 +89,12 @@ class RefundService
      *
      * @param  PaymentGatewayRegistry  $gateways
      * @param  InventoryService        $inventory
+     * @param  StockLevels             $stock     Stock rows a line draws on (bundle members).
      */
     public function __construct(
         protected PaymentGatewayRegistry $gateways,
         protected InventoryService $inventory,
+        protected StockLevels $stock,
     ) {
     }
 
@@ -687,13 +689,15 @@ class RefundService
     }
 
     /**
-     * Adds the refunded quantity back to the line's {@see InventoryItem}, if one exists.
+     * Puts the refunded units back on the shelf: every tracked inventory row
+     * the line drew on (a bundle's members, a variant's own row) gets
+     * `quantity × units per item` back — the same rows payment capture
+     * committed, so a restock exactly undoes the sale.
      *
-     * Missing or untracked inventory rows are treated as a no-op: refunding
-     * a digital/inventory-less product still records the ledger, it just
-     * has no stock to restore. Actual stock writes go through the shared
-     * {@see InventoryService::adjust()} path so `ap.ecommerce.inventory.*`
-     * hooks fire the same way they do for other stock changes.
+     * Missing or untracked inventory rows are skipped: refunding a digital
+     * or inventory-less product still records the ledger, it just has no
+     * stock to restore. Stock writes go through {@see InventoryService::adjust()}
+     * so `ap.ecommerce.inventory.*` hooks fire as for any stock change.
      *
      * @since 1.0.0
      *
@@ -707,32 +711,24 @@ class RefundService
         /** @var OrderItem|null $item */
         $item = $order->items->firstWhere( 'id', $line['order_item_id'] );
 
-        if ( null === $item ) {
+        if ( null === $item || null === $item->product || $line['quantity'] < 1 ) {
             return;
         }
 
-        [ $stockableType, $stockableId ] = null !== $item->product_variant_id
-            ? [ ( new ProductVariant() )->getMorphClass(), (int) $item->product_variant_id ]
-            : [ ( new Product() )->getMorphClass(), (int) $item->product_id ];
+        $variant = null === $item->product_variant_id ? null : ProductVariant::query()->find( $item->product_variant_id );
 
-        if ( null === $stockableId ) {
-            return;
+        foreach ( $this->stock->components( $item->product, $variant, (int) $line['quantity'] ) as $component ) {
+            $inventory = $this->stock->itemFor( $component['stockable'] );
+
+            if ( null === $inventory || ! $inventory->track_inventory ) {
+                continue;
+            }
+
+            $this->inventory->adjust(
+                $inventory,
+                (int) $component['quantity'],
+                sprintf( 'refund.restock:order#%d:item#%d', $order->id, $line['order_item_id'] ),
+            );
         }
-
-        /** @var InventoryItem|null $inventory */
-        $inventory = InventoryItem::query()
-            ->where( 'stockable_type', $stockableType )
-            ->where( 'stockable_id', $stockableId )
-            ->first();
-
-        if ( null === $inventory || ! $inventory->track_inventory ) {
-            return;
-        }
-
-        $this->inventory->adjust(
-            $inventory,
-            $line['quantity'],
-            sprintf( 'refund.restock:order#%d:item#%d', $order->id, $line['order_item_id'] ),
-        );
     }
 }
