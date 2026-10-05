@@ -20,6 +20,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Reports;
 
+use ArtisanPackUI\Ecommerce\Support\StoreTimezone;
 use Carbon\CarbonImmutable;
 use DateTimeInterface;
 use InvalidArgumentException;
@@ -140,9 +141,7 @@ final class ReportRange
      */
     public static function timezone(): string
     {
-        $timezone = config( 'artisanpack.ecommerce.timezone' );
-
-        return is_string( $timezone ) && '' !== $timezone ? $timezone : (string) ( config( 'app.timezone' ) ?: 'UTC' );
+        return StoreTimezone::name();
     }
 
     /**

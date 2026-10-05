@@ -106,6 +106,12 @@ class KanbanBoardService
                 return null;
             }
 
+            // Lock the target column (taken last, after the order and its
+            // assignment) so two moves into it can't both take its last slot.
+            if ( $to->exists ) {
+                $to = KanbanColumn::query()->lockForUpdate()->findOrFail( $to->getKey() );
+            }
+
             if ( null !== $to->wip_limit && $to->cardCount() >= $to->wip_limit ) {
                 throw new KanbanOperationException( 'wip-limit-reached', __( 'Column ":column" is at its limit of :limit cards.', [
                     'column' => $to->displayLabel(),

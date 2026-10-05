@@ -140,3 +140,11 @@ describe( 'LocalizedDate', function (): void {
             ->and( $rendered['body'] )->toBe( '<p>29. Oktober</p>' );
     } );
 } );
+
+it( 'shows moments in the store time zone but leaves bare dates alone (D17)', function (): void {
+    config()->set( 'app.timezone', 'UTC' );
+    config()->set( 'artisanpack.ecommerce.timezone', 'America/New_York' );
+
+    expect( LocalizedDate::format( Carbon::parse( '2026-03-02 02:00:00', 'UTC' ), 'Y-m-d H:i', 'en' ) )->toBe( '2026-03-01 21:00' )
+        ->and( LocalizedDate::format( '2026-03-02', 'Y-m-d', 'en' ) )->toBe( '2026-03-02' );
+} );

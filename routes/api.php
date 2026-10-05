@@ -385,6 +385,9 @@ Route::prefix( 'admin' )->name( 'admin.' )->group( function () use ( $admin, $au
         ->scopeBindings()
         ->middleware( $admin( 'webhookSubscription', 'viewAny' ) )
         ->name( 'webhook-subscriptions.deliveries.show' );
+    Route::post( 'webhook-subscriptions/{subscription}/replay-parked', [ WebhookSubscriptionController::class, 'replayParked' ] )
+        ->middleware( $admin( 'webhookSubscription', 'update', true ) )
+        ->name( 'webhook-subscriptions.replay-parked' );
     Route::post( 'webhook-subscriptions/{subscription}/replay/{delivery}', [ WebhookSubscriptionController::class, 'replay' ] )
         ->scopeBindings()
         ->middleware( $admin( 'webhookSubscription', 'update', true ) )

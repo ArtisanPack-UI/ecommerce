@@ -190,6 +190,21 @@ it( 'handles buy-x-get-y over a shared set with a percentage and application cap
     expect( (int) $capped->total()->getAmount() )->toBe( 1_000 );
 } );
 
+it( 'treats a buy-x-get-y max_applications of 0 as unlimited (D17)', function (): void {
+    $mug  = Product::factory()->create();
+    $cart = cartWithLines( [ [ 'unit' => 1_000, 'qty' => 7, 'product' => $mug ] ] );
+
+    $ledger = applyAction( 'buy-x-get-y', $cart, [
+        'buy_product_ids'  => [ $mug->id ],
+        'buy_quantity'     => 2,
+        'get_quantity'     => 1,
+        'percent'          => 50,
+        'max_applications' => 0,
+    ] );
+
+    expect( (int) $ledger->total()->getAmount() )->toBe( 1_000 );
+} );
+
 it( 'discounts in-cart units for add-free-item and records the shortfall', function (): void {
     $gift = Product::factory()->create();
 

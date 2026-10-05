@@ -34,6 +34,7 @@ use ArtisanPackUI\Ecommerce\Models\OrderBoardAssignment;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use ArtisanPackUI\Ecommerce\Services\KanbanBoardService;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -71,7 +72,9 @@ class KanbanCardController extends ApiController
     public function index( Request $request, KanbanBoard $board ): JsonResponse
     {
         $columns = $board->columns()->with( 'board' )->get()->keyBy( 'substatus_id' );
-        $query   = OrderBoardAssignment::query()->active()->where( 'board_id', $board->id )->with( 'order' );
+        // Card widgets read the lines (item count, condition rules) and the
+        // card's own assignment (days in column): load them once per page.
+        $query   = OrderBoardAssignment::query()->active()->where( 'board_id', $board->id )->with( [ 'order.items.product' ] );
 
         ListQuery::apply(
             $query,
@@ -92,6 +95,7 @@ class KanbanCardController extends ApiController
 
         foreach ( $paginator->items() as $card ) {
             $card->setRelation( 'column', $columns->get( $card->substatus_id ) );
+            $card->order?->setRelation( 'boardAssignments', new EloquentCollection( [ $card ] ) );
         }
 
         $payload         = KanbanCardResource::collection( $paginator )->response( $request )->getData( true );

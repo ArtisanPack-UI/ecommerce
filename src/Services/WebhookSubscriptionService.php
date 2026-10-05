@@ -27,6 +27,7 @@ namespace ArtisanPackUI\Ecommerce\Services;
 
 use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 /**
@@ -119,5 +120,38 @@ class WebhookSubscriptionService
         }
 
         return $this->dispatcher->queue( $subscription, $delivery->event, (array) $delivery->payload );
+    }
+
+    /**
+     * Puts back on the retry schedule the deliveries that were parked while
+     * the subscription was inactive — not delivered, attempts left, and
+     * taken off the schedule — so re-enabling a subscription can catch up
+     * on what it missed (audit D17). They are sent by the retry sweep
+     * (`ecommerce:retry-webhook-deliveries`). Returns how many were
+     * requeued; none while the subscription is still inactive.
+     *
+     * Re-enabling a subscription does not do this on its own: old events
+     * reach the receiver only when an operator asks for them.
+     *
+     * @since 1.0.0
+     *
+     * @param  WebhookSubscription  $subscription  Subscription.
+     *
+     * @return int
+     */
+    public function replayParked( WebhookSubscription $subscription ): int
+    {
+        if ( ! $subscription->is_active ) {
+            return 0;
+        }
+
+        $maxAttempts = max( 1, (int) config( 'artisanpack.ecommerce.webhooks.max_attempts', WebhookDeliveryService::DEFAULT_MAX_ATTEMPTS ) );
+
+        return WebhookDelivery::query()
+            ->where( 'subscription_id', $subscription->id )
+            ->whereNull( 'delivered_at' )
+            ->whereNull( 'next_retry_at' )
+            ->where( 'attempts', '<', $maxAttempts )
+            ->update( [ 'next_retry_at' => Carbon::now() ] );
     }
 }

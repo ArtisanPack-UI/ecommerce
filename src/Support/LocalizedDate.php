@@ -6,7 +6,8 @@
  * Locale-aware date formatting for anything shown to end users (parent plan
  * §16.5): month and day names come from Carbon's translations, and the
  * default pattern itself is a translatable string so each locale orders
- * day, month, and year its own way.
+ * day, month, and year its own way. Moments are shown in the store time
+ * zone ({@see StoreTimezone}).
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -58,6 +59,12 @@ final class LocalizedDate
             $carbon = $date instanceof DateTimeInterface ? Carbon::instance( $date ) : Carbon::parse( $date );
         } catch ( Throwable ) {
             return is_string( $date ) ? $date : '';
+        }
+
+        // A moment is shown in the store time zone; a bare date (`2026-03-01`)
+        // has no time to convert and stays that date.
+        if ( ! is_string( $date ) || 1 !== preg_match( '/^\d{4}-\d{2}-\d{2}$/', trim( $date ) ) ) {
+            $carbon = $carbon->copy()->setTimezone( StoreTimezone::name() );
         }
 
         return $carbon->locale( $locale )->translatedFormat( $format ?? __( 'F j, Y', [], $locale ) );

@@ -272,7 +272,7 @@ class OrderConditionEvaluator
         }
 
         $currency = (string) $order->currency;
-        $lines    = $order->relationLoaded( 'items' ) ? $order->items : $order->items()->with( 'product' )->get();
+        $lines    = $order->relationLoaded( 'items' ) ? $order->items->loadMissing( 'product' ) : $order->items()->with( 'product' )->get();
 
         $items = $lines->map( static function ( OrderItem $line ) use ( $currency ): CartItem {
             $subtotal = (int) $line->unit_price_amount * (int) $line->quantity;

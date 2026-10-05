@@ -232,6 +232,27 @@ class WebhookSubscriptionController extends ApiController
     }
 
     /**
+     * Requeues the deliveries parked while the subscription was inactive
+     * (see {@see WebhookSubscriptionService::replayParked()}).
+     *
+     * @since 1.0.0
+     *
+     * @param  Request              $request       Request.
+     * @param  WebhookSubscription  $subscription  Subscription.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Requeue deliveries parked while a subscription was inactive', status: 202 )]
+    public function replayParked( Request $request, WebhookSubscription $subscription ): JsonResponse
+    {
+        if ( ! $subscription->is_active ) {
+            return Problem::make( 422, 'webhook-subscription-inactive', __( 'Subscription inactive' ), __( 'Re-enable the subscription before replaying its deliveries.' ), $request );
+        }
+
+        return new JsonResponse( [ 'data' => [ 'requeued' => $this->subscriptions->replayParked( $subscription ) ] ], 202 );
+    }
+
+    /**
      * Allowed includes. Deliveries are capped to the newest 20 per
      * subscription so a noisy endpoint can't blow up the listing.
      *
