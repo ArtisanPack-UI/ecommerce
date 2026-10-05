@@ -22,6 +22,7 @@ namespace ArtisanPackUI\Ecommerce\ProductTypes;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
 use ArtisanPackUI\Ecommerce\Models\Product;
+use InvalidArgumentException;
 
 /**
  * The `digital` product type.
@@ -111,8 +112,15 @@ class DigitalProductType extends AbstractProductType
     {
         $out = parent::validateCartOptions( $product, $options );
 
-        if ( ! empty( $options[ 'license_type' ] ) && is_string( $options[ 'license_type' ] ) ) {
-            $out[ 'license_type' ] = $options[ 'license_type' ];
+        if ( array_key_exists( 'license_type', $options ) && null !== $options['license_type'] && '' !== $options['license_type'] ) {
+            // Only license types the product offers (`meta.licensing.types`).
+            $allowed = array_map( 'strval', (array) ( $product->meta['licensing']['types'] ?? [] ) );
+
+            if ( ! is_string( $options['license_type'] ) || ! in_array( $options['license_type'], $allowed, true ) ) {
+                throw new InvalidArgumentException( 'license_type must be one of the license types this product offers.' );
+            }
+
+            $out['license_type'] = $options['license_type'];
         }
 
         return $out;

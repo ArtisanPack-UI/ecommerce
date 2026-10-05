@@ -71,17 +71,19 @@ class TaxService
      *
      * @param  Cart     $cart         Cart being taxed.
      * @param  Address  $destination  Destination address.
+     * @param  array<int, int>  $lineDiscounts  Discount each line received (cart-item id → minor units), when known.
      *
      * @throws UnexpectedValueException When a listener or provider returns an invalid value.
      *
      * @return TaxResult
      */
-    public function calculate( Cart $cart, Address $destination ): TaxResult
+    public function calculate( Cart $cart, Address $destination, array $lineDiscounts = [] ): TaxResult
     {
         $context = new TaxContext(
             destination: $destination,
             providerKey: $this->activeProviderKey(),
             pricesIncludeTax: (bool) $this->config->get( 'artisanpack.ecommerce.tax.prices_include_tax', false ),
+            lineDiscounts: array_map( 'intval', $lineDiscounts ),
         );
 
         $context = applyFilters( 'ap.ecommerce.tax.calculating', $context, $cart );

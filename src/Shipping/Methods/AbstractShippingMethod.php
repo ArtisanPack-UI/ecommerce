@@ -75,7 +75,7 @@ abstract class AbstractShippingMethod implements ShippingMethodType, DescribesCo
     }
 
     /**
-     * Sum of line totals in the cart currency.
+     * Sum of line totals less the cart discount, in the cart currency.
      *
      * @since 1.0.0
      *
@@ -85,8 +85,10 @@ abstract class AbstractShippingMethod implements ShippingMethodType, DescribesCo
      */
     protected function subtotal( Cart $cart ): Money
     {
+        // After discounts: a coupon that brings the cart under a free-shipping
+        // threshold takes free shipping away (audit D17).
         return new Money(
-            (int) $this->items( $cart )->sum( 'line_total_amount' ),
+            max( 0, (int) $this->items( $cart )->sum( 'line_total_amount' ) - max( 0, (int) $cart->discount_amount ) ),
             new Currency( strtoupper( (string) $cart->currency ) ),
         );
     }

@@ -37,6 +37,10 @@ return new class extends Migration {
             $table->char( 'line_subtotal_currency', 3 );
             $table->bigInteger( 'line_total_amount' );
             $table->char( 'line_total_currency', 3 );
+            // The line's share of the cart discount and its tax, written by
+            // the cart totals refresh and carried onto the order line.
+            $table->bigInteger( 'discount_amount' )->default( 0 );
+            $table->bigInteger( 'tax_amount' )->default( 0 );
             $table->json( 'options' )->nullable();
             $table->json( 'meta' )->nullable();
             $table->char( 'options_hash', 64 );

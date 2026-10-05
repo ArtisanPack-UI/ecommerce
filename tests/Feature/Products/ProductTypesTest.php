@@ -9,6 +9,7 @@ use ArtisanPackUI\Ecommerce\ProductTypes\DigitalProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\MissingProductType;
 use ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use InvalidArgumentException;
 
 uses( RefreshDatabase::class );
 
@@ -130,7 +131,7 @@ describe( 'DigitalProductType', function (): void {
     } );
 
     it( 'keeps license_type in sanitized options', function (): void {
-        $product = Product::factory()->digital()->create();
+        $product = Product::factory()->digital()->create( [ 'meta' => [ 'licensing' => [ 'types' => [ 'personal', 'commercial' ] ] ] ] );
         $type    = new DigitalProductType();
 
         $sanitized = $type->validateCartOptions( $product, [
@@ -140,6 +141,16 @@ describe( 'DigitalProductType', function (): void {
 
         expect( $sanitized )->toBe( [ 'license_type' => 'personal' ] );
     } );
+
+    it( 'rejects a license_type the product does not offer', function ( mixed $licenseType ): void {
+        $product = Product::factory()->digital()->create( [ 'meta' => [ 'licensing' => [ 'types' => [ 'personal' ] ] ] ] );
+
+        expect( fn () => ( new DigitalProductType() )->validateCartOptions( $product, [ 'license_type' => $licenseType ] ) )
+            ->toThrow( InvalidArgumentException::class );
+    } )->with( [
+        'unknown type' => [ 'enterprise' ],
+        'not a string' => [ [ 'personal' ] ],
+    ] );
 
     it( 'includes the cart line options verbatim in the order snapshot', function (): void {
         // Orders/OrderItems tables are Phase 2/3; the snapshot builder is

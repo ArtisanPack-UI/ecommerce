@@ -114,6 +114,40 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Cart
+    |--------------------------------------------------------------------------
+    |
+    | `max_lines` — Most distinct lines one cart may hold (free items granted
+    |               by promotions don't count).
+    |
+    | `ttl_days`  — Days of inactivity before a cart expires. Every change
+    |               pushes the expiry back; an expired cart can't be changed.
+    |
+    */
+
+    'cart' => [
+        'max_lines' => (int) env( 'ECOMMERCE_CART_MAX_LINES', 100 ),
+        'ttl_days'  => (int) env( 'ECOMMERCE_CART_TTL_DAYS', 30 ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Promotions
+    |--------------------------------------------------------------------------
+    |
+    | `verbose_coupon_errors` — When `false` (the default), an inactive or
+    |                          used-up coupon is reported to shoppers as
+    |                          invalid, so the API doesn't reveal which codes
+    |                          exist. Turn on for more specific messages.
+    |
+    */
+
+    'promotions' => [
+        'verbose_coupon_errors' => (bool) env( 'ECOMMERCE_VERBOSE_COUPON_ERRORS', false ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Checkout
     |--------------------------------------------------------------------------
     |

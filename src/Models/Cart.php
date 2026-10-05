@@ -53,6 +53,12 @@ use Illuminate\Support\Carbon;
  * @property int                                                              $total_amount
  * @property string                                                           $total_currency
  * @property Carbon|null                                                      $checkout_started_at
+ * @property string                                                           $checkout_state
+ * @property array<string, mixed>|null                                        $shipping_address
+ * @property array<string, mixed>|null                                        $billing_address
+ * @property string|null                                                      $payment_gateway_key
+ * @property string|null                                                      $payment_reference
+ * @property string|null                                                      $locale
  * @property Carbon|null                                                      $abandoned_at
  * @property int|null                                                         $completed_order_id
  * @property array<string, mixed>                                             $meta
@@ -92,6 +98,12 @@ class Cart extends Model
         'total_amount',
         'total_currency',
         'checkout_started_at',
+        'checkout_state',
+        'shipping_address',
+        'billing_address',
+        'payment_gateway_key',
+        'payment_reference',
+        'locale',
         'abandoned_at',
         'completed_order_id',
         'meta',
@@ -109,6 +121,7 @@ class Cart extends Model
         'tax_amount'      => 0,
         'shipping_amount' => 0,
         'total_amount'    => 0,
+        'checkout_state'  => 'not_started',
     ];
 
     /**
@@ -150,6 +163,8 @@ class Cart extends Model
             'shipping_amount'     => 'integer',
             'total_amount'        => 'integer',
             'checkout_started_at' => 'datetime',
+            'shipping_address'    => 'array',
+            'billing_address'     => 'array',
             'abandoned_at'        => 'datetime',
             'completed_order_id'  => 'integer',
             'meta'                => 'array',

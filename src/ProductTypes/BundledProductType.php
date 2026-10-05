@@ -20,8 +20,11 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\ProductTypes;
 
+use ArtisanPackUI\Ecommerce\Contracts\ExpandsInventory;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
+use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\Models\ProductChild;
+use ArtisanPackUI\Ecommerce\Models\ProductVariant;
 
 /**
  * `bundled` product type.
@@ -31,7 +34,7 @@ use ArtisanPackUI\Ecommerce\Models\ProductChild;
  *
  * @since      1.0.0
  */
-class BundledProductType extends AbstractProductType
+class BundledProductType extends AbstractProductType implements ExpandsInventory
 {
     /**
      * Registry key.
@@ -111,5 +114,34 @@ class BundledProductType extends AbstractProductType
             ->all();
 
         return $snapshot;
+    }
+
+    /**
+     * A bundle's stock is its members': each sold bundle consumes every
+     * member's quantity.
+     *
+     * @since 1.0.0
+     *
+     * @param  Product              $product   Bundle.
+     * @param  ProductVariant|null  $variant   Unused (bundles have no variants).
+     * @param  int                  $quantity  Bundles sold.
+     *
+     * @return array<int, array{stockable: Product|ProductVariant, quantity: int}>
+     */
+    public function inventoryComponents( Product $product, ?ProductVariant $variant, int $quantity ): array
+    {
+        $components = [];
+
+        foreach ( ProductChild::query()->where( 'parent_product_id', $product->getKey() )->with( [ 'product', 'variant' ] )->orderBy( 'position' )->orderBy( 'id' )->get() as $child ) {
+            $member = $child->variant ?? $child->product;
+
+            if ( null === $member || ( null !== $child->product && ! $child->product->typeIsMissing() && ! $child->product->productType()->isInventoryTracked() ) ) {
+                continue;
+            }
+
+            $components[] = [ 'stockable' => $member, 'quantity' => max( 1, (int) $child->quantity ) * $quantity ];
+        }
+
+        return $components;
     }
 }

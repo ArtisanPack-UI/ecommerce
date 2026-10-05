@@ -27,7 +27,9 @@ use ArtisanPackUI\Ecommerce\Events\CartCreated;
 use ArtisanPackUI\Ecommerce\Events\CartUpdated;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
+use Carbon\CarbonInterface;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
@@ -78,6 +80,7 @@ class CartService
                 'shipping_currency' => $currency,
                 'total_currency'    => $currency,
                 'meta'              => [],
+                'expires_at'        => $this->expiryFrom( Carbon::now() ),
             ],
             $attributes,
         );
@@ -91,6 +94,22 @@ class CartService
         Event::dispatch( new CartCreated( $cart ) );
 
         return $cart;
+    }
+
+    /**
+     * When a cart touched at `$from` expires (`cart.ttl_days`, default 30).
+     *
+     * @since 1.0.0
+     *
+     * @param  CarbonInterface  $from  Last activity.
+     *
+     * @return CarbonInterface
+     */
+    public function expiryFrom( CarbonInterface $from ): CarbonInterface
+    {
+        $days = (int) $this->config->get( 'artisanpack.ecommerce.cart.ttl_days', 30 );
+
+        return $from->copy()->addDays( $days > 0 ? $days : 30 );
     }
 
     /**

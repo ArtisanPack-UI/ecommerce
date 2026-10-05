@@ -11,6 +11,10 @@ use stdClass;
 use Tests\Feature\Contracts\InMemoryPaymentGateway;
 use Tests\TestCase;
 
+// The fake lives beside its contract test; load it explicitly so this file
+// doesn't depend on test order (parallel runs split the files up).
+require_once __DIR__ . '/../Contracts/InMemoryPaymentGatewayContractTest.php';
+
 final class PaymentGatewayRegistryTest extends TestCase
 {
     public function test_find_returns_null_for_an_unknown_key(): void

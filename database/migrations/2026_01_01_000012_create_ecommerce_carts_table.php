@@ -42,6 +42,16 @@ return new class extends Migration {
             $table->bigInteger( 'total_amount' )->default( 0 );
             $table->char( 'total_currency', 3 );
             $table->timestamp( 'checkout_started_at' )->nullable();
+            // Checkout progress (CheckoutService) and what it has collected.
+            $table->string( 'checkout_state', 30 )->default( 'not_started' );
+            $table->json( 'shipping_address' )->nullable();
+            $table->json( 'billing_address' )->nullable();
+            $table->string( 'payment_gateway_key', 120 )->nullable();
+            // The provider session created for this cart (PaymentIntent id …),
+            // reused on retries and matched by payment webhooks.
+            $table->string( 'payment_reference', 255 )->nullable();
+            // The shopper's locale when the cart was created (notifications).
+            $table->string( 'locale', 12 )->nullable();
             $table->timestamp( 'abandoned_at' )->nullable();
             $table->unsignedBigInteger( 'completed_order_id' )->nullable();
             $table->json( 'meta' )->nullable();
@@ -49,6 +59,7 @@ return new class extends Migration {
             $table->timestamps();
 
             $table->unique( 'token', 'ecommerce_carts_token_uk' );
+            $table->index( 'payment_reference', 'ecommerce_carts_payment_reference_idx' );
             $table->index( 'customer_id', 'ecommerce_carts_customer_idx' );
             $table->index( 'abandoned_at', 'ecommerce_carts_abandoned_idx' );
             $table->index( 'expires_at', 'ecommerce_carts_expires_idx' );
