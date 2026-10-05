@@ -36,17 +36,23 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Services;
 
+use ArtisanPackUI\Ecommerce\Contracts\ShippingRateProvider;
 use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
 use ArtisanPackUI\Ecommerce\Models\Coupon;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\Models\ProductVariant;
+use ArtisanPackUI\Ecommerce\Models\ShippingMethod;
+use ArtisanPackUI\Ecommerce\Shipping\ZoneShippingRateProvider;
+use ArtisanPackUI\Ecommerce\ValueObjects\Address;
 use ArtisanPackUI\Ecommerce\ValueObjects\PromotionResult;
+use ArtisanPackUI\Ecommerce\ValueObjects\ShippingRate;
 use Closure;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
+use Money\Currency;
 use Money\Money;
 
 /**
@@ -76,6 +82,16 @@ class StorefrontCartService
      * @var string
      */
     public const UNSELLABLE_META_KEY = 'unsellable_item_ids';
+
+    /**
+     * `carts.meta` key holding the selected shipping rate
+     * ({@see ShippingRate::toArray()}), set by {@see self::selectShippingMethod()}.
+     *
+     * @since 1.0.0
+     *
+     * @var string
+     */
+    public const SHIPPING_RATE_META_KEY = 'shipping_rate';
 
     /**
      * Most units one cart line can hold.
@@ -170,7 +186,7 @@ class StorefrontCartService
 
             // A merged line keeps its old unit price in CartService; re-price
             // it so a quantity bump can't lock in an expired sale price.
-            return $this->reprice( $item, $price );
+            return $this->reprice( $locked, $item, $price );
         } );
     }
 
@@ -207,7 +223,7 @@ class StorefrontCartService
             $price   = $this->priceFor( $locked, $variant ?? $product );
             $updated = $this->carts->updateItemQuantity( $locked, $item, $quantity );
 
-            return null === $updated ? null : $this->reprice( $updated, $price );
+            return null === $updated ? null : $this->reprice( $locked, $updated, $price );
         } );
     }
 
@@ -290,10 +306,111 @@ class StorefrontCartService
     }
 
     /**
+     * Empties the cart (see {@see CartService::clear()}, which fires
+     * `ap.ecommerce.cart.cleared`). The selected shipping rate goes with
+     * the lines; an applied coupon stays until the next totals refresh
+     * finds it no longer applies.
+     *
+     * Only open carts can be cleared here. A checkout emptying a cart it
+     * just converted (or a job dropping an expired one) calls
+     * {@see CartService::clear()} directly with `converted` / `expired`.
+     *
+     * @since 1.0.0
+     *
+     * @param  Cart    $cart    Cart.
+     * @param  string  $reason  Why the cart was cleared (defaults to `cleared`).
+     *
+     * @throws CartOperationException When the cart is closed.
+     *
+     * @return Cart
+     */
+    public function clear( Cart $cart, string $reason = 'cleared' ): Cart
+    {
+        return $this->mutate( $cart, function ( Cart $locked ) use ( $reason ): Cart {
+            $cleared = $this->carts->clear( $locked, $reason );
+
+            $locked->setRawAttributes( $cleared->getAttributes(), true );
+
+            $meta = (array) ( $locked->meta ?? [] );
+            unset( $meta[ self::SHIPPING_RATE_META_KEY ] );
+            $locked->meta = $meta;
+
+            return $locked;
+        } );
+    }
+
+    /**
+     * Selects one of the shipping rates quoted for the cart.
+     *
+     * The rate is re-quoted server-side for `$destination` and matched on
+     * {@see ShippingRate::id()} — the identifier a client echoes back — so
+     * a client can't submit its own amount. The rate's amount becomes the
+     * cart's `shipping_amount` and the rate is kept under
+     * {@see self::SHIPPING_RATE_META_KEY}, with the country, region, and
+     * postal code it was quoted for under `destination` (no street or name,
+     * since cart meta is returned by the cart API). Fires
+     * `ap.ecommerce.shipping.methodSelected` (action) once the change is
+     * saved.
+     *
+     * The selection is not re-quoted when lines change afterwards; checkout
+     * should quote again before charging, as it does for tax, and check the
+     * shipping address matches the stored `destination`.
+     *
+     * @since 1.0.0
+     *
+     * @param  Cart                       $cart         Cart.
+     * @param  Address                    $destination  Destination the rates are quoted for.
+     * @param  string                     $rateId       {@see ShippingRate::id()} of the chosen rate.
+     * @param  ShippingRateProvider|null  $provider     Rate source (defaults to the zone-based provider).
+     *
+     * @throws CartOperationException When the cart is closed or the rate is not offered for it.
+     *
+     * @return Cart
+     */
+    public function selectShippingMethod( Cart $cart, Address $destination, string $rateId, ?ShippingRateProvider $provider = null ): Cart
+    {
+        $provider ??= app( ZoneShippingRateProvider::class );
+
+        $rate = $this->mutate( $cart, function ( Cart $locked ) use ( $destination, $rateId, $provider ): ShippingRate {
+            $rate = $provider->getRatesForCart( $locked->load( 'items' ), $destination )
+                ->first( static fn ( ShippingRate $rate ): bool => $rate->id() === $rateId
+                    && $rate->amount->getCurrency()->getCode() === strtoupper( (string) $locked->currency )
+                    && ! $rate->amount->isNegative() );
+
+            if ( null === $rate ) {
+                throw new CartOperationException( 'shipping_rate', 'shipping-rate-unavailable', __( 'That shipping option is not available for this cart.' ) );
+            }
+
+            $meta                                 = (array) ( $locked->meta ?? [] );
+            $meta[ self::SHIPPING_RATE_META_KEY ] = $rate->toArray() + [
+                'destination' => [
+                    'country_code' => strtoupper( $destination->countryCode ),
+                    'region_code'  => $destination->regionCode,
+                    'postal_code'  => $destination->postalCode,
+                ],
+            ];
+            $locked->meta                         = $meta;
+            $locked->shipping_amount              = (int) $rate->amount->getAmount();
+
+            return $rate;
+        } );
+
+        $method = null === $rate->shippingMethodId ? null : ShippingMethod::query()->find( $rate->shippingMethodId );
+
+        doAction( 'ap.ecommerce.shipping.methodSelected', $rate, $cart, $method );
+
+        return $cart;
+    }
+
+    /**
      * Recomputes subtotal, discount, and total from the cart's lines, the
      * automatic promotions, and the applied coupon. A coupon that stopped
      * applying (expired, usage exhausted, cart no longer eligible) is
      * dropped from the cart.
+     *
+     * The subtotal runs through `ap.ecommerce.pricing.subtotal` and the
+     * total through `ap.ecommerce.pricing.total` (filters). A return that
+     * isn't a non-negative {@see Money} in the cart's currency is ignored.
      *
      * @since 1.0.0
      *
@@ -305,7 +422,9 @@ class StorefrontCartService
     {
         $cart->load( 'items.product' );
 
-        $cart->subtotal_amount = (int) $cart->items->sum( 'line_subtotal_amount' );
+        $currency              = new Currency( strtoupper( (string) $cart->currency ) );
+        $subtotal              = new Money( (int) $cart->items->sum( 'line_subtotal_amount' ), $currency );
+        $cart->subtotal_amount = (int) $this->validAmount( applyFilters( 'ap.ecommerce.pricing.subtotal', $subtotal, $cart ), $subtotal )->getAmount();
 
         $meta       = (array) ( $cart->meta ?? [] );
         $unsellable = $this->unsellableItems( $cart )->modelKeys();
@@ -327,10 +446,19 @@ class StorefrontCartService
         }
 
         $cart->discount_amount = (int) $result->discountTotal()->getAmount();
-        $cart->total_amount    = max(
+
+        $total     = new Money( max(
             0,
             $cart->subtotal_amount - $cart->discount_amount + (int) $cart->tax_amount + (int) $cart->shipping_amount,
-        );
+        ), $currency );
+        $breakdown = [
+            'subtotal' => new Money( (int) $cart->subtotal_amount, $currency ),
+            'discount' => new Money( (int) $cart->discount_amount, $currency ),
+            'tax'      => new Money( (int) $cart->tax_amount, $currency ),
+            'shipping' => new Money( (int) $cart->shipping_amount, $currency ),
+        ];
+
+        $cart->total_amount = (int) $this->validAmount( applyFilters( 'ap.ecommerce.pricing.total', $total, $cart, $breakdown ), $total )->getAmount();
         $cart->save();
 
         return $cart;
@@ -450,23 +578,67 @@ class StorefrontCartService
     }
 
     /**
-     * Sets a line's unit price to `$price` and recomputes its totals.
+     * Sets a line's unit price to its filtered current price (see
+     * {@see self::linePrice()}) and recomputes its totals.
      *
      * @since 1.0.0
      *
+     * @param  Cart      $cart   Cart the line belongs to.
      * @param  CartItem  $item   Line.
-     * @param  Money     $price  Current unit price.
+     * @param  Money     $price  Resolved unit price.
      *
      * @return CartItem
      */
-    protected function reprice( CartItem $item, Money $price ): CartItem
+    protected function reprice( Cart $cart, CartItem $item, Money $price ): CartItem
     {
-        $item->unit_price_amount    = (int) $price->getAmount();
+        $item->unit_price_amount    = (int) $this->linePrice( $cart, $item, $price )->getAmount();
         $item->line_subtotal_amount = $item->unit_price_amount * (int) $item->quantity;
         $item->line_total_amount    = $item->line_subtotal_amount;
         $item->save();
 
         return $item;
+    }
+
+    /**
+     * Runs a resolved unit price through `ap.ecommerce.pricing.itemPrice`
+     * (filter). A return that isn't a non-negative {@see Money} in the
+     * cart's currency is ignored and the resolved price is kept.
+     *
+     * @since 1.0.0
+     *
+     * @param  Cart      $cart   Cart.
+     * @param  CartItem  $item   Line being priced.
+     * @param  Money     $price  Unit price from {@see ProductPriceResolver}.
+     *
+     * @return Money
+     */
+    protected function linePrice( Cart $cart, CartItem $item, Money $price ): Money
+    {
+        return $this->validAmount( applyFilters( 'ap.ecommerce.pricing.itemPrice', $price, $item, $cart ), $price );
+    }
+
+    /**
+     * `$candidate` when it is a non-negative {@see Money} in `$fallback`'s
+     * currency, otherwise `$fallback` — the guard every pricing filter's
+     * return value goes through.
+     *
+     * @since 1.0.0
+     *
+     * @param  mixed  $candidate  Filter return value.
+     * @param  Money  $fallback   Value passed into the filter.
+     *
+     * @return Money
+     */
+    protected function validAmount( mixed $candidate, Money $fallback ): Money
+    {
+        if ( ! $candidate instanceof Money
+            || ! $candidate->getCurrency()->equals( $fallback->getCurrency() )
+            || $candidate->isNegative()
+        ) {
+            return $fallback;
+        }
+
+        return $candidate;
     }
 
     /**
@@ -487,8 +659,17 @@ class StorefrontCartService
             $priceable = $item->variant ?? $item->product;
             $price     = null === $priceable ? null : $this->prices->resolve( $priceable, (string) $cart->currency );
 
-            if ( null !== $price && (int) $price->getAmount() !== (int) $item->unit_price_amount ) {
-                $this->reprice( $item, $price );
+            if ( null === $price ) {
+                continue;
+            }
+
+            $price = $this->linePrice( $cart, $item, $price );
+
+            if ( (int) $price->getAmount() !== (int) $item->unit_price_amount ) {
+                $item->unit_price_amount    = (int) $price->getAmount();
+                $item->line_subtotal_amount = $item->unit_price_amount * (int) $item->quantity;
+                $item->line_total_amount    = $item->line_subtotal_amount;
+                $item->save();
             }
         }
     }

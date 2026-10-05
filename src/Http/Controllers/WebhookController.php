@@ -11,11 +11,13 @@
  * records the delivery (verified or not) in {@see InboundWebhookDelivery}
  * so operators can inspect and replay what came in.
  *
- * A verified event fans out to two hook names — the generic
- * `ap.ecommerce.webhook_received` and the provider-scoped
- * `ap.ecommerce.gateway.{provider}.webhook_received` — so downstream
- * satellites can subscribe to a single provider or every provider at
- * once. An unverified request is still ledgered but never dispatches.
+ * A verified event fans out to three hook names — the generic
+ * `ap.ecommerce.webhook_received`, the provider-scoped
+ * `ap.ecommerce.gateway.{provider}.webhook_received`, and the
+ * payload-only `ap.ecommerce.payment.webhookReceived` from the hooks
+ * spec — so downstream satellites can subscribe to a single provider or
+ * every provider at once. An unverified request is still ledgered but
+ * never dispatches.
  *
  * Engine spec §4.2.
  *
@@ -127,6 +129,7 @@ class WebhookController
         if ( function_exists( 'doAction' ) ) {
             doAction( 'ap.ecommerce.webhook_received', $provider, $result, $request );
             doAction( sprintf( 'ap.ecommerce.gateway.%s.webhook_received', $provider ), $result, $request );
+            doAction( 'ap.ecommerce.payment.webhookReceived', $result->payload, $provider );
         }
 
         return new JsonResponse(

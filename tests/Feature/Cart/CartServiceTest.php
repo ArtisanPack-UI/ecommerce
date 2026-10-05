@@ -198,3 +198,119 @@ it( 'rotates the token to a fresh value on demand', function (): void {
     expect( $rotated->token )->not->toBe( $original );
     expect( strlen( $rotated->token ) )->toBe( 40 );
 } );
+
+it( 'fires itemUpdated with the line and cart when a quantity is set', function (): void {
+    $cart    = Cart::factory()->create();
+    $product = Product::factory()->simple()->create();
+    $item    = $this->service->addItem( $cart, [
+        'product_id'          => $product->id,
+        'quantity'            => 1,
+        'unit_price_amount'   => 500,
+        'unit_price_currency' => 'USD',
+    ] );
+    $fired = null;
+
+    addAction( 'ap.ecommerce.cart.itemUpdated', function ( CartItem $line, Cart $owner ) use ( &$fired ): void {
+        $fired = [ $line->id, $line->quantity, $owner->id ];
+    } );
+
+    $this->service->updateItemQuantity( $cart, $item, 3 );
+
+    expect( $fired )->toBe( [ $item->id, 3, $cart->id ] );
+} );
+
+it( 'fires itemUpdated instead of itemAdded when an add merges into an existing line', function (): void {
+    $cart    = Cart::factory()->create();
+    $product = Product::factory()->simple()->create();
+    $line    = [
+        'product_id'          => $product->id,
+        'quantity'            => 1,
+        'unit_price_amount'   => 500,
+        'unit_price_currency' => 'USD',
+    ];
+    $this->service->addItem( $cart, $line );
+    $fired = [];
+
+    addAction( 'ap.ecommerce.cart.itemAdded', function () use ( &$fired ): void {
+        $fired[] = 'added';
+    } );
+    addAction( 'ap.ecommerce.cart.itemUpdated', function ( CartItem $item ) use ( &$fired ): void {
+        $fired[] = 'updated:' . $item->quantity;
+    } );
+
+    $this->service->addItem( $cart, $line );
+
+    expect( $fired )->toBe( [ 'updated:2' ] );
+} );
+
+it( 'fires itemRemoved with the deleted line and cart', function (): void {
+    $cart    = Cart::factory()->create();
+    $product = Product::factory()->simple()->create();
+    $item    = $this->service->addItem( $cart, [
+        'product_id'          => $product->id,
+        'quantity'            => 1,
+        'unit_price_amount'   => 500,
+        'unit_price_currency' => 'USD',
+    ] );
+    $fired = null;
+
+    addAction( 'ap.ecommerce.cart.itemRemoved', function ( CartItem $line, Cart $owner ) use ( &$fired ): void {
+        $fired = [ $line->id, $line->exists, $owner->id, CartItem::query()->whereKey( $line->id )->exists() ];
+    } );
+
+    $this->service->removeItem( $cart, $item );
+
+    expect( $fired )->toBe( [ $item->id, false, $cart->id, false ] );
+} );
+
+it( 'clears every line, zeroes the totals, and fires cleared once with the reason', function (): void {
+    Event::fake( [ CartUpdated::class ] );
+
+    $cart = Cart::factory()->create( [ 'subtotal_amount' => 1_500, 'shipping_amount' => 500, 'total_amount' => 2_000 ] );
+
+    foreach ( Product::factory()->simple()->count( 2 )->create() as $product ) {
+        $this->service->addItem( $cart, [
+            'product_id'          => $product->id,
+            'quantity'            => 1,
+            'unit_price_amount'   => 750,
+            'unit_price_currency' => 'USD',
+        ] );
+    }
+
+    $cleared = [];
+    $removed = 0;
+
+    addAction( 'ap.ecommerce.cart.cleared', function ( Cart $owner, string $reason ) use ( &$cleared ): void {
+        $cleared[] = [ $owner->id, $reason, $owner->items()->count() ];
+    } );
+    addAction( 'ap.ecommerce.cart.itemRemoved', function () use ( &$removed ): void {
+        $removed++;
+    } );
+
+    $result = $this->service->clear( $cart, 'converted' );
+
+    expect( $cleared )->toBe( [ [ $cart->id, 'converted', 0 ] ] );
+    expect( $removed )->toBe( 0 );
+    expect( $result->subtotal_amount )->toBe( 0 );
+    expect( $result->shipping_amount )->toBe( 0 );
+    expect( $result->total_amount )->toBe( 0 );
+    expect( Cart::query()->whereKey( $cart->id )->exists() )->toBeTrue();
+
+    Event::assertDispatched( CartUpdated::class, fn ( CartUpdated $event ) => 'cleared' === ( $event->changes['action'] ?? null ) );
+} );
+
+it( 'clears with the default reason', function (): void {
+    $reason = null;
+
+    addAction( 'ap.ecommerce.cart.cleared', function ( Cart $cart, string $why ) use ( &$reason ): void {
+        $reason = $why;
+    } );
+
+    $this->service->clear( Cart::factory()->create() );
+
+    expect( $reason )->toBe( 'cleared' );
+} );
+
+it( 'refuses an empty clear reason', function (): void {
+    $this->service->clear( Cart::factory()->create(), '  ' );
+} )->throws( InvalidArgumentException::class );

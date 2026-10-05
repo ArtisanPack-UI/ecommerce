@@ -79,6 +79,7 @@ use ArtisanPackUI\Ecommerce\Listeners\LinkCustomerOnUserVerified;
 use ArtisanPackUI\Ecommerce\Listeners\RecordModelActivity;
 use ArtisanPackUI\Ecommerce\Listeners\RevokeDigitalDeliverables;
 use ArtisanPackUI\Ecommerce\Listeners\SendCatalogNotifications;
+use ArtisanPackUI\Ecommerce\Listeners\TrackCustomerMilestones;
 use ArtisanPackUI\Ecommerce\Logging\EcommerceLogFormatter;
 use ArtisanPackUI\Ecommerce\Models\Coupon;
 use ArtisanPackUI\Ecommerce\Models\Customer;
@@ -185,6 +186,7 @@ use ArtisanPackUI\Ecommerce\Shipping\Methods\PriceBasedMethod;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\WeightBasedMethod;
 use ArtisanPackUI\Ecommerce\Support\RateLimitPolicyRegistrar;
 use ArtisanPackUI\Ecommerce\Support\RegionalJsonFallbackLoader;
+use ArtisanPackUI\Ecommerce\Support\RegistryHookRegistrar;
 use ArtisanPackUI\Ecommerce\Tax\ManualTaxProvider;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Auth\Events\Verified;
@@ -323,6 +325,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->registerCoreKanban();
         $this->registerCoreNotificationTemplates();
         $this->registerCoreReports();
+        $this->registerRegistryHooks();
         $this->registerWebhookRoute();
         $this->registerPolicies();
         $this->registerRestRoutes();
@@ -1333,7 +1336,9 @@ class EcommerceServiceProvider extends ServiceProvider
 
     /**
      * Wires the customer-lifecycle listeners: on verified-email registration,
-     * back-fill `customers.user_id` for the shopper (engine spec §5.8 / §3.22).
+     * back-fill `customers.user_id` for the shopper (engine spec §5.8 / §3.22),
+     * and on a settled payment fire the `customer.firstOrder` /
+     * `customer.becameVip` milestones.
      *
      * @since 1.0.0
      *
@@ -1345,6 +1350,25 @@ class EcommerceServiceProvider extends ServiceProvider
         $events = $this->app->make( Dispatcher::class );
 
         $events->listen( Verified::class, LinkCustomerOnUserVerified::class );
+
+        $this->app->make( TrackCustomerMilestones::class )->subscribe();
+    }
+
+    /**
+     * Applies the `registered*` filters (payment gateways, shipping method
+     * types, product types, discount types) once every provider has booted,
+     * so satellites can add their filter callbacks from any `boot()`
+     * regardless of provider order. See {@see RegistryHookRegistrar}.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerRegistryHooks(): void
+    {
+        $this->app->booted( function (): void {
+            $this->app->make( RegistryHookRegistrar::class )->apply();
+        } );
     }
 
     /**

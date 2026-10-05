@@ -139,6 +139,43 @@ final class WebhookControllerTest extends TestCase
     }
 
     /**
+     * @return void
+     */
+    public function test_it_fires_payment_webhook_received_with_the_payload_and_provider(): void
+    {
+        $this->registerFakeGateway( 'fake' );
+
+        $calls = [];
+        addAction( 'ap.ecommerce.payment.webhookReceived', function ( array $payload, string $provider ) use ( &$calls ): void {
+            $calls[] = [ $payload, $provider ];
+        } );
+
+        $payload = [ 'id' => 'evt_spec_1', 'type' => 'payment.captured' ];
+
+        $this->postJson( '/ecommerce/webhooks/fake', $payload )->assertOk();
+        $this->postJson( '/ecommerce/webhooks/fake', $payload )->assertOk();
+
+        $this->assertSame( [ [ $payload, 'fake' ] ], $calls );
+    }
+
+    /**
+     * @return void
+     */
+    public function test_an_unverified_delivery_never_fires_payment_webhook_received(): void
+    {
+        $this->registerFakeGateway( 'fake', verified: false );
+
+        $fired = false;
+        addAction( 'ap.ecommerce.payment.webhookReceived', function () use ( &$fired ): void {
+            $fired = true;
+        } );
+
+        $this->postJson( '/ecommerce/webhooks/fake', [ 'id' => 'evt_bad' ] )->assertStatus( 400 );
+
+        $this->assertFalse( $fired );
+    }
+
+    /**
      * Registers an in-memory fake gateway under `$key`. When `$verified`
      * is `true` the gateway returns a verified {@see WebhookResult}
      * echoing the request body's `id` / `type`; otherwise a

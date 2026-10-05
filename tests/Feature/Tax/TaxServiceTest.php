@@ -98,3 +98,21 @@ it( 'throws on double registration in testing', function (): void {
 it( 'rejects entries that do not implement TaxProvider', function (): void {
     app( TaxProviderRegistry::class )->register( 'bogus', stdClass::class );
 } )->throws( InvalidArgumentException::class );
+
+it( 'passes the result and the cart to ap.ecommerce.tax.calculated', function (): void {
+    app( TaxProviderRegistry::class )->register( 'flat', flatTaxProvider( 'flat', 9 ) );
+    config()->set( 'artisanpack.ecommerce.tax.provider', 'flat' );
+
+    $cart     = cartWithLines( [ [ 'unit' => 1_000 ] ] );
+    $received = null;
+
+    addFilter( 'ap.ecommerce.tax.calculated', function ( TaxResult $result, Cart $filtered ) use ( &$received ): TaxResult {
+        $received = [ (int) $result->total->getAmount(), $filtered->id ];
+
+        return $result;
+    } );
+
+    app( TaxService::class )->calculate( $cart, $this->address );
+
+    expect( $received )->toBe( [ 9, $cart->id ] );
+} );

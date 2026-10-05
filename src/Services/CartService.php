@@ -263,6 +263,50 @@ class CartService
     }
 
     /**
+     * Removes every line from the cart and zeroes its stored totals.
+     *
+     * Fires `ap.ecommerce.cart.cleared` (action) once, with `$reason`,
+     * instead of one `ap.ecommerce.cart.itemRemoved` per line — so
+     * listeners can tell a shopper emptying their cart (`cleared`) from a
+     * checkout converting it (`converted`) or a cleanup job dropping it
+     * (`expired`). The cart row itself is kept.
+     *
+     * @since 1.0.0
+     *
+     * @param  Cart    $cart    Cart to empty.
+     * @param  string  $reason  Why the cart was cleared (`cleared`, `converted`, `expired`, or a satellite-defined value).
+     *
+     * @throws InvalidArgumentException When `$reason` is empty.
+     *
+     * @return Cart
+     */
+    public function clear( Cart $cart, string $reason = 'cleared' ): Cart
+    {
+        if ( '' === trim( $reason ) ) {
+            throw new InvalidArgumentException( 'Cart clear reason must not be empty.' );
+        }
+
+        return DB::transaction( function () use ( $cart, $reason ): Cart {
+            $locked = Cart::query()->lockForUpdate()->findOrFail( $cart->id );
+
+            $locked->items()->delete();
+
+            $locked->subtotal_amount = 0;
+            $locked->discount_amount = 0;
+            $locked->tax_amount      = 0;
+            $locked->shipping_amount = 0;
+            $locked->total_amount    = 0;
+            $locked->save();
+            $locked->unsetRelation( 'items' );
+
+            doAction( 'ap.ecommerce.cart.cleared', $locked, $reason );
+            Event::dispatch( new CartUpdated( $locked, [ 'action' => 'cleared', 'reason' => $reason ] ) );
+
+            return $locked;
+        } );
+    }
+
+    /**
      * Rotates the cart's opaque session token.
      *
      * Called after a guest→user merge (or on any successful login) to

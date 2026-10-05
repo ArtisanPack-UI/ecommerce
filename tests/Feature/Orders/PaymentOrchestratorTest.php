@@ -449,3 +449,119 @@ it( 'runs every provider in chain mode and approves when all providers approve',
     Event::assertDispatched( PaymentSucceeded::class );
     Event::assertNotDispatched( FraudBlocked::class );
 } );
+
+it( 'fires payment.charging before capture, then payment.succeeded and order.paid with the paid order', function (): void {
+    orchRegisterFraud( FraudDecision::approve() );
+    [ $order, $cart ] = orchMakeOrderAndCart();
+    $fired            = [];
+
+    addAction( 'ap.ecommerce.payment.charging', function ( PaymentGateway $gateway, Money $amount, Order $charging ) use ( &$fired ): void {
+        $fired[] = [ 'charging', $gateway->key(), (int) $amount->getAmount(), $charging->id, $this->gateway->calls ];
+    } );
+    addAction( 'ap.ecommerce.payment.succeeded', function () use ( &$fired ): void {
+        $fired[] = [ 'succeeded' ];
+    } );
+    addAction( 'ap.ecommerce.order.paid', function ( Order $paid, PaymentResult $result ) use ( &$fired ): void {
+        $fired[] = [ 'paid', $paid->id, $paid->payment_status, $result->gatewayReference ];
+    } );
+
+    app( PaymentOrchestrator::class )->finalize( $order, $cart, orchShipping() );
+
+    expect( $fired )->toBe( [
+        [ 'charging', 'orch-fake', 5_000, $order->id, [ 'createPaymentSession' ] ],
+        [ 'succeeded' ],
+        [ 'paid', $order->id, 'paid', 'ch_captured' ],
+    ] );
+} );
+
+it( 'fires payment.failed with the thrown exception when the gateway throws, and never order.paid', function (): void {
+    orchRegisterFraud( FraudDecision::approve() );
+    [ $order, $cart ]                    = orchMakeOrderAndCart();
+    $this->gateway->shouldThrowOnCapture = true;
+    $failed                              = null;
+    $paid                                = false;
+
+    addAction( 'ap.ecommerce.payment.failed', function ( PaymentGateway $gateway, Throwable $reason, Order $failedOrder ) use ( &$failed ): void {
+        $failed = [ $gateway->key(), $reason->getMessage(), $failedOrder->id ];
+    } );
+    addAction( 'ap.ecommerce.order.paid', function () use ( &$paid ): void {
+        $paid = true;
+    } );
+
+    app( PaymentOrchestrator::class )->finalize( $order, $cart, orchShipping() );
+
+    expect( $failed )->toBe( [ 'orch-fake', 'gateway timed out', $order->id ] );
+    expect( $paid )->toBeFalse();
+} );
+
+it( 'fires payment.failed with a decline reason when the gateway returns success=false', function (): void {
+    orchRegisterFraud( FraudDecision::approve() );
+    [ $order, $cart ]             = orchMakeOrderAndCart();
+    $this->gateway->captureResult = PaymentResult::terminalFailure( Money::USD( 5_000 ), 'card_declined', 'The card was declined.' );
+    $failed                       = null;
+
+    addAction( 'ap.ecommerce.payment.failed', function ( PaymentGateway $gateway, Throwable $reason, Order $failedOrder ) use ( &$failed ): void {
+        $failed = [ $gateway->key(), $reason->getMessage(), $failedOrder->id ];
+    } );
+
+    app( PaymentOrchestrator::class )->finalize( $order, $cart, orchShipping() );
+
+    expect( $failed[0] )->toBe( 'orch-fake' );
+    expect( $failed[1] )->toContain( 'The card was declined.' );
+    expect( $failed[2] )->toBe( $order->id );
+} );
+
+it( 'does not fire order.paid again on a repeat finalize of a paid order', function (): void {
+    orchRegisterFraud( FraudDecision::approve() );
+    [ $order, $cart ] = orchMakeOrderAndCart();
+    $paid             = 0;
+
+    addAction( 'ap.ecommerce.order.paid', function () use ( &$paid ): void {
+        $paid++;
+    } );
+
+    $orch = app( PaymentOrchestrator::class );
+    $orch->finalize( $order, $cart, orchShipping() );
+    $orch->finalize( $order->fresh(), $cart, orchShipping() );
+
+    expect( $paid )->toBe( 1 );
+} );
+
+it( 'lists every registered gateway as available for a cart by default', function (): void {
+    $available = app( PaymentGatewayRegistry::class )->availableFor( Cart::factory()->create() );
+
+    expect( array_keys( $available ) )->toBe( [ 'orch-fake' ] );
+    expect( $available['orch-fake'] )->toBe( $this->gateway );
+} );
+
+it( 'lets payment.availableGateways hide a gateway for a cart', function (): void {
+    $other = new OrchestratorFakeGateway( 'orch-other' );
+    app( PaymentGatewayRegistry::class )->register( $other->key(), $other );
+    $cart     = Cart::factory()->create();
+    $received = null;
+
+    addFilter( 'ap.ecommerce.payment.availableGateways', function ( array $gateways, Cart $filtered ) use ( &$received ): array {
+        $received = [ array_keys( $gateways ), $filtered->id ];
+        unset( $gateways['orch-fake'] );
+
+        return $gateways;
+    } );
+
+    $available = app( PaymentGatewayRegistry::class )->availableFor( $cart );
+
+    expect( $received )->toBe( [ [ 'orch-fake', 'orch-other' ], $cart->id ] );
+    expect( array_keys( $available ) )->toBe( [ 'orch-other' ] );
+} );
+
+it( 'drops payment.availableGateways entries that are not registered under their key', function (): void {
+    addFilter( 'ap.ecommerce.payment.availableGateways', function ( array $gateways ): array {
+        $gateways['injected'] = new OrchestratorFakeGateway( 'injected' );
+        $gateways['bogus']    = 'not a gateway';
+
+        return $gateways;
+    } );
+
+    $available = app( PaymentGatewayRegistry::class )->availableFor( Cart::factory()->create() );
+
+    expect( array_keys( $available ) )->toBe( [ 'orch-fake' ] );
+} );

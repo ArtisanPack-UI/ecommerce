@@ -469,5 +469,6 @@
     "meta.tax_breakdown is recorded when the order is placed and cannot be changed.": "meta.tax_breakdown est enregistré lors de la commande et ne peut pas être modifié.",
     "no": "non",
     "unknown error": "erreur inconnue",
-    "yes": "oui"
+    "yes": "oui",
+    "That shipping option is not available for this cart.": "Cette option de livraison n’est pas disponible pour ce panier."
 }

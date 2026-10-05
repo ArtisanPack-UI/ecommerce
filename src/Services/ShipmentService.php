@@ -72,6 +72,10 @@ class ShipmentService
      * Line and order `fulfillment_status` roll up afterwards
      * (`unfulfilled` → `partial` → `fulfilled`).
      *
+     * Fires `ap.ecommerce.order.fulfilling` (action) with the locked order
+     * once it is known to be shippable, before any shipment row is written;
+     * a listener that throws aborts the shipment.
+     *
      * @since 1.0.0
      *
      * @param  Order                 $order       Order being fulfilled.
@@ -91,6 +95,8 @@ class ShipmentService
             if ( in_array( $locked->system_status, self::UNSHIPPABLE_STATUSES, true ) ) {
                 throw new InvalidArgumentException( __( 'Order :id is :status and can no longer be shipped.', [ 'id' => $order->id, 'status' => $locked->system_status ] ) );
             }
+
+            doAction( 'ap.ecommerce.order.fulfilling', $locked );
 
             $remaining = $this->remainingQuantities( $locked );
 

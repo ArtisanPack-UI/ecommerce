@@ -406,9 +406,11 @@ class PaymentOrchestrator
     }
 
     /**
-     * Step 3 — capture on approve. Success dispatches
-     * {@see PaymentSucceeded}; a gateway that returns `success = false`
-     * or throws dispatches {@see PaymentFailed}.
+     * Step 3 — capture on approve. Success fires
+     * `ap.ecommerce.payment.succeeded` then `ap.ecommerce.order.paid` and
+     * dispatches {@see PaymentSucceeded}; a gateway that returns
+     * `success = false` or throws fires `ap.ecommerce.payment.failed` and
+     * dispatches {@see PaymentFailed}.
      *
      * @since 1.0.0
      *
@@ -431,11 +433,15 @@ class PaymentOrchestrator
             $result = $gateway->capturePayment( $order, $session );
         } catch ( Throwable $e ) {
             $this->recordCaptureFailure( $order, $gateway, $session, $e->getMessage(), null );
-            Event::dispatch( new PaymentFailed( $order->fresh() ?? $order, $gateway, $e ) );
+
+            $refreshed = $order->fresh() ?? $order;
+
+            doAction( 'ap.ecommerce.payment.failed', $gateway, $e, $refreshed );
+            Event::dispatch( new PaymentFailed( $refreshed, $gateway, $e ) );
 
             return new PaymentFinalization(
                 status: PaymentFinalization::STATUS_FAILED,
-                order: $order->fresh() ?? $order,
+                order: $refreshed,
                 session: $session,
                 fraud: $decision,
             );
@@ -474,6 +480,7 @@ class PaymentOrchestrator
         $refreshed = $this->recordCaptureSuccess( $order, $gateway, $result );
 
         doAction( 'ap.ecommerce.payment.succeeded', $result, $refreshed );
+        doAction( 'ap.ecommerce.order.paid', $refreshed, $result );
         Event::dispatch( new PaymentSucceeded( $refreshed, $result ) );
 
         return new PaymentFinalization(
