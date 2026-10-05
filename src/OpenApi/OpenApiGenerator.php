@@ -125,7 +125,7 @@ class OpenApiGenerator
                 'title'       => 'ArtisanPack UI Ecommerce API',
                 'version'     => $this->version(),
                 'description' => $this->description(),
-                'license'     => [ 'name' => 'GPL-3.0-or-later', 'identifier' => 'GPL-3.0-or-later' ],
+                'license'     => [ 'name' => 'MIT', 'identifier' => 'MIT' ],
             ],
             'servers'    => [ [ 'url' => $base, 'description' => 'REST API (relative to the store URL).' ] ],
             'security'   => [],

@@ -36,6 +36,7 @@ function documentedOperations( array $spec ): array
 it( 'produces an OpenAPI 3.1 document', function (): void {
     expect( $this->spec['openapi'] )->toBe( '3.1.0' )
         ->and( $this->spec['info']['version'] )->toBe( '1.0.0' )
+        ->and( $this->spec['info']['license'] )->toBe( [ 'name' => 'MIT', 'identifier' => 'MIT' ] )
         ->and( $this->spec['servers'][0]['url'] )->toBe( '/api/ecommerce/v1' )
         ->and( $this->spec['components']['securitySchemes'] )->toHaveKeys( [ 'sanctum', 'sessionCookie', 'serviceSignature' ] );
 } );
