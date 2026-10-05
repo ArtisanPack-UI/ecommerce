@@ -22,14 +22,13 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Middleware;
 
+use ArtisanPackUI\Ecommerce\RateLimiting\EcommerceRateLimiter;
 use Closure;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\RateLimiter as RateLimiterFacade;
-use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -50,115 +49,37 @@ class RateLimitEcommerce
     public const PROBLEM_CONTENT_TYPE = 'application/problem+json';
 
     /**
-     * Constructs the middleware.
-     *
      * @since 1.0.0
      *
-     * @param  RateLimiter  $limiter  Laravel's rate-limiter service.
+     * @param  RateLimiter           $limiter   Laravel's rate limiter.
+     * @param  EcommerceRateLimiter  $policies  Policy evaluation shared with in-process callers.
      */
-    public function __construct( protected RateLimiter $limiter )
-    {
+    public function __construct(
+        protected RateLimiter $limiter,
+        protected EcommerceRateLimiter $policies,
+    ) {
     }
 
     /**
-     * Handles the incoming request.
-     *
      * @since 1.0.0
      *
-     * @param  Request  $request  The incoming request.
-     * @param  Closure  $next  The rest of the pipeline.
-     * @param  string  $policy  Name of the registered policy (e.g.
-     *                          `ecommerce.catalog.read`).
+     * @param  Request  $request  Request.
+     * @param  Closure  $next     Next middleware.
+     * @param  string   $policy   Policy name.
      *
-     * @throws InvalidArgumentException When the policy is not registered.
-     *
-     * @return Response The response, possibly a 429.
+     * @return Response
      */
     public function handle( Request $request, Closure $next, string $policy ): Response
     {
-        $limits = $this->resolveLimits( $policy, $request );
+        $exceeded = $this->policies->exceeded( $policy, $request );
 
-        // Two passes: check every bucket first, then only hit them once we
-        // know none refuses. Doing check+hit in one loop would spend a slot
-        // from bucket A even when bucket B refuses the same request, giving
-        // a caller who is already over the compound cap the ability to
-        // erode a second bucket by hitting the endpoint they cannot use.
-        // The two passes are not atomic across concurrent requests — a
-        // small overshoot under load is possible and accepted — but any
-        // "fix" that combines them reintroduces the partial-spend bug.
-        foreach ( $limits as $limit ) {
-            $key = $this->keyFor( $policy, $limit );
-
-            if ( $this->limiter->tooManyAttempts( $key, $limit->maxAttempts ) ) {
-                return $this->refuse( $policy, $key, $limit, $request );
-            }
+        if ( null !== $exceeded ) {
+            return $this->refuse( $policy, $exceeded['key'], $exceeded['limit'], $request );
         }
 
-        foreach ( $limits as $limit ) {
-            $this->limiter->hit( $this->keyFor( $policy, $limit ), $limit->decaySeconds );
-        }
+        $this->policies->hit( $policy, $request );
 
         return $next( $request );
-    }
-
-    /**
-     * Resolves the registered policy callback to the concrete list of limits
-     * that apply to this request.
-     *
-     * @since 1.0.0
-     *
-     * @param  string  $policy  The policy name.
-     * @param  Request  $request  The incoming request.
-     *
-     * @throws InvalidArgumentException When the policy has no registered
-     *                                  resolver.
-     *
-     * @return array<int, Limit> The limits to enforce, in policy order.
-     */
-    protected function resolveLimits( string $policy, Request $request ): array
-    {
-        $resolver = RateLimiterFacade::limiter( $policy );
-
-        if ( null === $resolver ) {
-            throw new InvalidArgumentException( sprintf(
-                'Ecommerce rate-limit policy "%s" is not registered.',
-                $policy,
-            ) );
-        }
-
-        $result = $resolver( $request );
-
-        if ( $result instanceof Limit ) {
-            return [ $result ];
-        }
-
-        if ( is_array( $result ) ) {
-            return array_values( array_filter(
-                $result,
-                static fn ( mixed $item ): bool => $item instanceof Limit,
-            ) );
-        }
-
-        return [];
-    }
-
-    /**
-     * Builds the cache key for one limit within a policy.
-     *
-     * Namespaces the key by policy name so limits with overlapping `by()`
-     * subjects (e.g. two policies both keyed on the caller's IP) cannot
-     * poison each other's counters.
-     *
-     * @since 1.0.0
-     *
-     * @param  string  $policy  The policy name.
-     * @param  Limit  $limit  One of the policy's limits.
-     *
-     * @return string The cache key.
-     */
-    protected function keyFor( string $policy, Limit $limit ): string
-    {
-        return $policy . '|' . $limit->key;
     }
 
     /**
