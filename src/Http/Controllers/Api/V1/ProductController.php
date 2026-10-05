@@ -20,7 +20,9 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
 use ArtisanPackUI\Ecommerce\Catalog\CatalogQuery;
+use ArtisanPackUI\Ecommerce\Catalog\ProductViews;
 use ArtisanPackUI\Ecommerce\Catalog\VariantResolver;
+use ArtisanPackUI\Ecommerce\Contracts\ProvidesStorefrontOptions;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\PurchaseOptionsRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\ProductResource;
 use ArtisanPackUI\Ecommerce\Http\Resources\ProductVariantResource;
@@ -31,6 +33,7 @@ use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use ArtisanPackUI\Ecommerce\OpenApi\CatalogParameters;
 use ArtisanPackUI\Ecommerce\Pricing\PriceDisplayResolver;
+use ArtisanPackUI\Ecommerce\Services\CustomerService;
 use ArtisanPackUI\Ecommerce\Services\StoreCurrencies;
 use ArtisanPackUI\Ecommerce\ValueObjects\Address;
 use Closure;
@@ -258,7 +261,31 @@ class ProductController extends ApiController
             'price'      => app( PriceDisplayResolver::class )->for( $model, $currency, $destination )?->toArray(),
             'stock'      => StockStatus::for( $model )->toArray(),
             'variants'   => app( VariantResolver::class )->matrix( $model, $currency ),
+            'options'    => ! $model->typeIsMissing() && $model->productType() instanceof ProvidesStorefrontOptions ? $model->productType()->storefrontOptions( $model ) : [],
         ] ] );
+    }
+
+    /**
+     * Records that the shopper viewed `$product` (#179): fires
+     * `ap.ecommerce.product.viewed` for satellites such as recently-viewed.
+     *
+     * @since 1.0.0
+     *
+     * @param  Request  $request  Request.
+     * @param  int      $product  Product id.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Record a product view', status: 202 )]
+    public function recordView( Request $request, int $product ): JsonResponse
+    {
+        $model    = $this->visible()->findOrFail( $product );
+        $user     = $request->user();
+        $customer = null === $user ? null : app( CustomerService::class )->customerForUser( $user );
+
+        ProductViews::record( $model, $customer );
+
+        return new JsonResponse( [ 'data' => [ 'recorded' => true ] ], 202 );
     }
 
     /**

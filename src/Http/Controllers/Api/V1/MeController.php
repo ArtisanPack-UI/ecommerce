@@ -40,6 +40,7 @@ use ArtisanPackUI\Ecommerce\Http\Support\Problem;
 use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\CustomerAddress;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
+use ArtisanPackUI\Ecommerce\Registries\AccountMenuRegistry;
 use ArtisanPackUI\Ecommerce\Services\CustomerAddressService;
 use ArtisanPackUI\Ecommerce\Services\CustomerClaimService;
 use ArtisanPackUI\Ecommerce\Services\CustomerOrderHistory;
@@ -341,6 +342,23 @@ class MeController extends ApiController
             [ 'activations' => 'activations', 'order_item' => 'orderItem' ],
             '-created_at',
         ) );
+    }
+
+    /**
+     * The account navigation for the signed-in shopper (#179).
+     *
+     * @since 1.0.0
+     *
+     * @param  Request  $request  Request.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Get my account menu' )]
+    public function accountMenu( Request $request ): JsonResponse
+    {
+        return $this->forCustomer( $request, static fn ( Customer $customer ): JsonResponse => new JsonResponse( [
+            'data' => app( AccountMenuRegistry::class )->visibleTo( $customer ),
+        ] ) );
     }
 
     /**

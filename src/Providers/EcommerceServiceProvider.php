@@ -164,6 +164,7 @@ use ArtisanPackUI\Ecommerce\Promotions\Conditions\DateRangeCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\DayOfWeekCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\MinQuantityCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\MinSubtotalCondition;
+use ArtisanPackUI\Ecommerce\Registries\AccountMenuRegistry;
 use ArtisanPackUI\Ecommerce\Registries\AdminMenuRegistry;
 use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\FraudProviderRegistry;
@@ -200,10 +201,12 @@ use ArtisanPackUI\Ecommerce\Reviews\ProductRatingAggregator;
 use ArtisanPackUI\Ecommerce\Search\DatabaseSearchProvider;
 use ArtisanPackUI\Ecommerce\Services\ActivityLogService;
 use ArtisanPackUI\Ecommerce\Services\DatabaseCartStorage;
+use ArtisanPackUI\Ecommerce\Services\DigitalDownloadService;
 use ArtisanPackUI\Ecommerce\Services\Fraud\AlwaysApproveFraudProvider;
 use ArtisanPackUI\Ecommerce\Services\Fraud\StripeRadarFraudProvider;
 use ArtisanPackUI\Ecommerce\Services\KanbanAutomationRunner;
 use ArtisanPackUI\Ecommerce\Services\KanbanRoutingService;
+use ArtisanPackUI\Ecommerce\Services\LicenseService;
 use ArtisanPackUI\Ecommerce\Services\RandomEightCharGenerator;
 use ArtisanPackUI\Ecommerce\Services\SessionCurrencyResolver;
 use ArtisanPackUI\Ecommerce\Settings\CoreSettings;
@@ -331,6 +334,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->app->singleton( SettingsRepository::class );
         $this->app->singleton( ReportRegistry::class, static fn ( $app ): ReportRegistry => new ReportRegistry( $app ) );
         $this->app->singleton( AdminMenuRegistry::class, static fn ( $app ): AdminMenuRegistry => new AdminMenuRegistry( $app ) );
+        $this->app->singleton( AccountMenuRegistry::class, static fn ( $app ): AccountMenuRegistry => new AccountMenuRegistry( $app ) );
         $this->app->singleton( NotificationChannelRegistry::class, static fn ( $app ): NotificationChannelRegistry => new NotificationChannelRegistry( $app ) );
         // Scoped so queue workers and Octane re-read it per job / request.
         $this->app->scoped( SubStatusRegistry::class );
@@ -376,6 +380,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->registerCorePaymentGateways();
         $this->registerCoreFraudProviders();
         $this->registerCoreSearchProviders();
+        $this->registerCoreAccountMenu();
         $this->registerCoreTaxProviders();
         $this->registerCoreShippingMethodTypes();
         $this->registerCorePromotionRules();
@@ -837,6 +842,39 @@ class EcommerceServiceProvider extends ServiceProvider
                 'supports_partial_refunds' => true,
             ],
         );
+    }
+
+    /**
+     * The core account menu entries (#179): storefronts define the
+     * `ecommerce.account.*` routes. Downloads and license keys only show
+     * to customers who have some.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCoreAccountMenu(): void
+    {
+        $menu = $this->app->make( AccountMenuRegistry::class );
+
+        $menu->register( 'profile', [ 'label' => static fn (): string => __( 'Account details' ), 'route' => 'ecommerce.account.profile', 'icon' => 'user', 'position' => 10 ] );
+        $menu->register( 'orders', [ 'label' => static fn (): string => __( 'Orders' ), 'route' => 'ecommerce.account.orders', 'icon' => 'receipt', 'position' => 20 ] );
+        $menu->register( 'addresses', [ 'label' => static fn (): string => __( 'Addresses' ), 'route' => 'ecommerce.account.addresses', 'icon' => 'map-pin', 'position' => 30 ] );
+        $menu->register( 'downloads', [
+            'label'    => static fn (): string => __( 'Downloads' ),
+            'route'    => 'ecommerce.account.downloads',
+            'icon'     => 'download',
+            'position' => 40,
+            'visible'  => static fn ( ?Customer $customer ): bool => null !== $customer && app( DigitalDownloadService::class )->forCustomer( $customer )->exists(),
+        ] );
+        $menu->register( 'license-keys', [
+            'label'    => static fn (): string => __( 'License keys' ),
+            'route'    => 'ecommerce.account.license-keys',
+            'icon'     => 'key',
+            'position' => 50,
+            'visible'  => static fn ( ?Customer $customer ): bool => null !== $customer && app( LicenseService::class )->forCustomer( $customer )->exists(),
+        ] );
+        $menu->register( 'notifications', [ 'label' => static fn (): string => __( 'Email preferences' ), 'route' => 'ecommerce.account.notifications', 'icon' => 'bell', 'position' => 60 ] );
     }
 
     /**

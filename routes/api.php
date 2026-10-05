@@ -127,6 +127,12 @@ Route::middleware( [ 'ecommerce.rate-limit:ecommerce.lookup.attempt', 'ecommerce
     Route::get( 'orders/view/{token}', [ GuestOrderController::class, 'view' ] )->where( 'token', '[0-9a-f-]+' )->name( 'orders.view' );
 } );
 
+// Storefronts report product views (#179).
+Route::post( 'products/{product}/views', [ ProductController::class, 'recordView' ] )
+    ->whereNumber( 'product' )
+    ->middleware( [ 'ecommerce.optional-auth', 'ecommerce.rate-limit:ecommerce.catalog.read', 'ecommerce.idempotency' ] )
+    ->name( 'products.views.store' );
+
 Route::post( 'license/validate', [ LicenseKeyController::class, 'validateKey' ] )
     ->middleware( [ 'ecommerce.rate-limit:ecommerce.license.validate', 'ecommerce.idempotency' ] )
     ->name( 'license.validate' );
@@ -238,6 +244,7 @@ Route::where( [ 'order' => '[0-9]+', 'address' => '[0-9]+' ] )->group( function 
         Route::get( 'me/downloads/{download}', [ MeController::class, 'download' ] )->whereNumber( 'download' )->name( 'me.downloads.show' );
         Route::get( 'me/downloads/{download}/stream', [ MeController::class, 'streamDownload' ] )->whereNumber( 'download' )->name( 'me.downloads.stream' );
         Route::get( 'me/license-keys', [ MeController::class, 'licenseKeys' ] )->name( 'me.license-keys.index' );
+        Route::get( 'me/account-menu', [ MeController::class, 'accountMenu' ] )->name( 'me.account-menu' );
     } );
 
     Route::middleware( array_merge( $auth, [ 'ecommerce.rate-limit:ecommerce.admin.mutate', 'ecommerce.idempotency' ] ) )->group( function (): void {
