@@ -21,6 +21,9 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Services;
 
 use ArtisanPackUI\Ecommerce\Contracts\ShippingLabelProvider;
+use ArtisanPackUI\Ecommerce\Events\OrderFulfilled;
+use ArtisanPackUI\Ecommerce\Events\ShipmentCreated;
+use ArtisanPackUI\Ecommerce\Events\ShipmentDelivered;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
 use ArtisanPackUI\Ecommerce\Models\Refund;
@@ -34,6 +37,7 @@ use ArtisanPackUI\Ecommerce\ValueObjects\ShippingLabel;
 use ArtisanPackUI\Ecommerce\ValueObjects\TrackingStatus;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -186,6 +190,7 @@ class ShipmentService
         }
 
         doAction( 'ap.ecommerce.shipping.shipmentCreated', $shipment, $order );
+        Event::dispatch( new ShipmentCreated( $shipment, $order ) );
         doAction( 'ap.ecommerce.order.shipped', $order, $shipment );
 
         foreach ( $fulfilledItems as $item ) {
@@ -194,10 +199,12 @@ class ShipmentService
 
         if ( $orderFulfilled ) {
             doAction( 'ap.ecommerce.order.fulfilled', $order );
+            Event::dispatch( new OrderFulfilled( $order ) );
         }
 
         if ( Shipment::STATUS_DELIVERED === $shipment->status ) {
             doAction( 'ap.ecommerce.order.delivered', $order, $shipment );
+            Event::dispatch( new ShipmentDelivered( $shipment, $order ) );
         }
 
         return $shipment->load( 'items' );
@@ -259,6 +266,7 @@ class ShipmentService
 
         if ( ! $wasDelivered && Shipment::STATUS_DELIVERED === $status->status ) {
             doAction( 'ap.ecommerce.order.delivered', $shipment->order, $shipment );
+            Event::dispatch( new ShipmentDelivered( $shipment, $shipment->order ) );
         }
 
         return $shipment;

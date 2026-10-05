@@ -20,6 +20,8 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Models;
 
 use ArtisanPackUI\Ecommerce\Database\Factories\CustomerFactory;
+use ArtisanPackUI\Ecommerce\Events\CustomerRegistered;
+use ArtisanPackUI\Ecommerce\Events\CustomerUpdated;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Translation\HasLocalePreference;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -28,6 +30,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Event;
 
 /**
  * Customer Eloquent model.
@@ -60,6 +63,16 @@ class Customer extends Model implements HasLocalePreference
 {
     use HasFactory;
     use Notifiable;
+
+    /**
+     * Columns the engine maintains itself; a change to only these isn't a
+     * profile update.
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    public const MAINTAINED_COLUMNS = [ 'total_spent_amount', 'total_spent_currency', 'orders_count', 'last_ordered_at', 'updated_at', 'created_at' ];
 
     /**
      * @since 1.0.0
@@ -230,5 +243,28 @@ class Customer extends Model implements HasLocalePreference
     protected static function newFactory(): CustomerFactory
     {
         return CustomerFactory::new();
+    }
+
+    /**
+     * Fires {@see CustomerRegistered} and {@see CustomerUpdated} (audit I1)
+     * for every way a customer is created or changed.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected static function booted(): void
+    {
+        static::created( static function ( self $customer ): void {
+            Event::dispatch( new CustomerRegistered( $customer ) );
+        } );
+
+        static::updated( static function ( self $customer ): void {
+            $changes = array_values( array_diff( array_keys( $customer->getChanges() ), self::MAINTAINED_COLUMNS ) );
+
+            if ( [] !== $changes ) {
+                Event::dispatch( new CustomerUpdated( $customer, $changes ) );
+            }
+        } );
     }
 }

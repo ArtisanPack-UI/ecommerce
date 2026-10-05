@@ -24,10 +24,12 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Shipping;
 
+use ArtisanPackUI\Ecommerce\Events\ShipmentDelivered;
 use ArtisanPackUI\Ecommerce\Models\Shipment;
 use ArtisanPackUI\Ecommerce\ValueObjects\TrackingStatus;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use LogicException;
 
@@ -160,6 +162,7 @@ class LocalPickupHandoff
             occurredAt: $shipment->delivered_at,
         ) );
         doAction( 'ap.ecommerce.order.delivered', $shipment->order, $shipment );
+        Event::dispatch( new ShipmentDelivered( $shipment, $shipment->order ) );
 
         return true;
     }

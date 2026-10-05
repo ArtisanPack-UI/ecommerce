@@ -26,6 +26,8 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Services;
 
+use ArtisanPackUI\Ecommerce\Events\ProductOutOfStock;
+use ArtisanPackUI\Ecommerce\Events\ProductStockLow;
 use ArtisanPackUI\Ecommerce\Exceptions\InsufficientStockException;
 use ArtisanPackUI\Ecommerce\Models\InventoryItem;
 use ArtisanPackUI\Ecommerce\Models\InventoryReservation;
@@ -33,6 +35,7 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use InvalidArgumentException;
 use Throwable;
 
@@ -461,10 +464,12 @@ class InventoryService
         $threshold = $item->low_stock_threshold;
         if ( null !== $threshold && $previousOnHand > $threshold && $newOnHand <= $threshold ) {
             doAction( 'ap.ecommerce.inventory.lowStock', $item, $newOnHand );
+            Event::dispatch( new ProductStockLow( $item, $newOnHand ) );
         }
 
         if ( $previousOnHand > 0 && $newOnHand <= 0 ) {
             doAction( 'ap.ecommerce.inventory.outOfStock', $item );
+            Event::dispatch( new ProductOutOfStock( $item ) );
         }
     }
 }
