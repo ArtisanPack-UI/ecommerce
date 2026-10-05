@@ -102,7 +102,6 @@ describe( 'orders', function (): void {
             ->and( $response->json( 'data.customer_notes' ) )->toHaveCount( 1 )
             ->and( $response->json( 'data.customer_notes.0.body' ) )->toBe( 'Shipped early' );
 
-
         $theirs = Order::factory()->create( [ 'customer_id' => $this->other->id ] );
         $this->getJson( "/api/ecommerce/v1/me/orders/{$theirs->id}" )->assertNotFound();
     } );

@@ -129,6 +129,9 @@ Route::where( [ 'cart' => '[A-Za-z0-9]{40}', 'item' => '[0-9]+' ] )->middleware(
     Route::get( 'carts/{cart}', [ CartController::class, 'show' ] )
         ->middleware( 'ecommerce.rate-limit:ecommerce.cart.mutate' )
         ->name( 'carts.show' );
+    Route::get( 'carts/{cart}/shipping-rates', [ CartController::class, 'shippingRates' ] )
+        ->middleware( 'ecommerce.rate-limit:ecommerce.cart.mutate' )
+        ->name( 'carts.shipping-rates.index' );
 
     Route::middleware( [ 'ecommerce.rate-limit:ecommerce.cart.mutate', 'ecommerce.idempotency' ] )->group( function (): void {
         Route::post( 'carts/{cart}/items', [ CartController::class, 'addItem' ] )->name( 'carts.items.store' );
@@ -136,6 +139,9 @@ Route::where( [ 'cart' => '[A-Za-z0-9]{40}', 'item' => '[0-9]+' ] )->middleware(
         Route::delete( 'carts/{cart}/items/{item}', [ CartController::class, 'removeItem' ] )->name( 'carts.items.destroy' );
         Route::delete( 'carts/{cart}/coupons/{code}', [ CartController::class, 'removeCoupon' ] )->name( 'carts.coupons.destroy' );
         Route::post( 'carts/{cart}/merge', [ CartController::class, 'merge' ] )->name( 'carts.merge' );
+        Route::patch( 'carts/{cart}', [ CartController::class, 'update' ] )->name( 'carts.update' );
+        Route::delete( 'carts/{cart}/items', [ CartController::class, 'clear' ] )->name( 'carts.items.clear' );
+        Route::put( 'carts/{cart}/shipping-rate', [ CartController::class, 'selectShippingRate' ] )->name( 'carts.shipping-rate.update' );
     } );
 
     Route::post( 'carts/{cart}/coupons', [ CartController::class, 'applyCoupon' ] )

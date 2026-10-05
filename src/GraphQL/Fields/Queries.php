@@ -47,6 +47,7 @@ use ArtisanPackUI\Ecommerce\Registries\SubStatusRegistry;
 use ArtisanPackUI\Ecommerce\Services\CheckoutService;
 use ArtisanPackUI\Ecommerce\Services\NotificationTemplateService;
 use ArtisanPackUI\Ecommerce\Services\StorefrontCartService;
+use ArtisanPackUI\Ecommerce\ValueObjects\Address;
 use ArtisanPackUI\Ecommerce\ValueObjects\ShippingRate;
 use GraphQL\Type\Definition\ResolveInfo;
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -198,6 +199,29 @@ class Queries
                     }
 
                     return $this->r->present( $cart, 'Cart', $this->r->selection( $info ) );
+                },
+            ],
+
+            // A shipping estimate for a cart before checkout.
+            'cartShippingRates' => [
+                'type'    => 'JSON',
+                'args'    => [ 'token' => 'String!', 'country_code' => 'String!', 'region_code' => 'String', 'postal_code' => 'String' ],
+                'resolve' => function ( $root, array $args ): ?array {
+                    $this->r->throttle( 'ecommerce.cart.mutate', [ 'cart_token' => $args['token'] ] );
+
+                    $cart = Cart::query()->where( 'token', $args['token'] )->first();
+
+                    if ( null === $cart || ! $cart->isAccessibleBy( $this->r->user() ) || 1 !== preg_match( '/^[A-Za-z]{2}$/', (string) $args['country_code'] ) ) {
+                        return null;
+                    }
+
+                    return app( StorefrontCartService::class )->quoteShipping( $cart, new Address(
+                        address1: '',
+                        city: '',
+                        countryCode: strtoupper( (string) $args['country_code'] ),
+                        regionCode: isset( $args['region_code'] ) ? (string) $args['region_code'] : null,
+                        postalCode: isset( $args['postal_code'] ) ? (string) $args['postal_code'] : null,
+                    ) )->map( static fn ( ShippingRate $rate ): array => $rate->toArray() )->values()->all();
                 },
             ],
 

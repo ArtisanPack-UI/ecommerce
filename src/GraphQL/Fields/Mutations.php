@@ -83,7 +83,9 @@ use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductTagRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductVariantRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ReorderOrderSubstatusesRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\SelectShippingRateRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateCartItemRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateCartRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateNotificationTemplateRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\WebhookSubscriptionRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\WebhookSubscriptionResource;
@@ -180,20 +182,26 @@ class Mutations
             'MergeCartPayload'      => $output( [ 'cart' => 'Cart', 'merged' => 'Boolean!', 'pending' => 'CartMergePending' ] ),
             'CartMergePending'      => [ 'fields' => [ 'guest_currency' => 'String!', 'account_currency' => 'String!', 'resolutions' => '[String!]!' ] ],
 
-            'StartCheckoutInput'          => $input( [ 'cart_token' => 'String!' ] ),
-            'StartCheckoutPayload'        => $output( [ 'cart' => 'Cart', 'adjustments' => 'JSON' ] ),
-            'SetCheckoutAddressInput'     => $input( [ 'cart_token' => 'String!', 'email' => 'String', 'shipping_address' => 'JSON', 'billing_address' => 'JSON' ] ),
-            'SetCheckoutAddressPayload'   => $output( [ 'cart' => 'Cart', 'shipping_rates' => 'JSON' ] ),
-            'SetShippingMethodInput'      => $input( [ 'cart_token' => 'String!', 'rate_id' => 'String!' ] ),
-            'SetShippingMethodPayload'    => $output( [ 'cart' => 'Cart' ] ),
-            'SetPaymentGatewayInput'      => $input( [ 'cart_token' => 'String!', 'gateway' => 'String!' ] ),
-            'SetPaymentGatewayPayload'    => $output( [ 'cart' => 'Cart' ] ),
-            'CheckoutPaymentSession'      => [ 'fields' => [ 'reference' => 'String!', 'status' => 'String', 'amount' => 'Money!', 'client' => 'JSON' ] ],
-            'CreatePaymentSessionInput'   => $input( [ 'cart_token' => 'String!', 'return_url' => 'String' ] ),
-            'CreatePaymentSessionPayload' => $output( [ 'cart' => 'Cart', 'session' => 'CheckoutPaymentSession' ] ),
-            'PlaceOrderInput'             => $input( [ 'cart_token' => 'String!', 'payment_reference' => 'String', 'customer_note' => 'String' ] ),
-            'PlaceOrderPayload'           => $output( [ 'order' => 'Order', 'status' => 'String', 'complete' => 'Boolean', 'step_up_token' => 'String' ] ),
-            'RefundLineInput'             => [
+            'UpdateCartInput'               => $input( [ 'cart_token' => 'String!', 'email' => 'String', 'shipping_address' => 'JSON', 'billing_address' => 'JSON' ] ),
+            'UpdateCartPayload'             => $output( [ 'cart' => 'Cart' ] ),
+            'ClearCartInput'                => $input( [ 'cart_token' => 'String!' ] ),
+            'ClearCartPayload'              => $output( [ 'cart' => 'Cart' ] ),
+            'SelectCartShippingRateInput'   => $input( [ 'cart_token' => 'String!', 'rate_id' => 'String!', 'destination' => 'JSON!' ] ),
+            'SelectCartShippingRatePayload' => $output( [ 'cart' => 'Cart' ] ),
+            'StartCheckoutInput'            => $input( [ 'cart_token' => 'String!' ] ),
+            'StartCheckoutPayload'          => $output( [ 'cart' => 'Cart', 'adjustments' => 'JSON' ] ),
+            'SetCheckoutAddressInput'       => $input( [ 'cart_token' => 'String!', 'email' => 'String', 'shipping_address' => 'JSON', 'billing_address' => 'JSON' ] ),
+            'SetCheckoutAddressPayload'     => $output( [ 'cart' => 'Cart', 'shipping_rates' => 'JSON' ] ),
+            'SetShippingMethodInput'        => $input( [ 'cart_token' => 'String!', 'rate_id' => 'String!' ] ),
+            'SetShippingMethodPayload'      => $output( [ 'cart' => 'Cart' ] ),
+            'SetPaymentGatewayInput'        => $input( [ 'cart_token' => 'String!', 'gateway' => 'String!' ] ),
+            'SetPaymentGatewayPayload'      => $output( [ 'cart' => 'Cart' ] ),
+            'CheckoutPaymentSession'        => [ 'fields' => [ 'reference' => 'String!', 'status' => 'String', 'amount' => 'Money!', 'client' => 'JSON' ] ],
+            'CreatePaymentSessionInput'     => $input( [ 'cart_token' => 'String!', 'return_url' => 'String' ] ),
+            'CreatePaymentSessionPayload'   => $output( [ 'cart' => 'Cart', 'session' => 'CheckoutPaymentSession' ] ),
+            'PlaceOrderInput'               => $input( [ 'cart_token' => 'String!', 'payment_reference' => 'String', 'customer_note' => 'String' ] ),
+            'PlaceOrderPayload'             => $output( [ 'order' => 'Order', 'status' => 'String', 'complete' => 'Boolean', 'step_up_token' => 'String' ] ),
+            'RefundLineInput'               => [
                 'kind'   => 'input',
                 'fields' => [ 'order_item_id' => 'ID!', 'quantity' => 'Int!', 'amount' => 'BigInt!', 'restock' => 'Boolean' ],
             ],
@@ -422,6 +430,40 @@ class Mutations
                 }
 
                 return [ 'cart' => null === $cart ? null : $this->cart( $cart, $info ), 'merged' => null !== $cart, 'pending' => null ];
+            } ),
+
+            'updateCart' => $this->mutation( 'UpdateCart', function ( array $input, ResolveInfo $info ): array {
+                $cart = $this->findCart( $input );
+                $this->validate( $input, UpdateCartRequest::baseRules() );
+
+                $this->carts()->updateDetails( $cart, array_intersect_key( $input, array_flip( [ 'email', 'shipping_address', 'billing_address' ] ) ) );
+
+                return [ 'cart' => $this->cart( $cart, $info ) ];
+            } ),
+
+            'clearCart' => $this->mutation( 'ClearCart', function ( array $input, ResolveInfo $info ): array {
+                $cart = $this->findCart( $input );
+
+                $this->carts()->clear( $cart );
+
+                return [ 'cart' => $this->cart( $cart, $info ) ];
+            } ),
+
+            'selectCartShippingRate' => $this->mutation( 'SelectCartShippingRate', function ( array $input, ResolveInfo $info ): array {
+                $cart = $this->findCart( $input );
+                $this->validate( $input, SelectShippingRateRequest::baseRules() );
+
+                $destination = (array) $input['destination'];
+
+                $this->carts()->selectShippingMethod( $cart, new Address(
+                    address1: '',
+                    city: (string) ( $destination['city'] ?? '' ),
+                    countryCode: strtoupper( (string) $destination['country_code'] ),
+                    regionCode: isset( $destination['region_code'] ) ? (string) $destination['region_code'] : null,
+                    postalCode: isset( $destination['postal_code'] ) ? (string) $destination['postal_code'] : null,
+                ), (string) $input['rate_id'] );
+
+                return [ 'cart' => $this->cart( $cart, $info ) ];
             } ),
 
             'startCheckout' => $this->mutation( 'StartCheckout', function ( array $input, ResolveInfo $info ): array {

@@ -25,7 +25,10 @@ use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\AddCartItemRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ApplyCouponRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CreateCartRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\MergeCartRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\SelectShippingRateRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ShippingDestinationRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateCartItemRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateCartRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\CartResource;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
 use ArtisanPackUI\Ecommerce\Models\Cart;
@@ -35,8 +38,10 @@ use ArtisanPackUI\Ecommerce\Services\CartService;
 use ArtisanPackUI\Ecommerce\Services\CurrentCart;
 use ArtisanPackUI\Ecommerce\Services\CustomerService;
 use ArtisanPackUI\Ecommerce\Services\StorefrontCartService;
+use ArtisanPackUI\Ecommerce\ValueObjects\Address;
 use ArtisanPackUI\Ecommerce\ValueObjects\CartMergeResolution;
 use ArtisanPackUI\Ecommerce\ValueObjects\PendingCartMerge;
+use ArtisanPackUI\Ecommerce\ValueObjects\ShippingRate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -209,6 +214,87 @@ class CartController extends ApiController
     }
 
     /**
+     * Sets the cart's email and addresses. A changed address re-quotes a
+     * chosen shipping rate.
+     *
+     * @since 1.0.0
+     *
+     * @param  UpdateCartRequest  $request  Validated request.
+     * @param  string             $cart     Cart token.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Update a cart\'s email and addresses', resource: CartResource::class )]
+    public function update( UpdateCartRequest $request, string $cart ): JsonResponse
+    {
+        $model = $this->find( $cart );
+
+        $this->storefront->updateDetails( $model, $request->validated() );
+
+        return $this->cartResponse( $model, $request );
+    }
+
+    /**
+     * Empties the cart.
+     *
+     * @since 1.0.0
+     *
+     * @param  Request  $request  Request.
+     * @param  string   $cart     Cart token.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Remove every item from a cart', resource: CartResource::class )]
+    public function clear( Request $request, string $cart ): JsonResponse
+    {
+        $model = $this->find( $cart );
+
+        $this->storefront->clear( $model );
+
+        return $this->cartResponse( $model, $request );
+    }
+
+    /**
+     * Shipping rates on offer for the cart and a destination — an estimate
+     * before checkout (a country is enough).
+     *
+     * @since 1.0.0
+     *
+     * @param  ShippingDestinationRequest  $request  Validated request.
+     * @param  string                      $cart     Cart token.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Quote shipping rates for a cart' )]
+    public function shippingRates( ShippingDestinationRequest $request, string $cart ): JsonResponse
+    {
+        $rates = $this->storefront->quoteShipping( $this->find( $cart ), self::destination( $request->validated() ) );
+
+        return new JsonResponse( [ 'data' => $rates->map( static fn ( ShippingRate $rate ): array => $rate->toArray() )->values()->all() ] );
+    }
+
+    /**
+     * Chooses one of the quoted rates (re-quoted server-side for the
+     * destination).
+     *
+     * @since 1.0.0
+     *
+     * @param  SelectShippingRateRequest  $request  Validated request.
+     * @param  string                     $cart     Cart token.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Choose a shipping rate for a cart', resource: CartResource::class )]
+    public function selectShippingRate( SelectShippingRateRequest $request, string $cart ): JsonResponse
+    {
+        $model = $this->find( $cart );
+
+        $this->storefront->selectShippingMethod( $model, self::destination( (array) $request->validated( 'destination' ) ), (string) $request->validated( 'rate_id' ) );
+
+        return $this->cartResponse( $model, $request );
+    }
+
+    /**
      * Merges the guest cart `{cart}` into the signed-in shopper's cart
      * (parent plan §7.1), or attaches it to their account when they have no
      * cart yet. Answers 409 `cart-currency-mismatch` (with the currencies
@@ -250,6 +336,26 @@ class CartController extends ApiController
         abort_if( null === $result, 404 );
 
         return $this->cartResponse( $result, $request );
+    }
+
+    /**
+     * A destination for a shipping quote.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<string, mixed>  $data  Destination fields.
+     *
+     * @return Address
+     */
+    protected static function destination( array $data ): Address
+    {
+        return new Address(
+            address1: '',
+            city: (string) ( $data['city'] ?? '' ),
+            countryCode: strtoupper( (string) $data['country_code'] ),
+            regionCode: isset( $data['region_code'] ) ? (string) $data['region_code'] : null,
+            postalCode: isset( $data['postal_code'] ) ? (string) $data['postal_code'] : null,
+        );
     }
 
     /**
