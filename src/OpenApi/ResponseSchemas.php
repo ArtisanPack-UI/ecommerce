@@ -93,6 +93,21 @@ final class ResponseSchemas
                 'is_enabled' => [ 'type' => 'boolean' ],
                 'is_locked'  => [ 'type' => 'boolean' ],
             ], [ 'channel', 'category', 'is_enabled', 'is_locked' ] ) ),
+            'productsPurchaseOptions'           => self::object( [
+                'product_id' => [ 'type' => 'integer' ],
+                'currency'   => self::string(),
+                'price'      => [ 'oneOf' => [ self::displayPrice(), [ 'type' => 'null' ] ] ],
+                'stock'      => self::stockStatus(),
+                'variants'   => self::listOf( self::object( [
+                    'variant_id'          => [ 'type' => 'integer' ],
+                    'sku'                 => [ 'type' => [ 'string', 'null' ] ],
+                    'attribute_value_ids' => self::listOf( [ 'type' => 'integer' ] ),
+                    'available'           => [ 'type' => 'boolean' ],
+                    'stock'               => self::stockStatus(),
+                    'price'               => [ 'oneOf' => [ self::displayPrice(), [ 'type' => 'null' ] ] ],
+                    'image_media_id'      => [ 'type' => [ 'integer', 'null' ] ],
+                ], [ 'variant_id', 'attribute_value_ids', 'available', 'stock' ] ) ),
+            ], [ 'product_id', 'currency', 'stock', 'variants' ] ),
             'tagsIndex'                         => self::listOf( self::object( [ 'id' => [ 'type' => 'integer' ], 'name' => self::string(), 'slug' => self::string(), 'products_count' => [ 'type' => 'integer' ] ], [ 'id', 'name', 'slug', 'products_count' ] ) ),
             'webhooks'                          => null,
             default                             => null,
@@ -196,6 +211,48 @@ final class ResponseSchemas
             'service'            => [ 'type' => [ 'string', 'null' ] ],
             'meta'               => self::open(),
         ], [ 'id', 'label', 'amount', 'currency' ] );
+    }
+
+    /**
+     * A {@see \ArtisanPackUI\Ecommerce\Pricing\DisplayPrice}.
+     *
+     * @since 1.0.0
+     *
+     * @return array<string, mixed>
+     */
+    private static function displayPrice(): array
+    {
+        $money    = self::object( [ 'amount' => [ 'type' => 'integer' ], 'currency' => self::string() ], [ 'amount', 'currency' ] );
+        $nullable = [ 'oneOf' => [ $money, [ 'type' => 'null' ] ] ];
+
+        return self::object( [
+            'price'               => $money,
+            'compare_at'          => $nullable,
+            'on_sale'             => [ 'type' => 'boolean' ],
+            'is_range'            => [ 'type' => 'boolean' ],
+            'min_price'           => $nullable,
+            'max_price'           => $nullable,
+            'price_including_tax' => $money,
+            'price_excluding_tax' => $money,
+            'prices_include_tax'  => [ 'type' => 'boolean' ],
+            'tax_label'           => [ 'type' => [ 'string', 'null' ] ],
+        ], [ 'price', 'on_sale', 'price_including_tax', 'price_excluding_tax', 'prices_include_tax' ] );
+    }
+
+    /**
+     * A {@see \ArtisanPackUI\Ecommerce\Inventory\StockStatus}.
+     *
+     * @since 1.0.0
+     *
+     * @return array<string, mixed>
+     */
+    private static function stockStatus(): array
+    {
+        return self::object( [
+            'status'      => [ 'type' => 'string', 'enum' => [ 'in_stock', 'low_stock', 'backorder', 'out_of_stock' ] ],
+            'purchasable' => [ 'type' => 'boolean' ],
+            'quantity'    => [ 'type' => [ 'integer', 'null' ] ],
+        ], [ 'status', 'purchasable', 'quantity' ] );
     }
 
     /**

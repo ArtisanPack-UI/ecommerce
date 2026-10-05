@@ -20,13 +20,19 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
 use ArtisanPackUI\Ecommerce\Catalog\CatalogQuery;
+use ArtisanPackUI\Ecommerce\Catalog\VariantResolver;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\PurchaseOptionsRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\ProductResource;
 use ArtisanPackUI\Ecommerce\Http\Resources\ProductVariantResource;
 use ArtisanPackUI\Ecommerce\Http\Support\ListQuery;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
+use ArtisanPackUI\Ecommerce\Inventory\StockStatus;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use ArtisanPackUI\Ecommerce\OpenApi\CatalogParameters;
+use ArtisanPackUI\Ecommerce\Pricing\PriceDisplayResolver;
+use ArtisanPackUI\Ecommerce\Services\StoreCurrencies;
+use ArtisanPackUI\Ecommerce\ValueObjects\Address;
 use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -219,6 +225,40 @@ class ProductController extends ApiController
             [ 'prices' => [ 'prices', static fn ( $query ) => $query->currentAt( Carbon::now() ) ] ],
             'position',
         );
+    }
+
+    /**
+     * What a product page needs to sell `$product` (#172): its display
+     * price (with tax at the destination, default the store's country),
+     * its stock status, and, for variable products, every variant with
+     * its attribute values, availability, price, and image.
+     *
+     * @since 1.0.0
+     *
+     * @param  PurchaseOptionsRequest  $request  Validated request.
+     * @param  int                     $product  Product id.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Get a product\'s price, stock, and variant options' )]
+    public function purchaseOptions( PurchaseOptionsRequest $request, int $product ): JsonResponse
+    {
+        $model       = $this->visible()->findOrFail( $product );
+        $currency    = strtoupper( (string) ( $request->validated( 'currency' ) ?? app( StoreCurrencies::class )->base() ) );
+        $country     = $request->validated( 'country_code' );
+        $destination = null === $country ? null : Address::fromArray( [
+            'country_code' => $country,
+            'region_code'  => $request->validated( 'region_code' ),
+            'postal_code'  => $request->validated( 'postal_code' ),
+        ] );
+
+        return new JsonResponse( [ 'data' => [
+            'product_id' => (int) $model->id,
+            'currency'   => $currency,
+            'price'      => app( PriceDisplayResolver::class )->for( $model, $currency, $destination )?->toArray(),
+            'stock'      => StockStatus::for( $model )->toArray(),
+            'variants'   => app( VariantResolver::class )->matrix( $model, $currency ),
+        ] ] );
     }
 
     /**

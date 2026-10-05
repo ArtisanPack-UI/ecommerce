@@ -97,6 +97,7 @@ Route::middleware( [ 'ecommerce.rate-limit:ecommerce.catalog.read', 'ecommerce.c
     Route::get( 'products', [ ProductController::class, 'index' ] )->name( 'products.index' );
     Route::get( 'products/{product}', [ ProductController::class, 'show' ] )->whereNumber( 'product' )->name( 'products.show' );
     Route::get( 'products/{product}/variants', [ ProductController::class, 'variants' ] )->whereNumber( 'product' )->name( 'products.variants' );
+    Route::get( 'products/{product}/purchase-options', [ ProductController::class, 'purchaseOptions' ] )->whereNumber( 'product' )->name( 'products.purchase-options' );
     Route::get( 'products/{product}/reviews', [ ProductReviewController::class, 'index' ] )->whereNumber( 'product' )->name( 'products.reviews.index' );
     Route::get( 'search', [ SearchController::class, 'index' ] )->name( 'search' );
     Route::get( 'categories', [ CatalogController::class, 'categories' ] )->name( 'categories.index' );

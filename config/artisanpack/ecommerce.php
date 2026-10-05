@@ -1002,6 +1002,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Inventory
+    |--------------------------------------------------------------------------
+    |
+    | `show_quantity` — Report how many units are left in storefront stock
+    |                   status (`purchase-options`, `StockStatus`). Off by
+    |                   default: shoppers see in stock / low / backorder /
+    |                   out of stock only.
+    |
+    */
+
+    'inventory' => [
+        'show_quantity' => (bool) env( 'ECOMMERCE_INVENTORY_SHOW_QUANTITY', false ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Schedule
     |--------------------------------------------------------------------------
     |
