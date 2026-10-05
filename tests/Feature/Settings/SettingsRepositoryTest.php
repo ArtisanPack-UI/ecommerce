@@ -120,7 +120,7 @@ it( 'validates values against the definition and the type', function ( string $g
         $this->fail( 'Expected a validation failure.' );
     } catch ( SettingsWriteException $exception ) {
         expect( $exception->errors[0]['field'] )->toBe( $key )
-            ->and( $exception->errors[0]['code'] )->toBe( 'invalid' )
+            ->and( $exception->errors[0]['code'] )->toMatch( '/^[a-z][a-z-]*$/' )
             ->and( $exception->messagesByField() )->toHaveKey( $key );
     }
 

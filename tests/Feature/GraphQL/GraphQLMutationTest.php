@@ -67,7 +67,7 @@ it( 'returns expected cart failures as user errors', function (): void {
 
     gql( $this, ADD_TO_CART, [ 'input' => [ 'cart_token' => $cart->token, 'product_id' => 1, 'quantity' => 0 ] ] )
         ->assertJsonPath( 'data.addToCart.errors.0.field', 'quantity' )
-        ->assertJsonPath( 'data.addToCart.errors.0.code', 'invalid' );
+        ->assertJsonPath( 'data.addToCart.errors.0.code', 'min' );
 
     gql( $this, ADD_TO_CART, [ 'input' => [ 'cart_token' => 'missing', 'product_id' => 1, 'quantity' => 1 ] ] )
         ->assertJsonPath( 'errors.0.extensions.code', 'NOT_FOUND' );

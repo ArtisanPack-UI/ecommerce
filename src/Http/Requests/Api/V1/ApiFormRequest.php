@@ -22,6 +22,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
 
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
+use ArtisanPackUI\Ecommerce\Http\Support\ValidationErrors;
 use ArtisanPackUI\Ecommerce\Registries\AbstractContractRegistry;
 use ArtisanPackUI\Ecommerce\Support\ConfigSchema;
 use Illuminate\Contracts\Validation\Validator;
@@ -178,13 +179,7 @@ abstract class ApiFormRequest extends FormRequest
      */
     protected function failedValidation( Validator $validator ): void
     {
-        $errors = [];
-
-        foreach ( $validator->errors()->messages() as $field => $messages ) {
-            foreach ( $messages as $message ) {
-                $errors[] = [ 'field' => (string) $field, 'code' => 'invalid', 'message' => $message ];
-            }
-        }
+        $errors = ValidationErrors::from( $validator );
 
         throw new HttpResponseException( Problem::make(
             422,

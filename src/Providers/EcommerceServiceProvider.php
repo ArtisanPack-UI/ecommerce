@@ -213,17 +213,20 @@ use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Contracts\Translation\Loader;
 use Illuminate\Database\Events\MigrationsEnded;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Validation\ValidationException;
 use Rebing\GraphQL\GraphQL as RebingGraphQL;
 use Rebing\GraphQL\Support\ExecutionMiddleware\AddAuthUserContextValueMiddleware;
 use Rebing\GraphQL\Support\ExecutionMiddleware\AutomaticPersistedQueriesMiddleware;
 use Rebing\GraphQL\Support\ExecutionMiddleware\ValidateOperationParamsMiddleware;
 use Stripe\StripeClient;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Throwable;
 
 /**
@@ -1329,6 +1332,43 @@ class EcommerceServiceProvider extends ServiceProvider
                         [ 'field' => $e->field, 'code' => $e->errorCode, 'message' => $e->getMessage() ],
                     ] )
                     : null;
+            } );
+
+            // Everything else on the API is problem+json too (audit F5): HTTP
+            // errors keep their status (a missing model is a plain 404 that
+            // never names a class), and an unexpected error is a 500 with no
+            // details unless app.debug is on. Registered last, so the
+            // handlers above win.
+            $apiPrefix = trim( (string) $config->get( 'artisanpack.ecommerce.api_prefix', 'api/ecommerce' ), '/' );
+
+            $handler->renderable( static function ( Throwable $e, $request ) use ( $apiPrefix ) {
+                if ( ! $request->routeIs( 'ecommerce.api.*' ) && ! $request->is( $apiPrefix . '/*' ) ) {
+                    return null;
+                }
+
+                if ( $e instanceof HttpResponseException || $e instanceof ValidationException || $e instanceof AuthenticationException ) {
+                    return null;
+                }
+
+                if ( $e instanceof HttpExceptionInterface ) {
+                    $status = $e->getStatusCode();
+
+                    [ $slug, $title, $detail ] = match ( $status ) {
+                        404     => [ 'not-found', __( 'Not found' ), __( 'The requested resource does not exist.' ) ],
+                        405     => [ 'method-not-allowed', __( 'Method not allowed' ), __( 'This endpoint does not support that HTTP method.' ) ],
+                        403     => [ 'forbidden', __( 'Forbidden' ), __( 'You are not allowed to do that.' ) ],
+                        429     => [ 'too-many-requests', __( 'Too many requests' ), __( 'Too many requests. Try again later.' ) ],
+                        default => [ 'http-' . $status, __( 'Request failed' ), null ],
+                    };
+
+                    return Problem::make( $status, $slug, $title, $detail, $request )->withHeaders( $e->getHeaders() );
+                }
+
+                if ( (bool) config( 'app.debug' ) ) {
+                    return null;
+                }
+
+                return Problem::make( 500, 'server-error', __( 'Server error' ), __( 'Something went wrong on our end.' ), $request );
             } );
         }
 

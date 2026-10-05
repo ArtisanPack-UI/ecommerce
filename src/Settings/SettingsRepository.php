@@ -42,6 +42,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Settings;
 
 use ArtisanPackUI\Ecommerce\Exceptions\SettingsWriteException;
+use ArtisanPackUI\Ecommerce\Http\Support\ValidationErrors;
 use ArtisanPackUI\Ecommerce\Models\EcommerceSetting;
 use ArtisanPackUI\Ecommerce\Registries\SettingsRegistry;
 use Closure;
@@ -579,8 +580,8 @@ class SettingsRepository
             );
 
             if ( $validator->fails() ) {
-                foreach ( $validator->errors()->all() as $message ) {
-                    $errors[] = [ 'field' => (string) $key, 'code' => 'invalid', 'message' => $message ];
+                foreach ( ValidationErrors::from( $validator ) as $error ) {
+                    $errors[] = [ ...$error, 'field' => (string) $key ];
                 }
 
                 continue;

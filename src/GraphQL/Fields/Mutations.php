@@ -89,6 +89,7 @@ use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateCartRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateNotificationTemplateRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\WebhookSubscriptionRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\WebhookSubscriptionResource;
+use ArtisanPackUI\Ecommerce\Http\Support\ValidationErrors;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
 use ArtisanPackUI\Ecommerce\Models\InventoryItem;
@@ -986,15 +987,7 @@ class Mutations
      */
     protected function validationErrors( ValidationException $exception ): array
     {
-        $errors = [];
-
-        foreach ( $exception->errors() as $field => $messages ) {
-            foreach ( $messages as $message ) {
-                $errors[] = [ 'field' => (string) $field, 'code' => 'invalid', 'message' => $message ];
-            }
-        }
-
-        return $errors;
+        return ValidationErrors::from( $exception->validator );
     }
 
     /**
