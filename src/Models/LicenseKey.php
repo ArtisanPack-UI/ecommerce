@@ -1,0 +1,267 @@
+<?php
+
+/**
+ * LicenseKey model.
+ *
+ * A software license key issued for an {@see OrderItem}. A key is valid
+ * while it is not revoked and not expired; each distinct machine
+ * fingerprint that validates it records a {@see LicenseActivation}, up to
+ * `activations_limit` (null = unlimited). Engine spec §3.27.
+ *
+ * @package    ArtisanPack_UI
+ * @subpackage Ecommerce
+ *
+ * @author     Jacob Martella <me@jacobmartella.com>
+ *
+ * @since      1.0.0
+ */
+
+declare( strict_types=1 );
+
+namespace ArtisanPackUI\Ecommerce\Models;
+
+use ArtisanPackUI\Ecommerce\Database\Factories\LicenseKeyFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
+
+/**
+ * LicenseKey Eloquent model.
+ *
+ * @package    ArtisanPack_UI
+ * @subpackage Ecommerce
+ *
+ * @since      1.0.0
+ *
+ * @property int                                                                   $id
+ * @property int                                                                   $order_item_id
+ * @property int|null                                                              $digital_file_id
+ * @property string                                                                $key
+ * @property string                                                                $key_hash
+ * @property int|null                                                              $activations_limit
+ * @property int                                                                   $activations_count
+ * @property Carbon|null                                                           $expires_at
+ * @property bool                                                                  $is_revoked
+ * @property Carbon|null                                                           $revoked_at
+ * @property array<string, mixed>                                                  $meta
+ * @property Carbon|null                                                           $created_at
+ * @property Carbon|null                                                           $updated_at
+ * @property OrderItem                                                             $orderItem
+ * @property DigitalFile|null                                                      $file
+ * @property \Illuminate\Database\Eloquent\Collection<int, LicenseActivation>      $activations
+ */
+class LicenseKey extends Model
+{
+    use HasFactory;
+
+    /**
+     * @since 1.0.0
+     *
+     * @var string
+     */
+    protected $table = 'ecommerce_license_keys';
+
+    /**
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    protected $fillable = [
+        'order_item_id',
+        'digital_file_id',
+        'key',
+        'activations_limit',
+        'activations_count',
+        'expires_at',
+        'is_revoked',
+        'revoked_at',
+        'meta',
+    ];
+
+    /**
+     * The key is visible only through the attribute, never as raw hash.
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    protected $hidden = [
+        'key_hash',
+    ];
+
+    /**
+     * @since 1.0.0
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'activations_count' => 0,
+        'is_revoked'        => false,
+        'meta'              => '{}',
+    ];
+
+    /**
+     * Normalizes a key as typed by a customer: trimmed and upper-cased.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $key  Key.
+     *
+     * @return string
+     */
+    public static function normalize( string $key ): string
+    {
+        return strtoupper( trim( $key ) );
+    }
+
+    /**
+     * The `key_hash` of `$key` under the current app key: HMAC-SHA256 of
+     * the normalized key.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $key  Key, as typed or stored.
+     *
+     * @return string
+     */
+    public static function hashFor( string $key ): string
+    {
+        return self::hashUsing( $key, (string) config( 'app.key' ) );
+    }
+
+    /**
+     * Every `key_hash` `$key` may be stored under: the current app key's
+     * first, then each of `app.previous_keys`, so keys hashed before an app
+     * key rotation still validate.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $key  Key, as typed.
+     *
+     * @return array<int, string>
+     */
+    public static function hashCandidates( string $key ): array
+    {
+        $secrets = array_merge( [ (string) config( 'app.key' ) ], array_map( 'strval', (array) config( 'app.previous_keys', [] ) ) );
+
+        return array_values( array_unique( array_map( static fn ( string $secret ): string => self::hashUsing( $key, $secret ), array_filter( $secrets, static fn ( string $secret ): bool => '' !== $secret ) ) ) );
+    }
+
+    /**
+     * @since 1.0.0
+     *
+     * @return BelongsTo<OrderItem, $this>
+     */
+    public function orderItem(): BelongsTo
+    {
+        return $this->belongsTo( OrderItem::class );
+    }
+
+    /**
+     * @since 1.0.0
+     *
+     * @return BelongsTo<DigitalFile, $this>
+     */
+    public function file(): BelongsTo
+    {
+        return $this->belongsTo( DigitalFile::class, 'digital_file_id' );
+    }
+
+    /**
+     * @since 1.0.0
+     *
+     * @return HasMany<LicenseActivation, $this>
+     */
+    public function activations(): HasMany
+    {
+        return $this->hasMany( LicenseActivation::class );
+    }
+
+    /**
+     * Whether the key has passed its expiry.
+     *
+     * @since 1.0.0
+     *
+     * @return bool
+     */
+    public function isExpired(): bool
+    {
+        return null !== $this->expires_at && $this->expires_at->isPast();
+    }
+
+    /**
+     * Whether another machine may be activated.
+     *
+     * @since 1.0.0
+     *
+     * @return bool
+     */
+    public function hasActivationsRemaining(): bool
+    {
+        return null === $this->activations_limit || $this->activations_count < $this->activations_limit;
+    }
+
+    /**
+     * HMAC-SHA256 of the normalized key under `$secret`.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $key     Key.
+     * @param  string  $secret  App key.
+     *
+     * @return string
+     */
+    protected static function hashUsing( string $key, string $secret ): string
+    {
+        return hash_hmac( 'sha256', self::normalize( $key ), $secret );
+    }
+
+    /**
+     * Normalizes the key and keeps `key_hash` in step with it.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected static function booted(): void
+    {
+        static::saving( static function ( LicenseKey $license ): void {
+            if ( $license->isDirty( 'key' ) || null === ( $license->getAttributes()['key_hash'] ?? null ) ) {
+                $license->key      = self::normalize( (string) $license->key );
+                $license->key_hash = self::hashFor( (string) $license->key );
+            }
+        } );
+    }
+
+    /**
+     * @since 1.0.0
+     *
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'order_item_id'     => 'integer',
+            'digital_file_id'   => 'integer',
+            'key'               => 'encrypted',
+            'activations_limit' => 'integer',
+            'activations_count' => 'integer',
+            'expires_at'        => 'datetime',
+            'is_revoked'        => 'boolean',
+            'revoked_at'        => 'datetime',
+            'meta'              => 'array',
+        ];
+    }
+
+    /**
+     * @since 1.0.0
+     *
+     * @return LicenseKeyFactory
+     */
+    protected static function newFactory(): LicenseKeyFactory
+    {
+        return LicenseKeyFactory::new();
+    }
+}

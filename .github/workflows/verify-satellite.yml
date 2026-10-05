@@ -1,0 +1,183 @@
+# Reusable satellite contract-verification workflow (parent plan §15.2).
+#
+# Satellites call this from their own repository; it is `workflow_call`
+# only, so it never runs on the engine's own pushes. Copy
+# `stubs/workflows/verify-satellite.yml` into a satellite as the caller.
+#
+# Two jobs, so the signing key never shares a runner with satellite code:
+#
+# 1. `verify` runs `ecommerce-verify-satellite` (the satellite's code, its
+#    dependencies, and their Composer plugins) with no secrets, and uploads
+#    `.ecommerce-verify-report.json` as the `ecommerce-verify-report`
+#    artifact.
+# 2. `sign` (tag refs only, when `ECOMMERCE_VERIFY_SIGNING_KEY` is passed)
+#    runs on a fresh runner. It downloads only that artifact, checks out the
+#    engine at the exact commit of this workflow file (no `composer
+#    install`), signs with the engine's dependency-free `bin/ecommerce-sign-report`,
+#    and uploads the report plus `verify-report.sig` as the
+#    `ecommerce-verify-signature` artifact.
+#
+# This workflow never creates or edits a GitHub release: under immutable
+# releases a release created here would lock before the satellite's own
+# release step could attach its assets. The satellite's release job
+# downloads `ecommerce-verify-signature` and attaches both files through its
+# own release step's `files:` (see the stub).
+name: Verify satellite
+
+on:
+  workflow_call:
+    inputs:
+      php-version:
+        description: PHP version to run the contract suites on.
+        type: string
+        default: '8.4'
+      php-extensions:
+        description: PHP extensions to install (intl and sodium are always added).
+        type: string
+        default: 'dom, curl, libxml, mbstring, zip, pdo, sqlite, pdo_sqlite'
+      working-directory:
+        description: Satellite root, relative to the repository root.
+        type: string
+        default: '.'
+      extra-args:
+        description: Extra arguments passed to ecommerce-verify-satellite (e.g. --allow-empty).
+        type: string
+        default: ''
+      upload-release-assets:
+        description: Deprecated and ignored. Attach the `ecommerce-verify-signature` artifact from your own release step instead.
+        type: boolean
+        default: false
+    secrets:
+      ECOMMERCE_VERIFY_SIGNING_KEY:
+        description: Base64 Ed25519 secret key used to sign the report on tagged releases.
+        required: false
+    outputs:
+      signed:
+        description: Whether a signature was produced (the `ecommerce-verify-signature` artifact exists).
+        value: ${{ jobs.sign.outputs.signed }}
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    name: Contract verification
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: ${{ inputs.php-version }}
+          extensions: ${{ inputs.php-extensions }}, intl, sodium
+          coverage: none
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-php${{ inputs.php-version }}-verify-${{ hashFiles('**/composer.json', '**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-php${{ inputs.php-version }}-verify-
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Verify contracts
+        env:
+          EXTRA_ARGS: ${{ inputs.extra-args }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          # shellcheck disable=SC2086
+          vendor/bin/ecommerce-verify-satellite --package-version="$REF_NAME" $EXTRA_ARGS
+
+      - name: Note the ignored input
+        if: ${{ inputs.upload-release-assets }}
+        run: echo "::warning::upload-release-assets is ignored. Attach the ecommerce-verify-signature artifact from your own release step."
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecommerce-verify-report
+          path: ${{ inputs.working-directory }}/.ecommerce-verify-report.json
+          include-hidden-files: true
+          if-no-files-found: ignore
+
+  sign:
+    needs: verify
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    name: Sign report
+    permissions:
+      contents: read
+    outputs:
+      signed: ${{ steps.sign.outputs.signed }}
+
+    steps:
+      - name: Download the report
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecommerce-verify-report
+          path: report
+
+      # The engine's signer, from the same commit as this workflow file. No
+      # Composer install: nothing but the engine's ReportSigner is loaded.
+      - name: Check out the engine signer
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ArtisanPack-UI/ecommerce
+          ref: ${{ github.job_workflow_sha }}
+          path: engine
+          persist-credentials: false
+          sparse-checkout: |
+            bin/ecommerce-sign-report
+            src/Testing/Verification/ReportSigner.php
+          sparse-checkout-cone-mode: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.4'
+          extensions: sodium
+          coverage: none
+          tools: none
+
+      - name: Sign
+        id: sign
+        env:
+          ECOMMERCE_VERIFY_SIGNING_KEY: ${{ secrets.ECOMMERCE_VERIFY_SIGNING_KEY }}
+        run: |
+          if [ -z "$ECOMMERCE_VERIFY_SIGNING_KEY" ]; then
+            echo "::notice::No ECOMMERCE_VERIFY_SIGNING_KEY was passed; the report stays unsigned."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          php engine/bin/ecommerce-sign-report report/.ecommerce-verify-report.json report/verify-report.sig
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload signed report
+        if: ${{ steps.sign.outputs.signed == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ecommerce-verify-signature
+          path: |
+            report/.ecommerce-verify-report.json
+            report/verify-report.sig
+          include-hidden-files: true
+          if-no-files-found: error

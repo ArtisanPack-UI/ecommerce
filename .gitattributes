@@ -1,12 +1,20 @@
-# Ignore all test and documentation with "export-ignore".
+# Keep development-only files out of the Composer dist ("export-ignore").
+#
+# src/ is shipped whole: src/Testing/Contracts/*ContractTest.php are the
+# satellite contract test kit, not the engine's own tests, so no src/
+# pattern may match them. bin/, src/Demo, src/Testing, stubs/, lang/,
+# database/, routes/, and config/ all ship.
 
-/.gitlab export-ignore
-/.gitignore         export-ignore
-/tests              export-ignore
-/.idea export-ignore
-/src/**/Tests       export-ignore
-/src/**/*Test.php   export-ignore
-/src/**/Test.php    export-ignore
-/phpunit.xml   export-ignore
-/.gitlab-ci.yml export-ignore
-/docs export-ignore
+/.github                export-ignore
+/.gitattributes         export-ignore
+/.gitignore             export-ignore
+/.idea                  export-ignore
+/.coderabbit.yaml       export-ignore
+/.php-cs-fixer.dist.php export-ignore
+/phpcs.xml              export-ignore
+/phpunit.xml            export-ignore
+/testbench.yaml         export-ignore
+/CONTRIBUTING.md        export-ignore
+/package-lock.json      export-ignore
+/tests                  export-ignore
+/docs                   export-ignore

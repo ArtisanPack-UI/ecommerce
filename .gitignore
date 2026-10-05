@@ -1,2 +1,9 @@
 vendor/
+node_modules/
 .idea/
+composer.lock
+package-lock.json
+.php-cs-fixer.cache
+.phpunit.result.cache
+.phpunit.cache/
+build/

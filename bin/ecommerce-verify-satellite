@@ -1,0 +1,56 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * ecommerce-verify-satellite
+ *
+ * Composer bin entry point for satellite authors. Runs
+ * `ecommerce:verify-satellite` through the satellite's Orchestra Testbench
+ * so the satellite's own `testbench.yaml` providers are booted, passing
+ * every CLI argument through. Add to a satellite's composer.json:
+ *
+ *     "scripts": { "ecommerce:verify-satellite": "ecommerce-verify-satellite" }
+ *
+ * Parent plan §15.2.
+ *
+ * @package    ArtisanPack_UI
+ * @subpackage Ecommerce
+ *
+ * @since      1.0.0
+ */
+
+declare( strict_types=1 );
+
+$cwd       = getcwd();
+$testbench = $cwd . '/vendor/bin/testbench';
+
+if ( ! is_file( $testbench ) ) {
+    fwrite( STDERR, "ecommerce-verify-satellite: vendor/bin/testbench not found in {$cwd}. Require orchestra/testbench as a dev dependency.\n" );
+    exit( 1 );
+}
+
+$arguments = array_merge(
+    [ PHP_BINARY, $testbench, 'ecommerce:verify-satellite' ],
+    array_slice( $argv, 1 ),
+);
+
+$hasPath = false;
+
+foreach ( $arguments as $argument ) {
+    if ( str_starts_with( (string) $argument, '--path' ) ) {
+        $hasPath = true;
+    }
+}
+
+if ( ! $hasPath ) {
+    $arguments[] = '--path=' . $cwd;
+}
+
+$process = proc_open( $arguments, [ STDIN, STDOUT, STDERR ], $pipes, $cwd );
+
+if ( ! is_resource( $process ) ) {
+    fwrite( STDERR, "ecommerce-verify-satellite: could not start Testbench.\n" );
+    exit( 1 );
+}
+
+exit( proc_close( $process ) );

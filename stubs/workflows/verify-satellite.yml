@@ -1,0 +1,53 @@
+# Copy to `.github/workflows/verify-satellite.yml` in your satellite.
+#
+# Runs the engine's contract suites against this satellite on every pull
+# request. On a tag it also signs the report and attaches the report and
+# its signature to the release, so the docs site can show the
+# "contract-verified" badge. See docs/satellite-verification.md in
+# artisanpack-ui/ecommerce.
+#
+# The engine workflow never touches GitHub releases (they are immutable
+# once published). This file's `release` job creates the release once, with
+# both files attached. If you already have a release workflow, move that
+# job's two steps into it and make it `needs: verify`.
+name: Verify satellite
+
+on:
+  pull_request:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    # Pinned to an engine release tag on purpose: this job hands the workflow
+    # your signing key, so never point it at a moving branch like @main.
+    # Bump the tag (or pin a commit SHA) when you target a newer engine.
+    uses: ArtisanPack-UI/ecommerce/.github/workflows/verify-satellite.yml@v1.0.0
+    permissions:
+      contents: read
+    with:
+      php-version: '8.4'
+    secrets:
+      ECOMMERCE_VERIFY_SIGNING_KEY: ${{ secrets.ECOMMERCE_VERIFY_SIGNING_KEY }}
+
+  release:
+    needs: verify
+    if: ${{ startsWith(github.ref, 'refs/tags/') && needs.verify.outputs.signed == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ecommerce-verify-signature
+          path: verification
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            verification/.ecommerce-verify-report.json
+            verification/verify-report.sig

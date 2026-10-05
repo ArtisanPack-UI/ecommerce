@@ -1,0 +1,83 @@
+<?php
+
+/**
+ * Creates the `ecommerce_cart_items` table (engine spec §3.14).
+ *
+ * @package    ArtisanPack_UI
+ * @subpackage Ecommerce
+ *
+ * @author     Jacob Martella <me@jacobmartella.com>
+ *
+ * @since      1.0.0
+ */
+
+declare( strict_types=1 );
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration {
+    /**
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function up(): void
+    {
+        Schema::create( 'ecommerce_cart_items', function ( Blueprint $table ): void {
+            $table->bigIncrements( 'id' );
+            $table->unsignedBigInteger( 'cart_id' );
+            $table->unsignedBigInteger( 'product_id' );
+            $table->unsignedBigInteger( 'product_variant_id' )->nullable();
+            $table->unsignedInteger( 'quantity' );
+            $table->bigInteger( 'unit_price_amount' );
+            $table->char( 'unit_price_currency', 3 );
+            $table->bigInteger( 'line_subtotal_amount' );
+            $table->char( 'line_subtotal_currency', 3 );
+            $table->bigInteger( 'line_total_amount' );
+            $table->char( 'line_total_currency', 3 );
+            // The line's share of the cart discount and its tax, written by
+            // the cart totals refresh and carried onto the order line.
+            $table->bigInteger( 'discount_amount' )->default( 0 );
+            $table->bigInteger( 'tax_amount' )->default( 0 );
+            $table->json( 'options' )->nullable();
+            $table->json( 'meta' )->nullable();
+            $table->char( 'options_hash', 64 );
+            $table->timestamps();
+
+            $table->index( 'cart_id', 'ecommerce_cart_items_cart_idx' );
+            $table->index(
+                [ 'cart_id', 'product_id', 'product_variant_id', 'options_hash' ],
+                'ecommerce_cart_items_dedupe_idx',
+            );
+            $table->index( 'product_id', 'ecommerce_cart_items_product_idx' );
+            $table->index( 'product_variant_id', 'ecommerce_cart_items_product_variant_idx' );
+
+            $table->foreign( 'cart_id', 'ecommerce_cart_items_cart_fk' )
+                ->references( 'id' )
+                ->on( 'ecommerce_carts' )
+                ->cascadeOnDelete();
+
+            $table->foreign( 'product_id', 'ecommerce_cart_items_product_fk' )
+                ->references( 'id' )
+                ->on( 'ecommerce_products' )
+                ->restrictOnDelete();
+
+            $table->foreign( 'product_variant_id', 'ecommerce_cart_items_variant_fk' )
+                ->references( 'id' )
+                ->on( 'ecommerce_product_variants' )
+                ->restrictOnDelete();
+        } );
+    }
+
+    /**
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists( 'ecommerce_cart_items' );
+    }
+};
