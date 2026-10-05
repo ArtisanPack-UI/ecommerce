@@ -19,6 +19,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Support;
 
+use Locale;
 use Money\Currencies\ISOCurrencies;
 use Money\Currency;
 use Money\Money;
@@ -152,7 +153,11 @@ final class MoneyFormatter
     }
 
     /**
-     * `$locale` when ICU accepts it, otherwise `en`.
+     * `$locale` when ICU has data for its language, otherwise `en`.
+     * Depending on the ICU build, an unknown locale either throws or quietly
+     * resolves to another locale (`root`, or the process default such as
+     * `en_US_POSIX`), whose number pattern also varies; a resolved language
+     * other than the one asked for means "unknown" here.
      *
      * @since 1.0.0
      *
@@ -162,13 +167,24 @@ final class MoneyFormatter
      */
     private static function usableLocale( string $locale ): string
     {
+        if ( '' === $locale ) {
+            return 'en';
+        }
+
         try {
             $formatter = new NumberFormatter( $locale, NumberFormatter::DECIMAL );
         } catch ( Throwable ) {
             return 'en';
         }
 
-        return '' === $locale || false === $formatter->format( 1 ) ? 'en' : $locale;
+        $resolved = (string) $formatter->getLocale( Locale::VALID_LOCALE );
+        $wanted   = strtolower( (string) Locale::getPrimaryLanguage( $locale ) );
+
+        if ( '' === $resolved || 'root' === $resolved || '' === $wanted || strtolower( (string) Locale::getPrimaryLanguage( $resolved ) ) !== $wanted ) {
+            return 'en';
+        }
+
+        return false === $formatter->format( 1 ) ? 'en' : $locale;
     }
 
     /**
