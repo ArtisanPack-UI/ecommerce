@@ -19,9 +19,9 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\ProductTypes;
 
-use ArtisanPackUI\Ecommerce\Models\Order;
-use ArtisanPackUI\Ecommerce\Models\OrderItem;
+use ArtisanPackUI\Ecommerce\Models\CartItem;
 use ArtisanPackUI\Ecommerce\Models\Product;
+use InvalidArgumentException;
 
 /**
  * The `digital` product type.
@@ -111,34 +111,41 @@ class DigitalProductType extends AbstractProductType
     {
         $out = parent::validateCartOptions( $product, $options );
 
-        if ( ! empty( $options[ 'license_type' ] ) && is_string( $options[ 'license_type' ] ) ) {
-            $out[ 'license_type' ] = $options[ 'license_type' ];
+        if ( array_key_exists( 'license_type', $options ) && null !== $options['license_type'] && '' !== $options['license_type'] ) {
+            // Only license types the product offers (`meta.licensing.types`).
+            $allowed = array_map( 'strval', (array) ( $product->meta['licensing']['types'] ?? [] ) );
+
+            if ( ! is_string( $options['license_type'] ) || ! in_array( $options['license_type'], $allowed, true ) ) {
+                throw new InvalidArgumentException( 'license_type must be one of the license types this product offers.' );
+            }
+
+            $out['license_type'] = $options['license_type'];
         }
 
         return $out;
     }
 
     /**
-     * Records that a digital delivery is expected. The
-     * `ecommerce-digital-delivery` satellite listens for `ap.ecommerce.order.placed`
-     * to actually mint the download tokens; the engine only marks intent.
+     * The line snapshot plus a `digital_delivery` marker recording that a
+     * delivery is expected. The `ecommerce-digital-delivery` satellite
+     * listens for `ap.ecommerce.order.placed` to mint the download tokens;
+     * the engine only marks intent. The marker is part of the snapshot
+     * written at placement — the snapshot is immutable afterwards.
      *
      * @since 1.0.0
      *
-     * @param  Order      $order      Placed order.
-     * @param  OrderItem  $orderItem  Line to run side-effects for.
+     * @param  CartItem  $item  Cart line being converted.
      *
-     * @return void
+     * @return array<string, mixed>
      */
-    public function onOrderPlaced( Order $order, OrderItem $orderItem ): void
+    public function buildOrderSnapshot( CartItem $item ): array
     {
-        $snapshot                       = (array) ( $orderItem->product_snapshot ?? [] );
-        $snapshot[ 'digital_delivery' ] = [
-            'expected'   => true,
-            'issued_at'  => null,
-            'expires_at' => null,
+        return parent::buildOrderSnapshot( $item ) + [
+            'digital_delivery' => [
+                'expected'   => true,
+                'issued_at'  => null,
+                'expires_at' => null,
+            ],
         ];
-
-        $orderItem->forceFill( [ 'product_snapshot' => $snapshot ] )->save();
     }
 }

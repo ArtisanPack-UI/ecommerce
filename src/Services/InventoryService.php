@@ -26,6 +26,8 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Services;
 
+use ArtisanPackUI\Ecommerce\Events\ProductOutOfStock;
+use ArtisanPackUI\Ecommerce\Events\ProductStockLow;
 use ArtisanPackUI\Ecommerce\Exceptions\InsufficientStockException;
 use ArtisanPackUI\Ecommerce\Models\InventoryItem;
 use ArtisanPackUI\Ecommerce\Models\InventoryReservation;
@@ -33,6 +35,7 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use InvalidArgumentException;
 use Throwable;
 
@@ -170,7 +173,9 @@ class InventoryService
      * {@see InsufficientStockException}.
      *
      * TTL comes from `artisanpack.ecommerce.checkout.reservation_ttl_minutes`
-     * (default 15) unless overridden via `$expiresAt`.
+     * (default 15) unless overridden via `$expiresAt`. Pass `$expires =
+     * false` for a reservation that holds until it is committed or released
+     * (an order's: it must outlive the checkout TTL).
      *
      * @since 1.0.0
      *
@@ -178,6 +183,7 @@ class InventoryService
      * @param  Model          $reservable  Cart or Order the reservation belongs to.
      * @param  int            $quantity    Units to reserve. Must be > 0.
      * @param  Carbon|null    $expiresAt   Optional explicit expiry.
+     * @param  bool           $expires     False for a reservation that never expires.
      *
      * @throws InsufficientStockException When effective available is too low.
      *
@@ -188,12 +194,13 @@ class InventoryService
         Model $reservable,
         int $quantity,
         ?Carbon $expiresAt = null,
+        bool $expires = true,
     ): InventoryReservation {
         if ( $quantity < 1 ) {
             throw new InvalidArgumentException( 'Reservation quantity must be at least 1.' );
         }
 
-        $expiresAt ??= Carbon::now()->addMinutes( $this->reservationTtlMinutes() );
+        $expiresAt = $expires ? ( $expiresAt ?? Carbon::now()->addMinutes( $this->reservationTtlMinutes() ) ) : null;
 
         return DB::transaction( function () use ( $item, $reservable, $quantity, $expiresAt ): InventoryReservation {
             $fresh = InventoryItem::query()->lockForUpdate()->findOrFail( $item->id );
@@ -220,6 +227,102 @@ class InventoryService
             doAction( 'ap.ecommerce.inventory.reserved', $reservation );
 
             return $reservation;
+        } );
+    }
+
+    /**
+     * Moves every reservation `$from` holds onto `$to`. By default the
+     * expiry is dropped: at placement a cart's checkout reservations become
+     * the order's, held until payment commits them or a cancellation
+     * releases them (parent plan §7.2). A cart-to-cart move (a merge) keeps
+     * each reservation's expiry.
+     *
+     * @since 1.0.0
+     *
+     * @param  Model  $from        Current holder (a Cart).
+     * @param  Model  $to          New holder (an Order, or the cart merged into).
+     * @param  bool   $keepExpiry  Keep each reservation's expiry.
+     *
+     * @return int Reservations moved.
+     */
+    public function transferReservations( Model $from, Model $to, bool $keepExpiry = false ): int
+    {
+        $changes = [
+            'reservable_type' => $to->getMorphClass(),
+            'reservable_id'   => $to->getKey(),
+            'updated_at'      => Carbon::now(),
+        ];
+
+        if ( ! $keepExpiry ) {
+            $changes['expires_at'] = null;
+        }
+
+        return InventoryReservation::query()
+            ->where( 'reservable_type', $from->getMorphClass() )
+            ->where( 'reservable_id', $from->getKey() )
+            ->update( $changes );
+    }
+
+    /**
+     * Turns `$reservable`'s reservations into sales: under each inventory
+     * row's lock the reservation is deleted, `quantity_reserved` drops by
+     * its quantity, and so does `quantity_on_hand` for tracked rows. Called
+     * inside the payment capture transaction, so stock leaves the shelf
+     * exactly when the money is taken; a refund that restocks puts it back.
+     * Idempotent: a second call finds nothing left to commit.
+     *
+     * Fires `ap.ecommerce.inventory.adjusted` and the low/out-of-stock hooks
+     * per row, like {@see self::adjust()}.
+     *
+     * @since 1.0.0
+     *
+     * @param  Model  $reservable  Order (or Cart) whose reservations are committed.
+     *
+     * @return array<int, array{inventory_item_id: int, quantity: int}> What was committed.
+     */
+    public function commitFor( Model $reservable ): array
+    {
+        return DB::transaction( function () use ( $reservable ): array {
+            $committed    = [];
+            $reservations = InventoryReservation::query()
+                ->where( 'reservable_type', $reservable->getMorphClass() )
+                ->where( 'reservable_id', $reservable->getKey() )
+                ->orderBy( 'inventory_item_id' )
+                ->orderBy( 'id' )
+                ->get();
+
+            foreach ( $reservations as $reservation ) {
+                $item = InventoryItem::query()->lockForUpdate()->find( $reservation->inventory_item_id );
+
+                if ( 1 !== InventoryReservation::query()->whereKey( $reservation->getKey() )->delete() || null === $item ) {
+                    continue;
+                }
+
+                $quantity                = (int) $reservation->quantity;
+                $previousOnHand          = (int) $item->quantity_on_hand;
+                $item->quantity_reserved = max( 0, (int) $item->quantity_reserved - $quantity );
+
+                if ( $item->track_inventory ) {
+                    $item->quantity_on_hand = $previousOnHand - $quantity;
+                }
+
+                $item->save();
+
+                if ( $item->track_inventory ) {
+                    try {
+                        DB::transaction( static fn () => app( ActivityLogService::class )->recordInventoryAdjustment( $item, -$quantity, $previousOnHand, (int) $item->quantity_on_hand, sprintf( 'sale:%s#%s', $reservable->getMorphClass(), $reservable->getKey() ) ) );
+                    } catch ( Throwable $exception ) {
+                        report( $exception );
+                    }
+
+                    doAction( 'ap.ecommerce.inventory.adjusted', $item, -$quantity, (int) $item->quantity_on_hand );
+                    $this->fireStockThresholdHooks( $item, $previousOnHand, (int) $item->quantity_on_hand );
+                }
+
+                $committed[] = [ 'inventory_item_id' => (int) $item->id, 'quantity' => $quantity ];
+            }
+
+            return $committed;
         } );
     }
 
@@ -361,10 +464,12 @@ class InventoryService
         $threshold = $item->low_stock_threshold;
         if ( null !== $threshold && $previousOnHand > $threshold && $newOnHand <= $threshold ) {
             doAction( 'ap.ecommerce.inventory.lowStock', $item, $newOnHand );
+            Event::dispatch( new ProductStockLow( $item, $newOnHand ) );
         }
 
         if ( $previousOnHand > 0 && $newOnHand <= 0 ) {
             doAction( 'ap.ecommerce.inventory.outOfStock', $item );
+            Event::dispatch( new ProductOutOfStock( $item ) );
         }
     }
 }

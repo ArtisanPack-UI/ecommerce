@@ -53,7 +53,10 @@ class CartItemResource extends EcommerceResource
             'quantity'           => $this->resource->quantity,
             'unit_price'         => $this->money( 'unit_price_amount' ),
             'line_subtotal'      => $this->money( 'line_subtotal_amount' ),
+            'discount'           => $this->money( 'discount_amount', 'unit_price_currency' ),
+            'tax'                => $this->money( 'tax_amount', 'unit_price_currency' ),
             'line_total'         => $this->money( 'line_total_amount' ),
+            'is_free_item'       => $this->resource->isFreeItem(),
             'options'            => $this->resource->options,
             'meta'               => $this->resource->meta,
         ];

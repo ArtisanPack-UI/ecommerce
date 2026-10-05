@@ -76,7 +76,7 @@ class DigitalDownloadEvent extends Model
      *
      * @var string
      */
-    protected $table = 'digital_download_events';
+    protected $table = 'ecommerce_digital_download_events';
 
     /**
      * @since 1.0.0

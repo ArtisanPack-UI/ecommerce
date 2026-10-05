@@ -19,7 +19,9 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\ProductTypes;
 
+use ArtisanPackUI\Ecommerce\Contracts\ProvidesStorefrontOptions;
 use ArtisanPackUI\Ecommerce\Models\Product;
+use ArtisanPackUI\Ecommerce\Models\ProductChild;
 use InvalidArgumentException;
 
 /**
@@ -30,7 +32,7 @@ use InvalidArgumentException;
  *
  * @since      1.0.0
  */
-class GroupedProductType extends AbstractProductType
+class GroupedProductType extends AbstractProductType implements ProvidesStorefrontOptions
 {
     /**
      * Registry key.
@@ -110,5 +112,31 @@ class GroupedProductType extends AbstractProductType
     public function validateCartOptions( Product $product, array $options ): array
     {
         throw new InvalidArgumentException( 'A grouped product is not sold on its own; add its products individually.' );
+    }
+
+    /**
+     * One quantity field per child: the storefront adds each chosen child
+     * to the cart as its own line (#179).
+     *
+     * @since 1.0.0
+     *
+     * @param  Product  $product  Grouped product.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function storefrontOptions( Product $product ): array
+    {
+        return $product->children()->with( [ 'product', 'variant' ] )->get()
+            ->filter( static fn ( ProductChild $child ): bool => null !== $child->product && 'active' === $child->product->status )
+            ->map( static fn ( ProductChild $child ): array => [
+                'type'    => 'quantity',
+                'name'    => 'items.' . $child->id,
+                'label'   => (string) ( $child->variant?->name ? $child->product->name . ' — ' . $child->variant->name : $child->product->name ),
+                'default' => 0,
+                'rules'   => [ 'integer', 'min:0' ],
+                'meta'    => [ 'product_id' => (int) $child->child_product_id, 'variant_id' => null === $child->child_variant_id ? null : (int) $child->child_variant_id, 'add_separately' => true ],
+            ] )
+            ->values()
+            ->all();
     }
 }

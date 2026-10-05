@@ -20,10 +20,15 @@ namespace ArtisanPackUI\Ecommerce\Providers;
 use ArtisanPackUI\Ecommerce\Auth\CmsFrameworkPermissions;
 use ArtisanPackUI\Ecommerce\Auth\EcommerceAuthorizer;
 use ArtisanPackUI\Ecommerce\Console\Commands\AuditOrderStatusCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\FlagAbandonedCartsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\GenerateOpenApiCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\LintPciColumnsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\LintTranslationsCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\PruneCartsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\PruneIdempotencyRecordsCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\PruneLedgersCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\ReconcilePaymentsCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\RefreshFxRatesCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\ReleaseExpiredReservationsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\RetryWebhookDeliveriesCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\SatelliteAuditCommand;
@@ -33,6 +38,7 @@ use ArtisanPackUI\Ecommerce\Console\Commands\SeedDemoCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\SyncPermissionsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\VerifySatelliteCommand;
 use ArtisanPackUI\Ecommerce\Contracts\CartStorage;
+use ArtisanPackUI\Ecommerce\Contracts\CurrencyResolver;
 use ArtisanPackUI\Ecommerce\Contracts\OrderNumberGenerator;
 use ArtisanPackUI\Ecommerce\Contracts\ReviewModerator;
 use ArtisanPackUI\Ecommerce\CurrencyRates\ConfigRateProvider;
@@ -49,12 +55,15 @@ use ArtisanPackUI\Ecommerce\Gateways\Stripe\StripeGateway;
 use ArtisanPackUI\Ecommerce\GraphQL\EcommerceSchema;
 use ArtisanPackUI\Ecommerce\GraphQL\Execution\GuardOperations;
 use ArtisanPackUI\Ecommerce\GraphQL\Fields\Subscriptions;
+use ArtisanPackUI\Ecommerce\Http\Controllers\NotificationUnsubscribeController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\WebhookController;
 use ArtisanPackUI\Ecommerce\Http\Middleware\AuthenticateOptionally;
+use ArtisanPackUI\Ecommerce\Http\Middleware\CacheHeaders;
 use ArtisanPackUI\Ecommerce\Http\Middleware\EnsureEcommerceAbility;
 use ArtisanPackUI\Ecommerce\Http\Middleware\ForceJsonResponse;
 use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Middleware\LimitGraphQLBatch;
+use ArtisanPackUI\Ecommerce\Http\Middleware\NegotiateLocale;
 use ArtisanPackUI\Ecommerce\Http\Middleware\RateLimitEcommerce;
 use ArtisanPackUI\Ecommerce\Http\Middleware\RequestIdMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Middleware\ServiceSignatureMiddleware;
@@ -78,13 +87,17 @@ use ArtisanPackUI\Ecommerce\Listeners\BroadcastKanbanCardMoved;
 use ArtisanPackUI\Ecommerce\Listeners\DispatchWebhooksForEvent;
 use ArtisanPackUI\Ecommerce\Listeners\IssueDigitalDeliverables;
 use ArtisanPackUI\Ecommerce\Listeners\LinkCustomerOnUserVerified;
+use ArtisanPackUI\Ecommerce\Listeners\MergeGuestCartOnLogin;
 use ArtisanPackUI\Ecommerce\Listeners\RecordModelActivity;
 use ArtisanPackUI\Ecommerce\Listeners\RevokeDigitalDeliverables;
 use ArtisanPackUI\Ecommerce\Listeners\SendCatalogNotifications;
+use ArtisanPackUI\Ecommerce\Listeners\SyncSearchIndexers;
 use ArtisanPackUI\Ecommerce\Listeners\TrackCustomerMilestones;
+use ArtisanPackUI\Ecommerce\Listeners\UpdateCustomerStats;
 use ArtisanPackUI\Ecommerce\Logging\EcommerceLogFormatter;
 use ArtisanPackUI\Ecommerce\Models\Coupon;
 use ArtisanPackUI\Ecommerce\Models\Customer;
+use ArtisanPackUI\Ecommerce\Models\CustomerAddress;
 use ArtisanPackUI\Ecommerce\Models\DigitalFile;
 use ArtisanPackUI\Ecommerce\Models\EcommerceSetting;
 use ArtisanPackUI\Ecommerce\Models\InventoryItem;
@@ -107,6 +120,7 @@ use ArtisanPackUI\Ecommerce\Models\TaxRate;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
 use ArtisanPackUI\Ecommerce\Notifications\NotificationCatalog;
 use ArtisanPackUI\Ecommerce\Policies\CouponPolicy;
+use ArtisanPackUI\Ecommerce\Policies\CustomerAddressPolicy;
 use ArtisanPackUI\Ecommerce\Policies\CustomerPolicy;
 use ArtisanPackUI\Ecommerce\Policies\DigitalFilePolicy;
 use ArtisanPackUI\Ecommerce\Policies\InventoryPolicy;
@@ -133,16 +147,24 @@ use ArtisanPackUI\Ecommerce\ProductTypes\VariableProductType;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\AddFreeItemAction;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\BuyXGetYAction;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\FixedOffCartAction;
+use ArtisanPackUI\Ecommerce\Promotions\Actions\FixedOffProductAction;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\FreeShippingAction;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\PercentOffCartAction;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\PercentOffProductAction;
 use ArtisanPackUI\Ecommerce\Promotions\Actions\TieredDiscountAction;
+use ArtisanPackUI\Ecommerce\Promotions\Conditions\CartContainsCategoryCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\CartContainsProductCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\CartContainsProductTypeCondition;
+use ArtisanPackUI\Ecommerce\Promotions\Conditions\CartContainsTagCondition;
+use ArtisanPackUI\Ecommerce\Promotions\Conditions\CurrencyIsCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\CustomerFirstOrderCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\CustomerInGroupCondition;
+use ArtisanPackUI\Ecommerce\Promotions\Conditions\CustomerLifetimeValueOverCondition;
+use ArtisanPackUI\Ecommerce\Promotions\Conditions\DateRangeCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\DayOfWeekCondition;
+use ArtisanPackUI\Ecommerce\Promotions\Conditions\MinQuantityCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\MinSubtotalCondition;
+use ArtisanPackUI\Ecommerce\Registries\AccountMenuRegistry;
 use ArtisanPackUI\Ecommerce\Registries\AdminMenuRegistry;
 use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\FraudProviderRegistry;
@@ -158,6 +180,8 @@ use ArtisanPackUI\Ecommerce\Registries\PromotionConditionRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PromotionSourceRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ReportRegistry;
 use ArtisanPackUI\Ecommerce\Registries\SatelliteRegistry;
+use ArtisanPackUI\Ecommerce\Registries\SearchIndexerRegistry;
+use ArtisanPackUI\Ecommerce\Registries\SearchProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\SettingsRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingLabelProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingMethodTypeRegistry;
@@ -174,13 +198,17 @@ use ArtisanPackUI\Ecommerce\Reports\TaxCollectedReport;
 use ArtisanPackUI\Ecommerce\Reports\TopProductsReport;
 use ArtisanPackUI\Ecommerce\Reviews\NoopReviewModerator;
 use ArtisanPackUI\Ecommerce\Reviews\ProductRatingAggregator;
+use ArtisanPackUI\Ecommerce\Search\DatabaseSearchProvider;
 use ArtisanPackUI\Ecommerce\Services\ActivityLogService;
 use ArtisanPackUI\Ecommerce\Services\DatabaseCartStorage;
+use ArtisanPackUI\Ecommerce\Services\DigitalDownloadService;
 use ArtisanPackUI\Ecommerce\Services\Fraud\AlwaysApproveFraudProvider;
 use ArtisanPackUI\Ecommerce\Services\Fraud\StripeRadarFraudProvider;
 use ArtisanPackUI\Ecommerce\Services\KanbanAutomationRunner;
 use ArtisanPackUI\Ecommerce\Services\KanbanRoutingService;
+use ArtisanPackUI\Ecommerce\Services\LicenseService;
 use ArtisanPackUI\Ecommerce\Services\RandomEightCharGenerator;
+use ArtisanPackUI\Ecommerce\Services\SessionCurrencyResolver;
 use ArtisanPackUI\Ecommerce\Settings\CoreSettings;
 use ArtisanPackUI\Ecommerce\Settings\SettingsRepository;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\FlatRateMethod;
@@ -188,11 +216,15 @@ use ArtisanPackUI\Ecommerce\Shipping\Methods\FreeShippingMethod;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\LocalPickupMethod;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\PriceBasedMethod;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\WeightBasedMethod;
+use ArtisanPackUI\Ecommerce\Support\EngineSchedule;
+use ArtisanPackUI\Ecommerce\Support\MorphType;
 use ArtisanPackUI\Ecommerce\Support\RateLimitPolicyRegistrar;
 use ArtisanPackUI\Ecommerce\Support\RegionalJsonFallbackLoader;
 use ArtisanPackUI\Ecommerce\Support\RegistryHookRegistrar;
+use ArtisanPackUI\Ecommerce\Support\RequestContext;
 use ArtisanPackUI\Ecommerce\Tax\ManualTaxProvider;
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
@@ -201,16 +233,22 @@ use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Contracts\Translation\Loader;
 use Illuminate\Database\Events\MigrationsEnded;
+use Illuminate\Http\Exceptions\HttpResponseException;
+use Illuminate\Queue\Events\JobFailed;
+use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Validation\ValidationException;
 use Rebing\GraphQL\GraphQL as RebingGraphQL;
 use Rebing\GraphQL\Support\ExecutionMiddleware\AddAuthUserContextValueMiddleware;
 use Rebing\GraphQL\Support\ExecutionMiddleware\AutomaticPersistedQueriesMiddleware;
 use Rebing\GraphQL\Support\ExecutionMiddleware\ValidateOperationParamsMiddleware;
+use Stripe\StripeClient;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Throwable;
 
 /**
@@ -223,6 +261,15 @@ use Throwable;
  */
 class EcommerceServiceProvider extends ServiceProvider
 {
+    /**
+     * Whether the "Stripe enabled but not installed" error was logged.
+     *
+     * @since 1.0.0
+     *
+     * @var bool
+     */
+    protected bool $stripeMissingLogged = false;
+
     /**
      * Registers any application services.
      *
@@ -276,6 +323,8 @@ class EcommerceServiceProvider extends ServiceProvider
             KanbanCardWidgetRegistry::class,
             KanbanAutomationRegistry::class,
             NotificationTemplateRegistry::class,
+            SearchProviderRegistry::class,
+            SearchIndexerRegistry::class,
         ] as $registry ) {
             $this->app->singleton( $registry, static fn ( $app ) => new $registry( $app ) );
         }
@@ -285,11 +334,13 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->app->singleton( SettingsRepository::class );
         $this->app->singleton( ReportRegistry::class, static fn ( $app ): ReportRegistry => new ReportRegistry( $app ) );
         $this->app->singleton( AdminMenuRegistry::class, static fn ( $app ): AdminMenuRegistry => new AdminMenuRegistry( $app ) );
+        $this->app->singleton( AccountMenuRegistry::class, static fn ( $app ): AccountMenuRegistry => new AccountMenuRegistry( $app ) );
         $this->app->singleton( NotificationChannelRegistry::class, static fn ( $app ): NotificationChannelRegistry => new NotificationChannelRegistry( $app ) );
         // Scoped so queue workers and Octane re-read it per job / request.
         $this->app->scoped( SubStatusRegistry::class );
 
         $this->app->singleton( CartStorage::class, DatabaseCartStorage::class );
+        $this->app->singleton( CurrencyResolver::class, SessionCurrencyResolver::class );
         $this->app->singleton( OrderNumberGenerator::class, RandomEightCharGenerator::class );
         $this->app->singleton( ReviewModerator::class, NoopReviewModerator::class );
 
@@ -314,8 +365,8 @@ class EcommerceServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        $this->loadMigrationsFrom( __DIR__ . '/../../database/migrations' );
-
+        MorphType::register();
+        $this->registerMigrations();
         $this->registerTranslations();
         $this->registerCoreSettings();
         $this->registerRequestIdMiddleware();
@@ -328,6 +379,8 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->registerCoreFulfillmentAllocationStrategies();
         $this->registerCorePaymentGateways();
         $this->registerCoreFraudProviders();
+        $this->registerCoreSearchProviders();
+        $this->registerCoreAccountMenu();
         $this->registerCoreTaxProviders();
         $this->registerCoreShippingMethodTypes();
         $this->registerCorePromotionRules();
@@ -367,7 +420,12 @@ class EcommerceServiceProvider extends ServiceProvider
                 GenerateOpenApiCommand::class,
                 LintPciColumnsCommand::class,
                 LintTranslationsCommand::class,
+                FlagAbandonedCartsCommand::class,
+                PruneCartsCommand::class,
                 PruneIdempotencyRecordsCommand::class,
+                PruneLedgersCommand::class,
+                ReconcilePaymentsCommand::class,
+                RefreshFxRatesCommand::class,
                 ReleaseExpiredReservationsCommand::class,
                 RetryWebhookDeliveriesCommand::class,
                 SatelliteAuditCommand::class,
@@ -379,24 +437,7 @@ class EcommerceServiceProvider extends ServiceProvider
             ] );
 
             $this->app->booted( function (): void {
-                /** @var Schedule $schedule */
-                $schedule = $this->app->make( Schedule::class );
-                $schedule->command( 'ecommerce:release-expired-reservations' )
-                    ->everyMinute()
-                    ->withoutOverlapping()
-                    ->runInBackground();
-                $schedule->command( 'ecommerce:audit-order-status' )
-                    ->dailyAt( '02:15' )
-                    ->withoutOverlapping()
-                    ->runInBackground();
-                $schedule->command( 'ecommerce:prune-idempotency-records' )
-                    ->hourly()
-                    ->withoutOverlapping()
-                    ->runInBackground();
-                $schedule->command( 'ecommerce:retry-webhook-deliveries' )
-                    ->everyMinute()
-                    ->withoutOverlapping()
-                    ->runInBackground();
+                EngineSchedule::register( $this->app->make( Schedule::class ) );
             } );
         }
     }
@@ -433,6 +474,21 @@ class EcommerceServiceProvider extends ServiceProvider
                 Log::channel( 'ecommerce' )->warning( 'Could not sync ecommerce permissions into cms-framework.', [ 'error' => $exception->getMessage() ] );
             }
         } );
+    }
+
+    /**
+     * Loads the engine's migrations unless the host called
+     * {@see Ecommerce::ignoreMigrations()} to run published copies instead.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerMigrations(): void
+    {
+        if ( Ecommerce::shouldRunMigrations() ) {
+            $this->loadMigrationsFrom( __DIR__ . '/../../database/migrations' );
+        }
     }
 
     /**
@@ -544,6 +600,11 @@ class EcommerceServiceProvider extends ServiceProvider
      * threads a correlation ID through log context + outbound webhook
      * headers + gateway idempotency keys. Engine plan §16.3.
      *
+     * Also clears {@see RequestContext} around every queued job and at the
+     * start of every Octane request (audit G4): the id is static, so in a
+     * long-lived worker one job's id would otherwise be reused by every
+     * job after it.
+     *
      * @since 1.0.0
      *
      * @return void
@@ -554,6 +615,15 @@ class EcommerceServiceProvider extends ServiceProvider
         $router = $this->app->make( Router::class );
 
         $router->aliasMiddleware( 'ecommerce.request-id', RequestIdMiddleware::class );
+        $router->aliasMiddleware( 'ecommerce.locale', NegotiateLocale::class );
+
+        $reset  = static fn (): null => RequestContext::reset();
+        $events = $this->app->make( Dispatcher::class );
+
+        $events->listen( JobProcessing::class, $reset );
+        $events->listen( JobProcessed::class, $reset );
+        $events->listen( JobFailed::class, $reset );
+        $events->listen( 'Laravel\\Octane\\Events\\RequestReceived', $reset );
     }
 
     /**
@@ -602,6 +672,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $router = $this->app->make( Router::class );
 
         $router->aliasMiddleware( 'ecommerce.idempotency', IdempotencyMiddleware::class );
+        $router->aliasMiddleware( 'ecommerce.cache', CacheHeaders::class );
     }
 
     /**
@@ -746,7 +817,8 @@ class EcommerceServiceProvider extends ServiceProvider
      * Currently: Stripe (parent plan §7.5 + §8.1 + §8.5). The gateway is
      * only registered when `artisanpack.ecommerce.gateways.stripe.enabled`
      * is true, so a mis-configured environment can't accidentally route
-     * traffic through a provider whose secret key is unset.
+     * traffic through a provider whose secret key is unset, and only when
+     * the optional `stripe/stripe-php` package is installed.
      *
      * @since 1.0.0
      *
@@ -754,7 +826,7 @@ class EcommerceServiceProvider extends ServiceProvider
      */
     protected function registerCorePaymentGateways(): void
     {
-        if ( ! (bool) $this->app[ 'config' ]->get( 'artisanpack.ecommerce.gateways.stripe.enabled', false ) ) {
+        if ( ! $this->stripeAvailable() ) {
             return;
         }
 
@@ -770,6 +842,59 @@ class EcommerceServiceProvider extends ServiceProvider
                 'supports_partial_refunds' => true,
             ],
         );
+    }
+
+    /**
+     * The core account menu entries (#179): storefronts define the
+     * `ecommerce.account.*` routes. Downloads and license keys only show
+     * to customers who have some.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCoreAccountMenu(): void
+    {
+        $menu = $this->app->make( AccountMenuRegistry::class );
+
+        $menu->register( 'profile', [ 'label' => static fn (): string => __( 'Account details' ), 'route' => 'ecommerce.account.profile', 'icon' => 'user', 'position' => 10 ] );
+        $menu->register( 'orders', [ 'label' => static fn (): string => __( 'Orders' ), 'route' => 'ecommerce.account.orders', 'icon' => 'receipt', 'position' => 20 ] );
+        $menu->register( 'addresses', [ 'label' => static fn (): string => __( 'Addresses' ), 'route' => 'ecommerce.account.addresses', 'icon' => 'map-pin', 'position' => 30 ] );
+        $menu->register( 'downloads', [
+            'label'    => static fn (): string => __( 'Downloads' ),
+            'route'    => 'ecommerce.account.downloads',
+            'icon'     => 'download',
+            'position' => 40,
+            'visible'  => static fn ( ?Customer $customer ): bool => null !== $customer && app( DigitalDownloadService::class )->forCustomer( $customer )->exists(),
+        ] );
+        $menu->register( 'license-keys', [
+            'label'    => static fn (): string => __( 'License keys' ),
+            'route'    => 'ecommerce.account.license-keys',
+            'icon'     => 'key',
+            'position' => 50,
+            'visible'  => static fn ( ?Customer $customer ): bool => null !== $customer && app( LicenseService::class )->forCustomer( $customer )->exists(),
+        ] );
+        $menu->register( 'notifications', [ 'label' => static fn (): string => __( 'Email preferences' ), 'route' => 'ecommerce.account.notifications', 'icon' => 'bell', 'position' => 60 ] );
+    }
+
+    /**
+     * Registers the core search provider and keeps registered search
+     * indexers in step with the catalog (#176). The active provider is
+     * `search.provider`.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCoreSearchProviders(): void
+    {
+        $this->app->make( SearchProviderRegistry::class )->register(
+            DatabaseSearchProvider::KEY,
+            DatabaseSearchProvider::class,
+            [ 'label' => static fn (): string => __( 'Store search' ) ],
+        );
+
+        SyncSearchIndexers::register();
     }
 
     /**
@@ -799,7 +924,7 @@ class EcommerceServiceProvider extends ServiceProvider
             [ 'label' => __( 'Always approve (fraud gating disabled)' ) ],
         );
 
-        if ( (bool) $this->app[ 'config' ]->get( 'artisanpack.ecommerce.gateways.stripe.enabled', false ) ) {
+        if ( $this->stripeAvailable() ) {
             $this->app->bind( StripeRadarFraudProvider::class, function ( $app ): StripeRadarFraudProvider {
                 return new StripeRadarFraudProvider(
                     static fn () => $app->make( \ArtisanPackUI\Ecommerce\Gateways\Stripe\StripeClientFactory::class )->make(),
@@ -812,6 +937,35 @@ class EcommerceServiceProvider extends ServiceProvider
                 [ 'label' => __( 'Stripe Radar' ) ],
             );
         }
+    }
+
+    /**
+     * Whether the built-in Stripe gateway and Radar provider can be
+     * registered: the gateway is enabled and `stripe/stripe-php` (an
+     * optional dependency) is installed. An enabled gateway without the SDK
+     * logs an error once per boot instead of failing every request.
+     *
+     * @since 1.0.0
+     *
+     * @return bool
+     */
+    protected function stripeAvailable(): bool
+    {
+        if ( ! (bool) $this->app['config']->get( 'artisanpack.ecommerce.gateways.stripe.enabled', false ) ) {
+            return false;
+        }
+
+        if ( class_exists( StripeClient::class ) ) {
+            return true;
+        }
+
+        if ( ! $this->stripeMissingLogged ) {
+            $this->stripeMissingLogged = true;
+
+            Log::channel( 'ecommerce' )->error( 'The Stripe gateway is enabled (artisanpack.ecommerce.gateways.stripe.enabled) but stripe/stripe-php is not installed, so it was not registered. Run `composer require stripe/stripe-php`.' );
+        }
+
+        return false;
     }
 
     /**
@@ -880,6 +1034,12 @@ class EcommerceServiceProvider extends ServiceProvider
             CustomerInGroupCondition::class,
             DayOfWeekCondition::class,
             CustomerFirstOrderCondition::class,
+            MinQuantityCondition::class,
+            CartContainsCategoryCondition::class,
+            CartContainsTagCondition::class,
+            CustomerLifetimeValueOverCondition::class,
+            DateRangeCondition::class,
+            CurrencyIsCondition::class,
         ] as $condition ) {
             $conditions->register( $condition::KEY, $condition );
         }
@@ -895,6 +1055,7 @@ class EcommerceServiceProvider extends ServiceProvider
             BuyXGetYAction::class,
             AddFreeItemAction::class,
             TieredDiscountAction::class,
+            FixedOffProductAction::class,
         ] as $action ) {
             $actions->register( $action::KEY, $action );
         }
@@ -1149,7 +1310,8 @@ class EcommerceServiceProvider extends ServiceProvider
     }
 
     /**
-     * Registers the generic inbound-webhook route.
+     * Registers the generic inbound-webhook route and the signed
+     * notification unsubscribe routes.
      *
      * `POST /ecommerce/webhooks/{provider}` dispatches to whatever gateway
      * is registered under `{provider}` in {@see PaymentGatewayRegistry}.
@@ -1169,6 +1331,16 @@ class EcommerceServiceProvider extends ServiceProvider
             ->where( 'provider', '[A-Za-z0-9_.-]+' )
             ->middleware( [ 'api', 'ecommerce.request-id', 'ecommerce.rate-limit:ecommerce.webhook.inbound' ] )
             ->name( 'ecommerce.webhooks' );
+
+        // Signed unsubscribe links in opt-out notification mail (H3).
+        $unsubscribe = [ 'ecommerce.request-id', 'ecommerce.locale', 'ecommerce.rate-limit:ecommerce.notifications.unsubscribe', 'signed' ];
+
+        $router->get( 'ecommerce/notifications/unsubscribe', [ NotificationUnsubscribeController::class, 'show' ] )
+            ->middleware( $unsubscribe )
+            ->name( 'ecommerce.notifications.unsubscribe' );
+        $router->post( 'ecommerce/notifications/unsubscribe', [ NotificationUnsubscribeController::class, 'store' ] )
+            ->middleware( $unsubscribe )
+            ->name( 'ecommerce.notifications.unsubscribe.store' );
     }
 
     /**
@@ -1186,6 +1358,12 @@ class EcommerceServiceProvider extends ServiceProvider
 
         if ( ! (bool) $config->get( 'artisanpack.ecommerce.features.rest', true ) ) {
             return;
+        }
+
+        // Signed service requests are only protected from replay when the
+        // store is shared; an in-memory store forgets between requests.
+        if ( [] !== (array) $config->get( 'artisanpack.ecommerce.api.services', [] ) && $this->app->isProduction() && 'array' === ServiceSignatureMiddleware::replayStoreDriver() ) {
+            Log::channel( 'ecommerce' )->warning( 'The service-signature replay store uses the array cache driver; set artisanpack.ecommerce.api.signature_cache_store to a shared store.' );
         }
 
         /** @var Router $router */
@@ -1233,21 +1411,61 @@ class EcommerceServiceProvider extends ServiceProvider
                     : null;
             } );
 
-            // Expected storefront cart failures (unknown product, bad coupon, …).
+            // Expected storefront cart and checkout failures (unknown product,
+            // bad coupon, stock shortfall, payment in progress, …).
             $handler->renderable( static function ( CartOperationException $e, $request ) {
                 return $request->routeIs( 'ecommerce.api.*' )
-                    ? Problem::make( 422, $e->errorCode, __( 'Cart operation failed' ), $e->getMessage(), $request, [
+                    ? Problem::make( $e->httpStatus(), $e->errorCode, $e->title(), $e->getMessage(), $request, [
                         [ 'field' => $e->field, 'code' => $e->errorCode, 'message' => $e->getMessage() ],
                     ] )
                     : null;
             } );
+
+            // Everything else on the API is problem+json too (audit F5): HTTP
+            // errors keep their status (a missing model is a plain 404 that
+            // never names a class), and an unexpected error is a 500 with no
+            // details unless app.debug is on. Registered last, so the
+            // handlers above win.
+            $apiPrefix = trim( (string) $config->get( 'artisanpack.ecommerce.api_prefix', 'api/ecommerce' ), '/' );
+
+            $handler->renderable( static function ( Throwable $e, $request ) use ( $apiPrefix ) {
+                if ( ! $request->routeIs( 'ecommerce.api.*' ) && ! $request->is( $apiPrefix . '/*' ) ) {
+                    return null;
+                }
+
+                if ( $e instanceof HttpResponseException || $e instanceof ValidationException || $e instanceof AuthenticationException ) {
+                    return null;
+                }
+
+                if ( $e instanceof HttpExceptionInterface ) {
+                    $status = $e->getStatusCode();
+
+                    [ $slug, $title, $detail ] = match ( $status ) {
+                        404     => [ 'not-found', __( 'Not found' ), __( 'The requested resource does not exist.' ) ],
+                        405     => [ 'method-not-allowed', __( 'Method not allowed' ), __( 'This endpoint does not support that HTTP method.' ) ],
+                        403     => [ 'forbidden', __( 'Forbidden' ), __( 'You are not allowed to do that.' ) ],
+                        429     => [ 'too-many-requests', __( 'Too many requests' ), __( 'Too many requests. Try again later.' ) ],
+                        default => [ 'http-' . $status, __( 'Request failed' ), null ],
+                    };
+
+                    return Problem::make( $status, $slug, $title, $detail, $request )->withHeaders( $e->getHeaders() );
+                }
+
+                if ( (bool) config( 'app.debug' ) ) {
+                    return null;
+                }
+
+                return Problem::make( 500, 'server-error', __( 'Server error' ), __( 'Something went wrong on our end.' ), $request );
+            } );
         }
 
         $router->prefix( trim( (string) $config->get( 'artisanpack.ecommerce.api_prefix', 'api/ecommerce' ), '/' ) . '/' . $config->get( 'artisanpack.ecommerce.api.version', 'v1' ) )
-            ->middleware( array_merge(
+            ->middleware( array_values( array_unique( array_merge(
                 [ 'ecommerce.json' ],
                 (array) $config->get( 'artisanpack.ecommerce.api.middleware', [ 'api', 'ecommerce.request-id' ] ),
-            ) )
+                // Added even to an older published middleware list (H2).
+                [ 'ecommerce.locale' ],
+            ) ) ) )
             ->name( 'ecommerce.api.' )
             ->group( __DIR__ . '/../../routes/api.php' );
     }
@@ -1277,7 +1495,7 @@ class EcommerceServiceProvider extends ServiceProvider
 
         $config->set( 'graphql.schemas.' . EcommerceSchema::NAME, [
             'method'               => [ 'GET', 'POST' ],
-            'middleware'           => (array) $config->get( 'artisanpack.ecommerce.graphql.middleware', [] ),
+            'middleware'           => array_values( array_unique( [ ...(array) $config->get( 'artisanpack.ecommerce.graphql.middleware', [] ), 'ecommerce.locale' ] ) ),
             'execution_middleware' => [
                 ValidateOperationParamsMiddleware::class,
                 AutomaticPersistedQueriesMiddleware::class,
@@ -1300,7 +1518,8 @@ class EcommerceServiceProvider extends ServiceProvider
     /**
      * Broadcasts GraphQL subscription events (engine spec §10.4) on the
      * `private-ecommerce.admin` channel when
-     * `artisanpack.ecommerce.graphql.subscriptions` is on. The channel is
+     * `artisanpack.ecommerce.graphql.subscriptions` is on and the optional
+     * `rebing/graphql-laravel` package is installed. The channel is
      * authorized by the `order`, `product`, and `webhookSubscription`
      * `viewAny` abilities together.
      *
@@ -1310,7 +1529,7 @@ class EcommerceServiceProvider extends ServiceProvider
      */
     protected function registerGraphQLSubscriptions(): void
     {
-        if ( ! (bool) $this->app['config']->get( 'artisanpack.ecommerce.graphql.subscriptions', false ) ) {
+        if ( ! class_exists( RebingGraphQL::class ) || ! (bool) $this->app['config']->get( 'artisanpack.ecommerce.graphql.subscriptions', false ) ) {
             return;
         }
 
@@ -1346,6 +1565,7 @@ class EcommerceServiceProvider extends ServiceProvider
             Order::class                => OrderPolicy::class,
             Refund::class               => RefundPolicy::class,
             Customer::class             => CustomerPolicy::class,
+            CustomerAddress::class      => CustomerAddressPolicy::class,
             Promotion::class            => PromotionPolicy::class,
             Coupon::class               => CouponPolicy::class,
             TaxRate::class              => TaxRatePolicy::class,
@@ -1418,7 +1638,8 @@ class EcommerceServiceProvider extends ServiceProvider
     /**
      * Wires the customer-lifecycle listeners: on verified-email registration,
      * back-fill `customers.user_id` for the shopper (engine spec §5.8 / §3.22),
-     * and on a settled payment fire the `customer.firstOrder` /
+     * on login merge the guest cart into the account cart (parent plan §7.1),
+     * keep customer stats current, and on a settled payment fire the `customer.firstOrder` /
      * `customer.becameVip` milestones.
      *
      * @since 1.0.0
@@ -1431,8 +1652,10 @@ class EcommerceServiceProvider extends ServiceProvider
         $events = $this->app->make( Dispatcher::class );
 
         $events->listen( Verified::class, LinkCustomerOnUserVerified::class );
+        $events->listen( Login::class, MergeGuestCartOnLogin::class );
 
         $this->app->make( TrackCustomerMilestones::class )->subscribe();
+        $this->app->make( UpdateCustomerStats::class )->subscribe();
     }
 
     /**

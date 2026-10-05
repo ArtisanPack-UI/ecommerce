@@ -39,7 +39,7 @@ class TaxRateController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List tax rates', resource: TaxRateResource::class, collection: true )]
+    #[ApiOperation( summary: 'List tax rates', resource: TaxRateResource::class, collection: true, filters: [ 'tax_class_key' => 'string', 'country_code' => 'string', 'region_code' => 'string', 'is_active' => 'boolean' ], sorts: [ 'priority', 'country_code' ] )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(

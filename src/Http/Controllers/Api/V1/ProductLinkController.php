@@ -23,9 +23,11 @@ namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\AdjustStockRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductChildrenRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductLinksRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductRelationsRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\InventoryItemResource;
 use ArtisanPackUI\Ecommerce\Http\Resources\ProductCategoryResource;
 use ArtisanPackUI\Ecommerce\Http\Resources\ProductChildResource;
+use ArtisanPackUI\Ecommerce\Http\Resources\ProductResource;
 use ArtisanPackUI\Ecommerce\Http\Resources\ProductTagResource;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\Models\ProductVariant;
@@ -100,6 +102,30 @@ class ProductLinkController extends ApiController
         $this->products->assertEditable( $product );
 
         return ProductChildResource::collection( $this->products->syncChildren( $product, (array) $request->validated( 'children' ) ) )->response( $request );
+    }
+
+    /**
+     * Replaces one kind of hand-picked product link (#182): `{ type:
+     * upsell|cross_sell|related, ids: [...] }`, in order. Answers the
+     * linked products.
+     *
+     * @since 1.0.0
+     *
+     * @param  ProductRelationsRequest  $request  Validated request.
+     * @param  Product                  $product  Product.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Replace a product\'s upsells, cross-sells, or related products', resource: ProductResource::class, collection: true )]
+    public function relations( ProductRelationsRequest $request, Product $product ): JsonResponse
+    {
+        $this->products->assertEditable( $product );
+
+        $links    = $this->products->syncProductRelations( $product, (string) $request->validated( 'type' ), (array) $request->validated( 'ids' ) );
+        $order    = array_flip( $links->pluck( 'related_product_id' )->all() );
+        $products = Product::query()->whereKey( array_keys( $order ) )->get()->sortBy( static fn ( Product $related ): int => $order[ (int) $related->id ] )->values();
+
+        return ProductResource::collection( $products )->response( $request );
     }
 
     /**

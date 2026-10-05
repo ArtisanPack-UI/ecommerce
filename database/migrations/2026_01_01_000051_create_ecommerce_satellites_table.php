@@ -3,7 +3,7 @@
 /**
  * Creates the `ecommerce_satellites` table.
  *
- * Backing store for the {@see \ArtisanPackUI\Ecommerce\Registries\SatelliteRegistry}
+ * Backing store for the {@see ArtisanPackUI\Ecommerce\Registries\SatelliteRegistry}
  * (engine spec §3.32, parent plan §16.6). One row per satellite package
  * that has ever registered with the engine. `uninstalled_at` is set by
  * `ecommerce:satellite:uninstall` and cleared by
@@ -37,10 +37,6 @@ return new class extends Migration {
      */
     public function up(): void
     {
-        if ( Schema::hasTable( 'ecommerce_satellites' ) ) {
-            return;
-        }
-
         Schema::create( 'ecommerce_satellites', function ( Blueprint $table ): void {
             $table->bigIncrements( 'id' );
             $table->string( 'package_name', 191 );

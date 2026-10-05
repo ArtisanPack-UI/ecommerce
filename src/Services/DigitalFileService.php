@@ -20,6 +20,8 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Services;
 
 use ArtisanPackUI\Ecommerce\Events\DigitalProductUpdated;
+use ArtisanPackUI\Ecommerce\Exceptions\DigitalFileInUseException;
+use ArtisanPackUI\Ecommerce\Models\DigitalDownload;
 use ArtisanPackUI\Ecommerce\Models\DigitalFile;
 use Illuminate\Support\Facades\Event;
 
@@ -42,7 +44,7 @@ class DigitalFileService
      */
     public function create( array $attributes ): DigitalFile
     {
-        return DigitalFile::query()->create( $attributes );
+        return DigitalFile::query()->create( $this->withArchiveFlag( $attributes ) );
     }
 
     /**
@@ -58,7 +60,7 @@ class DigitalFileService
      */
     public function update( DigitalFile $file, array $attributes ): DigitalFile
     {
-        $file->fill( $attributes );
+        $file->fill( $this->withArchiveFlag( $attributes, $file ) );
 
         $versionChanged = $file->exists && $file->isDirty( 'version' ) && null !== $file->getOriginal( 'version' );
 
@@ -72,5 +74,55 @@ class DigitalFileService
         }
 
         return $file;
+    }
+
+    /**
+     * Deletes a file nobody holds an entitlement for. A file customers
+     * already bought can't be deleted (their downloads would vanish);
+     * archive it instead with `is_archived`.
+     *
+     * @since 1.0.0
+     *
+     * @param  DigitalFile  $file  File.
+     *
+     * @throws DigitalFileInUseException When download entitlements reference it.
+     *
+     * @return void
+     */
+    public function delete( DigitalFile $file ): void
+    {
+        if ( DigitalDownload::query()->where( 'digital_file_id', $file->id )->exists() ) {
+            throw new DigitalFileInUseException(
+                __( 'Customers have downloads for this file, so it cannot be deleted. Archive it instead.' ),
+                [ 'digital_file_id' => $file->id ],
+            );
+        }
+
+        $file->delete();
+    }
+
+    /**
+     * Turns the `is_archived` input into `archived_at`, keeping the
+     * original archive time when an archived file is saved again.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<string, mixed>  $attributes  Validated attributes.
+     * @param  DigitalFile|null      $file        The file being updated.
+     *
+     * @return array<string, mixed>
+     */
+    protected function withArchiveFlag( array $attributes, ?DigitalFile $file = null ): array
+    {
+        if ( ! array_key_exists( 'is_archived', $attributes ) ) {
+            return $attributes;
+        }
+
+        $archive = (bool) $attributes['is_archived'];
+        unset( $attributes['is_archived'] );
+
+        $attributes['archived_at'] = $archive ? ( $file?->archived_at ?? now() ) : null;
+
+        return $attributes;
     }
 }

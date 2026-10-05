@@ -55,7 +55,7 @@ class OrderRefundController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Issue a refund against an order', resource: RefundResource::class, status: 201 )]
+    #[ApiOperation( summary: 'Issue a refund against an order', resource: RefundResource::class, status: 201, includes: [ 'items' ] )]
     public function store( IssueRefundRequest $request, Order $order ): JsonResponse
     {
         $actor = $request->user()?->getAuthIdentifier();

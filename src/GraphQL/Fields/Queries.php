@@ -28,6 +28,9 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\GraphQL\Fields;
 
 use ArtisanPackUI\Ecommerce\Auth\TokenAbilities;
+use ArtisanPackUI\Ecommerce\Catalog\CatalogQuery;
+use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
+use ArtisanPackUI\Ecommerce\Exceptions\GuestLookupLockedException;
 use ArtisanPackUI\Ecommerce\GraphQL\GraphQLError;
 use ArtisanPackUI\Ecommerce\GraphQL\Support\Resolvers;
 use ArtisanPackUI\Ecommerce\Models\Cart;
@@ -43,11 +46,18 @@ use ArtisanPackUI\Ecommerce\Models\TaxClass;
 use ArtisanPackUI\Ecommerce\Models\TaxRate;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
 use ArtisanPackUI\Ecommerce\Registries\SubStatusRegistry;
+use ArtisanPackUI\Ecommerce\Services\CheckoutService;
+use ArtisanPackUI\Ecommerce\Services\GuestOrderLookupService;
 use ArtisanPackUI\Ecommerce\Services\NotificationTemplateService;
+use ArtisanPackUI\Ecommerce\Services\StorefrontCartService;
+use ArtisanPackUI\Ecommerce\Support\OrderViewToken;
+use ArtisanPackUI\Ecommerce\ValueObjects\Address;
+use ArtisanPackUI\Ecommerce\ValueObjects\ShippingRate;
 use GraphQL\Type\Definition\ResolveInfo;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Gate;
+use Throwable;
 
 /**
  * @package    ArtisanPack_UI
@@ -105,7 +115,24 @@ class Queries
         return [
             'ProductFilter' => [
                 'kind'   => 'input',
-                'fields' => [ 'type' => 'String', 'sku' => 'String', 'slug' => 'String', 'search' => 'String' ],
+                'fields' => [
+                    'type'        => 'String',
+                    'sku'         => 'String',
+                    'slug'        => 'String',
+                    'search'      => 'String',
+                    'category'    => 'String',
+                    'descendants' => 'Boolean',
+                    'tag'         => 'String',
+                    'price_min'   => 'Int',
+                    'price_max'   => 'Int',
+                    'currency'    => 'String',
+                    'attributes'  => 'JSON',
+                    'in_stock'    => 'Boolean',
+                    'on_sale'     => 'Boolean',
+                    'featured'    => 'Boolean',
+                    'min_rating'  => 'Float',
+                    'ids'         => '[ID!]',
+                ],
             ],
             'OrderFilter' => [
                 'kind'   => 'input',
@@ -121,6 +148,16 @@ class Queries
             'CustomerFilter' => [
                 'kind'   => 'input',
                 'fields' => [ 'email' => 'String' ],
+            ],
+            'CheckoutInfo' => [
+                'fields' => [
+                    'state'             => 'String!',
+                    'requires_shipping' => 'Boolean!',
+                    'shipping_rates'    => 'JSON',
+                    'gateways'          => 'JSON',
+                    'guest_checkout'    => 'String!',
+                    'account_creation'  => 'Boolean!',
+                ],
             ],
         ];
     }
@@ -154,9 +191,9 @@ class Queries
             ],
             'products' => [
                 'type'    => 'ProductConnection!',
-                'args'    => [ 'filter' => 'ProductFilter' ] + $page,
+                'args'    => [ 'filter' => 'ProductFilter', 'sort' => 'String' ] + $page,
                 'resolve' => fn ( $root, array $args, $context, ResolveInfo $info ): array => $this->catalog(
-                    fn () => $this->r->connection( $this->filterProducts( Product::query()->storefrontVisible(), (array) ( $args['filter'] ?? [] ) ), 'Product', $args, $info ),
+                    fn () => $this->r->connection( $this->catalogProducts( (array) ( $args['filter'] ?? [] ), isset( $args['sort'] ) ? (string) $args['sort'] : null ), 'Product', $args, $info ),
                 ),
             ],
             'search' => [
@@ -168,14 +205,79 @@ class Queries
                 ),
             ],
 
-            // Cart (the token is the credential).
+            // Cart (the token is the credential for a guest cart).
             'cart' => [
                 'type'    => 'Cart',
                 'args'    => [ 'token' => 'String!' ],
                 'resolve' => function ( $root, array $args, $context, ResolveInfo $info ): ?array {
                     $this->r->throttle( 'ecommerce.cart.mutate', [ 'cart_token' => $args['token'] ] );
 
-                    return $this->r->present( Cart::query()->where( 'token', $args['token'] )->first(), 'Cart', $this->r->selection( $info ) );
+                    $cart = Cart::query()->where( 'token', $args['token'] )->first();
+
+                    // An account's cart also needs that account's session (engine spec §9.2).
+                    if ( null !== $cart && ! $cart->isAccessibleBy( $this->r->user() ) ) {
+                        $cart = null;
+                    }
+
+                    return $this->r->present( $cart, 'Cart', $this->r->selection( $info ) );
+                },
+            ],
+
+            // A shipping estimate for a cart before checkout.
+            'cartShippingRates' => [
+                'type'    => 'JSON',
+                'args'    => [ 'token' => 'String!', 'country_code' => 'String!', 'region_code' => 'String', 'postal_code' => 'String' ],
+                'resolve' => function ( $root, array $args ): ?array {
+                    $this->r->throttle( 'ecommerce.cart.mutate', [ 'cart_token' => $args['token'] ] );
+
+                    $cart = Cart::query()->where( 'token', $args['token'] )->first();
+
+                    if ( null === $cart || ! $cart->isAccessibleBy( $this->r->user() ) || 1 !== preg_match( '/^[A-Za-z]{2}$/', (string) $args['country_code'] ) ) {
+                        return null;
+                    }
+
+                    return app( StorefrontCartService::class )->quoteShipping( $cart, new Address(
+                        address1: '',
+                        city: '',
+                        countryCode: strtoupper( (string) $args['country_code'] ),
+                        regionCode: isset( $args['region_code'] ) ? (string) $args['region_code'] : null,
+                        postalCode: isset( $args['postal_code'] ) ? (string) $args['postal_code'] : null,
+                    ) )->map( static fn ( ShippingRate $rate ): array => $rate->toArray() )->values()->all();
+                },
+            ],
+
+            // Checkout state, shipping rates, and gateways for a cart.
+            'checkout' => [
+                'type'    => 'CheckoutInfo',
+                'args'    => [ 'token' => 'String!' ],
+                'resolve' => function ( $root, array $args ): ?array {
+                    $this->r->throttle( 'ecommerce.cart.mutate', [ 'cart_token' => $args['token'] ] );
+
+                    $cart = Cart::query()->where( 'token', $args['token'] )->first();
+
+                    if ( null === $cart || ! $cart->isAccessibleBy( $this->r->user() ) ) {
+                        return null;
+                    }
+
+                    $checkout = app( CheckoutService::class );
+                    $rates    = [];
+
+                    if ( null !== $cart->shipping_address && null === $cart->completed_order_id ) {
+                        try {
+                            $rates = $checkout->shippingRates( $cart )->map( static fn ( ShippingRate $rate ): array => $rate->toArray() )->values()->all();
+                        } catch ( Throwable ) {
+                            $rates = [];
+                        }
+                    }
+
+                    return [
+                        'state'             => (string) $cart->checkout_state,
+                        'requires_shipping' => app( StorefrontCartService::class )->requiresShipping( $cart ),
+                        'shipping_rates'    => $rates,
+                        'gateways'          => array_values( array_map( static fn ( PaymentGateway $gateway ): array => [ 'key' => $gateway->key(), 'label' => $gateway->label() ], $checkout->availableGateways( $cart ) ) ),
+                        'guest_checkout'    => $checkout->guestCheckout(),
+                        'account_creation'  => $checkout->offersAccountCreation(),
+                    ];
                 },
             ],
 
@@ -196,6 +298,37 @@ class Queries
                     $query    = Order::query()->where( 'customer_id', $customer?->id ?? 0 );
 
                     return $this->r->connection( $query, 'Order', $args, $info );
+                },
+            ],
+            // Guests (#175): null for no match, an error once locked out.
+            'guestOrderLookup' => [
+                'type'    => 'Order',
+                'args'    => [ 'email' => 'String!', 'order_number' => 'String!' ],
+                'resolve' => function ( $root, array $args, $context, ResolveInfo $info ): ?array {
+                    $this->r->throttle( 'ecommerce.lookup.attempt' );
+
+                    if ( mb_strlen( (string) $args['email'] ) > 255 || mb_strlen( (string) $args['order_number'] ) > 50 ) {
+                        return null;
+                    }
+
+                    try {
+                        $order = app( GuestOrderLookupService::class )->find( (string) $args['email'], (string) $args['order_number'], request()->ip() );
+                    } catch ( GuestLookupLockedException $e ) {
+                        throw GraphQLError::rateLimited( $e->retryAfter );
+                    }
+
+                    return null === $order ? null : $this->r->present( $order, 'Order', $this->r->selection( $info ) );
+                },
+            ],
+            'orderByViewToken' => [
+                'type'    => 'Order',
+                'args'    => [ 'token' => 'String!' ],
+                'resolve' => function ( $root, array $args, $context, ResolveInfo $info ): ?array {
+                    $this->r->throttle( 'ecommerce.lookup.attempt' );
+
+                    $order = OrderViewToken::verify( (string) $args['token'] );
+
+                    return null === $order ? null : $this->r->present( $order, 'Order', $this->r->selection( $info ) );
                 },
             ],
             'order' => [
@@ -471,15 +604,46 @@ class Queries
     {
         foreach ( [ 'type', 'sku', 'slug' ] as $column ) {
             if ( isset( $filter[ $column ] ) ) {
-                $query->where( $column, $filter[ $column ] );
+                $query->where( $query->getModel()->qualifyColumn( $column ), $filter[ $column ] );
             }
         }
 
-        if ( isset( $filter['search'] ) && '' !== $filter['search'] ) {
-            $query->whereRaw( "name LIKE ? ESCAPE '!'", [ '%' . str_replace( [ '!', '%', '_' ], [ '!!', '!%', '!_' ], (string) $filter['search'] ) . '%' ] );
-        }
-
         return $query;
+    }
+
+    /**
+     * Storefront products through {@see CatalogQuery}, ordered by a column
+     * sort (`position` — the default —, `name`, `-name`, `newest`, or
+     * `rating`), so they page by cursor like every connection.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<string, mixed>  $filter  `ProductFilter`.
+     * @param  string|null           $sort    Sort.
+     *
+     * @return Builder<Product>
+     */
+    protected function catalogProducts( array $filter, ?string $sort ): Builder
+    {
+        $flags = array_map( static fn ( mixed $value ): mixed => is_bool( $value ) ? ( $value ? '1' : '0' ) : $value, $filter );
+
+        $query = app( CatalogQuery::class )
+            ->fromParameters( $flags, null, isset( $filter['currency'] ) && 1 === preg_match( '/^[A-Za-z]{3}$/', (string) $filter['currency'] ) ? (string) $filter['currency'] : null )
+            ->builder( false );
+
+        $this->filterProducts( $query, $filter );
+
+        $model = $query->getModel();
+
+        match ( $sort ) {
+            'name'   => $query->orderBy( $model->qualifyColumn( 'name' ) ),
+            '-name'  => $query->orderByDesc( $model->qualifyColumn( 'name' ) ),
+            'newest' => $query->orderByDesc( $model->qualifyColumn( 'created_at' ) ),
+            'rating' => $query->orderByDesc( $model->qualifyColumn( 'avg_rating' ) ),
+            default  => $query->orderBy( $model->qualifyColumn( 'position' ) ),
+        };
+
+        return $query->orderBy( $model->getQualifiedKeyName() );
     }
 
     /**

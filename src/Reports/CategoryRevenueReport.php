@@ -40,7 +40,7 @@ class CategoryRevenueReport extends LineItemReport
      *
      * @var string
      */
-    protected const PIVOT = 'product_category_product';
+    protected const PIVOT = 'ecommerce_product_category_product';
 
     /**
      * {@inheritDoc}
@@ -57,7 +57,7 @@ class CategoryRevenueReport extends LineItemReport
     public function run( ?ReportRange $range, array $options = [] ): array
     {
         if ( null === $range ) {
-            throw new InvalidArgumentException( 'The revenue by category report needs a date range.' );
+            throw new InvalidArgumentException( __( 'The revenue by category report needs a date range.' ) );
         }
 
         $amounts   = $this->amounts();

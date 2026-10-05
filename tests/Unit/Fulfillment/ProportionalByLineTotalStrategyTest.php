@@ -187,3 +187,25 @@ it( 'returns Money values tagged with the order\'s shipping and tax currencies',
         ->and( $result[ 1 ][ 'tax' ]->getCurrency()->getCode() )->toBe( 'GBP' );
 } );
 
+it( 'divides by the net weights, not the gross subtotal (D10)', function (): void {
+    // Two 50.00 lines, one with 25.00 off, sharing 10.00 tax.
+    $order = makeAllocationOrder( 10_000, 0, 1_000 );
+    $out   = ( new ProportionalByLineTotalStrategy() )->allocate( $order, [
+        makeAllocationItem( 1, 1, 5_000, 2_500 ),
+        makeAllocationItem( 2, 1, 5_000 ),
+    ] );
+
+    expect( (int) $out[1]['tax']->getAmount() )->toBe( 333 )
+        ->and( (int) $out[2]['tax']->getAmount() )->toBe( 667 );
+} );
+
+it( 'gives a line discounted past zero no weight', function (): void {
+    $order = makeAllocationOrder( 2_000, 300, 0 );
+    $out   = ( new ProportionalByLineTotalStrategy() )->allocate( $order, [
+        makeAllocationItem( 1, 1, 1_000, 1_500 ),
+        makeAllocationItem( 2, 1, 1_000 ),
+    ] );
+
+    expect( (int) $out[1]['shipping']->getAmount() )->toBe( 0 )
+        ->and( (int) $out[2]['shipping']->getAmount() )->toBe( 300 );
+} );

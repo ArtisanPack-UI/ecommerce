@@ -57,7 +57,7 @@ class ShippingZone extends Model
      *
      * @var string
      */
-    protected $table = 'shipping_zones';
+    protected $table = 'ecommerce_shipping_zones';
 
     /**
      * @since 1.0.0

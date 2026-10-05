@@ -45,7 +45,7 @@ class ProductVariantOptionValue extends Model
     /**
      * @var string
      */
-    protected $table = 'product_variant_option_values';
+    protected $table = 'ecommerce_product_variant_option_values';
 
     /**
      * @var array<int, string>

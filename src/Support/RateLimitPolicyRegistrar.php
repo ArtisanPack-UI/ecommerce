@@ -23,7 +23,6 @@ namespace ArtisanPackUI\Ecommerce\Support;
 
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 
 /**
@@ -56,8 +55,12 @@ class RateLimitPolicyRegistrar
         'ecommerce.coupon.attempt',
         'ecommerce.login',
         'ecommerce.review.submit',
+        'ecommerce.claim.attempt',
+        'ecommerce.lookup.attempt',
         'ecommerce.license.validate',
         'ecommerce.webhook.inbound',
+        'ecommerce.webhook.verified',
+        'ecommerce.notifications.unsubscribe',
         'ecommerce.admin.mutate',
     ];
 
@@ -139,6 +142,31 @@ class RateLimitPolicyRegistrar
             ];
         } );
 
+        // Guest-order claims (#173): a claim checks an order number and postal
+        // code, so it is throttled per shopper and per IP. The per-shopper
+        // default follows `customers.claim_rate_limit` / `_window_minutes`.
+        RateLimiter::for( 'ecommerce.claim.attempt', function ( Request $request ): array {
+            $user    = $request->user();
+            $minutes = max( 1, (int) config( 'artisanpack.ecommerce.customers.claim_rate_window_minutes', 60 ) );
+
+            return [
+                Limit::perMinutes( $minutes, self::limit( 'claim.attempt.per_customer', max( 1, (int) config( 'artisanpack.ecommerce.customers.claim_rate_limit', 5 ) ) ) )
+                    ->by( 'ecommerce:claim:customer:' . ( null !== $user ? (string) $user->getAuthIdentifier() : 'guest:' . sha1( (string) $request->ip() ) ) ),
+                Limit::perHour( self::limit( 'claim.attempt.per_ip', 30 ) )
+                    ->by( 'ecommerce:claim:ip:' . sha1( (string) $request->ip() ) ),
+            ];
+        } );
+
+        // Guest order lookups and signed order links (#175): every request
+        // counts per IP; failed lookups also lock out per order number in
+        // GuestOrderLookupService.
+        RateLimiter::for( 'ecommerce.lookup.attempt', function ( Request $request ): array {
+            return [
+                Limit::perMinute( self::limit( 'lookup.attempt.per_ip', 30 ) )
+                    ->by( 'ecommerce:lookup-request:ip:' . sha1( (string) $request->ip() ) ),
+            ];
+        } );
+
         RateLimiter::for( 'ecommerce.license.validate', function ( Request $request ): array {
             $licenseKey = $request->route( 'license_key' ) ?? $request->input( 'key' ) ?? $request->input( 'license_key' ) ?? '';
             $licenseKey = is_string( $licenseKey ) ? strtoupper( trim( $licenseKey ) ) : '';
@@ -157,25 +185,32 @@ class RateLimitPolicyRegistrar
             return $limits;
         } );
 
+        // Every inbound webhook request counts against its caller's IP
+        // (G1): junk for made-up providers or with bad signatures is bounded
+        // per source instead of filling a shared bucket.
         RateLimiter::for( 'ecommerce.webhook.inbound', function ( Request $request ): array {
-            $provider = $request->route( 'provider' ) ?? $request->route( 'gateway' );
+            return [
+                Limit::perMinute( self::limit( 'webhook.inbound.per_ip', 120 ) )
+                    ->by( 'ecommerce:webhook:ip:' . sha1( (string) $request->ip() ) ),
+            ];
+        } );
 
-            if ( ! is_string( $provider ) || '' === $provider ) {
-                // A webhook route wired without a `{provider}`/`{gateway}`
-                // segment would silently pool every inbound provider into
-                // one shared 1000/min bucket. Fall back to the caller IP so
-                // the misconfiguration bounds itself while surfacing loudly
-                // in the log so operators notice.
-                Log::warning( 'ecommerce.rate_limit.webhook.missing_provider', [
-                    'route' => optional( $request->route() )->getName(),
-                ] );
-
-                $provider = 'ip:' . sha1( (string) $request->ip() );
-            }
+        // Signature-verified deliveries per registered provider, counted by
+        // the webhook controller after verification so unverified traffic
+        // can't use up a real provider's allowance.
+        RateLimiter::for( 'ecommerce.webhook.verified', function ( Request $request ): array {
+            $provider = $request->route( 'provider' );
 
             return [
                 Limit::perMinute( self::limit( 'webhook.inbound.per_provider', 1_000 ) )
-                    ->by( 'ecommerce:webhook:provider:' . sha1( $provider ) ),
+                    ->by( 'ecommerce:webhook:provider:' . sha1( is_string( $provider ) ? $provider : '' ) ),
+            ];
+        } );
+
+        RateLimiter::for( 'ecommerce.notifications.unsubscribe', function ( Request $request ): array {
+            return [
+                Limit::perMinute( self::limit( 'notifications.unsubscribe.per_ip', 30 ) )
+                    ->by( 'ecommerce:unsubscribe:ip:' . sha1( (string) $request->ip() ) ),
             ];
         } );
 

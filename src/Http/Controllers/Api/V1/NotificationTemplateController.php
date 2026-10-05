@@ -59,7 +59,7 @@ class NotificationTemplateController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List notification templates', resource: NotificationTemplateResource::class, collection: true )]
+    #[ApiOperation( summary: 'List notification templates', resource: NotificationTemplateResource::class, collection: true, filters: [ 'key' => 'string', 'channel' => 'string', 'locale' => 'string', 'is_active' => 'boolean' ], sorts: [ 'key' ] )]
     public function index( Request $request ): JsonResponse
     {
         $this->templates->sync();

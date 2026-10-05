@@ -43,7 +43,7 @@ class CustomerController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List customers', resource: CustomerResource::class, collection: true )]
+    #[ApiOperation( summary: 'List customers', resource: CustomerResource::class, collection: true, filters: [ 'email' => 'string', 'user_id' => 'int-list' ], sorts: [ 'created_at', 'orders_count', 'total_spent' ], includes: [ 'addresses' ] )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(
@@ -64,7 +64,7 @@ class CustomerController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Get a customer', resource: CustomerResource::class )]
+    #[ApiOperation( summary: 'Get a customer', resource: CustomerResource::class, includes: [ 'addresses' ] )]
     public function show( Request $request, Customer $customer ): JsonResponse
     {
         return $this->resourceResponse( $customer, $request, CustomerResource::class, [ 'addresses' => 'addresses' ] );
@@ -78,7 +78,7 @@ class CustomerController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Update a customer', resource: CustomerResource::class )]
+    #[ApiOperation( summary: 'Update a customer', resource: CustomerResource::class, includes: [ 'addresses' ] )]
     public function update( UpdateCustomerRequest $request, Customer $customer ): JsonResponse
     {
         $data = $request->validated();

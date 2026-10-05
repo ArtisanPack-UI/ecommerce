@@ -47,11 +47,13 @@ class RefundItemResource extends EcommerceResource
     protected function fields( Request $request ): array
     {
         return [
-            'refund_id'     => $this->resource->refund_id,
-            'order_item_id' => $this->resource->order_item_id,
-            'quantity'      => $this->resource->quantity,
-            'amount'        => $this->money( 'amount', 'currency' ),
-            'restock'       => $this->resource->restock,
+            'refund_id'       => $this->resource->refund_id,
+            'order_item_id'   => $this->resource->order_item_id,
+            'quantity'        => $this->resource->quantity,
+            'amount'          => $this->money( 'amount', 'currency' ),
+            'tax_amount'      => $this->money( 'tax_amount', 'currency' ),
+            'shipping_amount' => $this->money( 'shipping_amount', 'currency' ),
+            'restock'         => $this->resource->restock,
         ];
     }
 }

@@ -53,7 +53,7 @@ class ReviewController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List reviews for moderation', resource: ProductReviewResource::class, collection: true )]
+    #[ApiOperation( summary: 'List reviews for moderation', resource: ProductReviewResource::class, collection: true, filters: [ 'status' => 'string', 'product_id' => 'int-list', 'customer_id' => 'int-list', 'rating' => 'int-list', 'is_verified_purchase' => 'boolean' ], sorts: [ 'rating', 'created_at' ] )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(

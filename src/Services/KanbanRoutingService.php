@@ -43,6 +43,7 @@ use ArtisanPackUI\Ecommerce\Models\KanbanColumn;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderBoardAssignment;
 use ArtisanPackUI\Ecommerce\Models\OrderTimelineEntry;
+use ArtisanPackUI\Ecommerce\Support\AfterCommit;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -183,7 +184,7 @@ class KanbanRoutingService
         }
 
         if ( [] !== $added || [] !== $removed ) {
-            doAction( 'ap.ecommerce.kanban.boardReassigned', $order, $added, $removed );
+            AfterCommit::action( 'ap.ecommerce.kanban.boardReassigned', $order, $added, $removed );
         }
 
         return [ 'added' => $added, 'removed' => $removed ];
@@ -251,7 +252,7 @@ class KanbanRoutingService
         } );
 
         if ( $changed ) {
-            doAction( 'ap.ecommerce.kanban.boardAssignmentAdded', $assignment );
+            AfterCommit::action( 'ap.ecommerce.kanban.boardAssignmentAdded', $assignment );
             Event::dispatch( new KanbanBoardAssignmentAdded( $assignment ) );
         }
 
@@ -298,7 +299,7 @@ class KanbanRoutingService
             return $assignment;
         } );
 
-        doAction( 'ap.ecommerce.kanban.boardAssignmentRemoved', $assignment );
+        AfterCommit::action( 'ap.ecommerce.kanban.boardAssignmentRemoved', $assignment );
         Event::dispatch( new KanbanBoardAssignmentRemoved( $assignment ) );
 
         return $assignment;

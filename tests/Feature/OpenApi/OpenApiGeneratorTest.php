@@ -83,7 +83,7 @@ it( 'documents auth, abilities, and token scopes for admin endpoints', function 
     $refund = $this->spec['paths']['/orders/{order}/refunds']['post'];
 
     expect( $refund['x-ecommerce-ability'] )->toBe( 'ecommerce.order.refund' )
-        ->and( $refund['x-token-scopes'] )->toBe( [ 'ecommerce:admin', 'ecommerce:orders.write' ] )
+        ->and( $refund['x-token-scopes'] )->toBe( [ 'ecommerce:admin', 'ecommerce:orders.refund' ] )
         ->and( $refund['security'] )->toContain( [ 'sanctum' => [] ] )
         ->and( $refund['responses'] )->toHaveKeys( [ '201', '401', '403', '404', '422' ] )
         ->and( $refund['requestBody']['content']['application/json']['schema']['properties']['lines']['items']['required'] )
@@ -165,4 +165,78 @@ it( 'converts validation rules to JSON Schema', function (): void {
         ->and( $schema['properties']['tags']['items'] )->toBe( [ 'type' => 'string', 'minLength' => 2, 'maxLength' => 2 ] )
         ->and( $schema['properties']['lines']['items']['required'] )->toBe( [ 'qty' ] )
         ->and( $schema['properties']['currency']['type'] )->toBe( [ 'string', 'null' ] );
+} );
+
+it( 'documents listing query parameters', function (): void {
+    $parameters = fn ( string $path ): array => collect( $this->spec['paths'][ $path ]['get']['parameters'] ?? [] )
+        ->reject( fn ( array $parameter ): bool => isset( $parameter['$ref'] ) )
+        ->keyBy( 'name' )
+        ->all();
+
+    $products = $parameters( '/products' );
+
+    expect( $products )->toHaveKeys( [ 'filter', 'sort', 'include', 'per_page', 'cursor', 'q', 'currency', 'attributes', 'facets', 'page' ] )
+        ->and( $products['filter']['style'] )->toBe( 'deepObject' )
+        ->and( $products['filter']['schema']['properties'] )->toHaveKeys( [ 'category', 'tag', 'price_min', 'in_stock', 'ids' ] )
+        ->and( $products['filter']['schema']['properties']['ids']['pattern'] )->toBe( '^[0-9]+(,[0-9]+)*$' )
+        ->and( $products['per_page']['schema']['maximum'] )->toBe( (int) config( 'artisanpack.ecommerce.api.max_per_page' ) )
+        ->and( $products['include']['description'] )->toContain( 'images' );
+
+    $search = $parameters( '/search' );
+
+    expect( $search['q']['required'] )->toBeTrue()
+        ->and( $search )->toHaveKeys( [ 'page', 'per_page', 'include' ] )
+        ->and( $search['per_page']['schema']['maximum'] )->toBe( (int) config( 'artisanpack.ecommerce.api.max_per_page' ) );
+
+    expect( $parameters( '/admin/reports/{report}' ) )->toHaveKeys( [ 'from', 'to', 'interval', 'compare' ] );
+
+    // Includes come from the controller's map on single-resource reads too.
+    expect( $parameters( '/orders/{order}' )['include']['description'] )->toContain( 'shipments' );
+
+    // A plain (unpaginated) list has no cursor.
+    expect( $parameters( '/me/addresses' ) )->not->toHaveKey( 'cursor' );
+} );
+
+it( 'gives every success response a real schema', function (): void {
+    foreach ( $this->spec['paths'] as $path => $operations ) {
+        foreach ( $operations as $method => $operation ) {
+            if ( 'get' === $method ) {
+                expect( $operation )->not->toHaveKey( 'requestBody' );
+            }
+
+            foreach ( $operation['responses'] as $status => $response ) {
+                if ( ! str_starts_with( (string) $status, '2' ) ) {
+                    continue;
+                }
+
+                foreach ( $response['content'] ?? [] as $type => $content ) {
+                    $schema = $content['schema'] ?? [];
+
+                    expect( $schema )->not->toBe( [ 'type' => 'object' ], sprintf( '%s %s %s has a bare object schema', $method, $path, $status ) )
+                        ->and( $schema )->not->toBe( [ 'type' => 'object', 'additionalProperties' => true ], sprintf( '%s %s %s has a free-form schema', $method, $path, $status ) );
+                }
+            }
+        }
+    }
+} );
+
+it( 'documents maps as objects and file downloads as binary', function (): void {
+    $options = $this->spec['paths']['/carts/{cart}/items']['post']['requestBody']['content']['application/json']['schema']['properties']['options'];
+
+    expect( (array) $options['type'] )->toContain( 'object' )->not->toContain( 'array' )
+        ->and( $options['maxProperties'] )->toBe( 20 );
+
+    $stream = $this->spec['paths']['/downloads/{token}/stream']['get']['responses'];
+
+    expect( $stream )->toHaveKeys( [ '200', '206', '416' ] )
+        ->and( array_keys( $stream['200']['content'] ) )->toBe( [ 'application/octet-stream' ] )
+        ->and( array_keys( $stream['206']['content'] ) )->toBe( [ 'application/octet-stream' ] );
+} );
+
+it( 'never emits an empty list where a schema object belongs', function (): void {
+    $json = json_encode( app( OpenApiGenerator::class )->generate(), JSON_THROW_ON_ERROR );
+
+    expect( $json )->not->toContain( '"schema":[]' )
+        ->and( $json )->not->toContain( '"properties":[]' )
+        ->and( $json )->not->toMatch( '/"items":\[\]/' );
 } );

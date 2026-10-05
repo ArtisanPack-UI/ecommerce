@@ -7,6 +7,7 @@ namespace Tests\Feature\Gateways\Stripe;
 use ArtisanPackUI\Ecommerce\Gateways\Stripe\StripeClientFactory;
 use ArtisanPackUI\Ecommerce\Gateways\Stripe\StripeGateway;
 use ArtisanPackUI\Ecommerce\Gateways\Stripe\StripeSignatureVerifier;
+use ArtisanPackUI\Ecommerce\ValueObjects\WebhookResult;
 use Illuminate\Http\Request;
 use Stripe\WebhookSignature;
 use Tests\TestCase;
@@ -96,6 +97,68 @@ final class StripeGatewayWebhookTest extends TestCase
 
         $this->assertFalse( $result->verified );
         $this->assertSame( 'webhook_secret_not_configured', $result->errorCode );
+    }
+
+    /**
+     * @return void
+     */
+    public function test_accepts_any_configured_secret_so_secrets_can_rotate(): void
+    {
+        $payload = $this->event( 'payment_intent.succeeded', [ 'id' => 'pi_rot' ] );
+
+        config()->set( 'artisanpack.ecommerce.gateways.stripe.webhook_secret', 'whsec_old, whsec_new' );
+
+        $this->assertTrue( $this->gateway()->handleWebhook( $this->signedRequest( $payload, 'whsec_old' ) )->verified );
+        $this->assertTrue( $this->gateway()->handleWebhook( $this->signedRequest( $payload, 'whsec_new' ) )->verified );
+
+        $timestamp = time();
+        $other     = Request::create( '/webhooks/stripe', 'POST', [], [], [], [], $payload );
+        $other->headers->set( StripeGateway::SIGNATURE_HEADER, sprintf( 't=%d,v1=%s', $timestamp, hash_hmac( 'sha256', $timestamp . '.' . $payload, 'whsec_other' ) ) );
+
+        $result = $this->gateway()->handleWebhook( $other );
+
+        $this->assertFalse( $result->verified );
+        $this->assertSame( 'signature_mismatch', $result->errorCode );
+    }
+
+    /**
+     * @return void
+     */
+    public function test_reports_a_normalized_payment_outcome(): void
+    {
+        config()->set( 'artisanpack.ecommerce.gateways.stripe.webhook_secret', 'whsec_test_secret' );
+
+        $cases = [
+            [ 'payment_intent.succeeded', [ 'id' => 'pi_a' ], WebhookResult::OUTCOME_SUCCEEDED, 'pi_a' ],
+            [ 'payment_intent.amount_capturable_updated', [ 'id' => 'pi_b' ], WebhookResult::OUTCOME_SUCCEEDED, 'pi_b' ],
+            [ 'payment_intent.payment_failed', [ 'id' => 'pi_c' ], WebhookResult::OUTCOME_FAILED, 'pi_c' ],
+            [ 'payment_intent.requires_action', [ 'id' => 'pi_d' ], WebhookResult::OUTCOME_REQUIRES_ACTION, 'pi_d' ],
+            [ 'charge.refunded', [ 'id' => 'ch_e', 'payment_intent' => 'pi_e' ], WebhookResult::OUTCOME_REFUNDED, 'pi_e' ],
+            [ 'customer.created', [ 'id' => 'cus_f' ], null, null ],
+        ];
+
+        foreach ( $cases as [ $type, $object, $outcome, $reference ] ) {
+            $result = $this->gateway()->handleWebhook( $this->signedRequest( $this->event( $type, $object ), 'whsec_test_secret' ) );
+
+            $this->assertSame( $outcome, $result->outcome, $type );
+            $this->assertSame( $reference, $result->sessionReference, $type );
+        }
+    }
+
+    /**
+     * A signed event payload.
+     *
+     * @param  array<string, mixed>  $object
+     */
+    private function event( string $type, array $object ): string
+    {
+        return json_encode( [
+            'id'          => 'evt_' . md5( $type . json_encode( $object ) ),
+            'type'        => $type,
+            'object'      => 'event',
+            'api_version' => '2024-06-20',
+            'data'        => [ 'object' => $object ],
+        ], JSON_THROW_ON_ERROR );
     }
 
     /**

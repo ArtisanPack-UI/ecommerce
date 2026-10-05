@@ -166,6 +166,8 @@ final class ResourceSchemas
                 'dim_unit'                => 'String',
                 'avg_rating'              => 'Float',
                 'reviews_count'           => 'Int',
+                'is_featured'             => 'Boolean',
+                'position'                => 'Int',
                 'meta'                    => 'JSON',
                 'published_at'            => 'DateTime',
             ] + $timestamps, [
@@ -270,6 +272,7 @@ final class ResourceSchemas
                 'first_name'           => 'String',
                 'last_name'            => 'String',
                 'phone'                => 'String',
+                'locale'               => 'String',
                 'accepts_marketing'    => 'Boolean',
                 'accepts_marketing_at' => 'DateTime',
                 'total_spent'          => 'Money',
@@ -324,6 +327,11 @@ final class ResourceSchemas
                 'tax'                 => 'Money!',
                 'shipping'            => 'Money!',
                 'total'               => 'Money!',
+                'checkout_state'      => 'String!',
+                'shipping_address'    => 'JSON',
+                'billing_address'     => 'JSON',
+                'payment_gateway_key' => 'String',
+                'locale'              => 'String',
                 'checkout_started_at' => 'DateTime',
                 'abandoned_at'        => 'DateTime',
                 'completed_order_id'  => 'Int',
@@ -341,7 +349,10 @@ final class ResourceSchemas
                 'quantity'           => 'Int!',
                 'unit_price'         => 'Money!',
                 'line_subtotal'      => 'Money!',
+                'discount'           => 'Money!',
+                'tax'                => 'Money!',
                 'line_total'         => 'Money!',
+                'is_free_item'       => 'Boolean!',
                 'options'            => 'JSON',
                 'meta'               => 'JSON',
             ], [
@@ -359,6 +370,7 @@ final class ResourceSchemas
                 'payment_status'      => 'String',
                 'fulfillment_status'  => 'String',
                 'currency'            => 'String!',
+                'locale'              => 'String',
                 'base_currency'       => 'String',
                 'fx_rate_to_base_e8'  => 'BigInt',
                 'subtotal'            => 'Money!',
@@ -382,6 +394,7 @@ final class ResourceSchemas
                 'items'            => [ 'OrderItem', true, 'items' ],
                 'customer'         => [ 'Customer', false, 'customer' ],
                 'notes'            => [ 'OrderNote', true, 'notes', true ],
+                'customer_notes'   => [ 'OrderNote', true, 'customerNotes' ],
                 'timeline'         => [ 'OrderTimelineEntry', true, 'timelineEntries', true ],
                 'edits'            => [ 'OrderEdit', true, 'edits', true ],
                 'refunds'          => [ 'Refund', true, 'refunds' ],
@@ -442,6 +455,7 @@ final class ResourceSchemas
             'Refund' => self::schema( Resources\RefundResource::class, Models\Refund::class, 'A refund issued against an order.', [
                 'order_id'          => 'Int!',
                 'amount'            => 'Money!',
+                'status'            => 'String!',
                 'reason'            => 'String',
                 'gateway_reference' => 'String',
                 'issued_by_user_id' => 'Int',
@@ -451,11 +465,13 @@ final class ResourceSchemas
             ] ),
 
             'RefundItem' => self::schema( Resources\RefundItemResource::class, Models\RefundItem::class, 'A per-line allocation of a refund.', [
-                'refund_id'     => 'Int!',
-                'order_item_id' => 'Int!',
-                'quantity'      => 'Int!',
-                'amount'        => 'Money!',
-                'restock'       => 'Boolean',
+                'refund_id'       => 'Int!',
+                'order_item_id'   => 'Int!',
+                'quantity'        => 'Int!',
+                'amount'          => 'Money!',
+                'tax_amount'      => 'Money!',
+                'shipping_amount' => 'Money!',
+                'restock'         => 'Boolean',
             ] ),
 
             'InventoryItem' => self::schema( Resources\InventoryItemResource::class, Models\InventoryItem::class, 'Stock levels for a product or variant.', [
@@ -681,6 +697,7 @@ final class ResourceSchemas
                 'version'            => 'String',
                 'is_streaming_only'  => 'Boolean!',
                 'checksum_sha256'    => 'String',
+                'archived_at'        => 'DateTime',
             ] + $timestamps ),
 
             'DigitalDownload' => self::schema( Resources\DigitalDownloadResource::class, Models\DigitalDownload::class, 'A download entitlement for one order line and file.', [
@@ -692,7 +709,10 @@ final class ResourceSchemas
                 'last_downloaded_at'  => 'DateTime',
                 'download_count'      => 'Int!',
             ] + $timestamps, [
-                'file' => [ 'DigitalFile', false, 'file', true ],
+                // Shoppers see their own entitlements' files (#174); the
+                // storage disk and path stay admin-only on DigitalFile.
+                'file'       => [ 'DigitalFile', false, 'file' ],
+                'order_item' => [ 'OrderItem', false, 'orderItem' ],
             ] ),
 
             'LicenseKey' => self::schema( Resources\LicenseKeyResource::class, Models\LicenseKey::class, 'A software license key issued for an order line.', [
@@ -707,6 +727,7 @@ final class ResourceSchemas
                 'meta'              => 'JSON',
             ] + $timestamps, [
                 'activations' => [ 'LicenseActivation', true, 'activations' ],
+                'order_item'  => [ 'OrderItem', false, 'orderItem' ],
             ] ),
 
             'LicenseActivation' => self::schema( Resources\LicenseActivationResource::class, Models\LicenseActivation::class, 'A machine a license key is activated on.', [

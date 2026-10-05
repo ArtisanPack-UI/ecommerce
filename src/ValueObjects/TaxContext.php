@@ -35,12 +35,17 @@ final class TaxContext
      * @param  string       $providerKey       Registry key of the provider that will run.
      * @param  bool         $pricesIncludeTax  Whether line prices are tax-inclusive.
      * @param  string|null  $taxClassKey       Tax class being resolved (set during rate resolution).
+     * @param  array<int, int>  $lineDiscounts  Discount each cart line received (cart-item id → minor units),
+     *                                         from the promotion ledger. Providers tax each line on its own
+     *                                         price less its own discount; empty means only the cart-level
+     *                                         discount is known and is spread across lines.
      */
     public function __construct(
         public readonly Address $destination,
         public readonly string $providerKey,
         public readonly bool $pricesIncludeTax,
         public readonly ?string $taxClassKey = null,
+        public readonly array $lineDiscounts = [],
     ) {
     }
 
@@ -55,6 +60,6 @@ final class TaxContext
      */
     public function forClass( string $taxClassKey ): self
     {
-        return new self( $this->destination, $this->providerKey, $this->pricesIncludeTax, $taxClassKey );
+        return new self( $this->destination, $this->providerKey, $this->pricesIncludeTax, $taxClassKey, $this->lineDiscounts );
     }
 }

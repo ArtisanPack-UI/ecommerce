@@ -35,6 +35,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Auth;
 
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 
@@ -76,6 +77,29 @@ class EcommerceAuthorizer
         );
 
         return $allowed && TokenAbilities::allowsAction( $user, $resource, $action );
+    }
+
+    /**
+     * The gate subject for a REST request (audit F12): the first route
+     * parameter bound to an Eloquent model, or null — never the Request, so
+     * a gate typed on a model (`fn ( $user, Order $order )`) works and one
+     * with no subject gets none.
+     *
+     * @since 1.0.0
+     *
+     * @param  Request  $request  Request.
+     *
+     * @return Model|null
+     */
+    public static function routeSubject( Request $request ): ?Model
+    {
+        foreach ( (array) ( $request->route()?->parameters() ?? [] ) as $parameter ) {
+            if ( $parameter instanceof Model ) {
+                return $parameter;
+            }
+        }
+
+        return null;
     }
 
     /**

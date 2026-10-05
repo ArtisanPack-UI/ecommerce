@@ -98,21 +98,26 @@ interface NotificationTemplate
     public function previewData(): array;
 
     /**
-     * Default Twig source for the subject line (null for channels without
-     * one).
+     * Default Twig source for the subject line in `$locale` (null for
+     * channels without one). A null locale means the current app locale.
      *
      * @since 1.0.0
+     *
+     * @param  string|null  $locale  Locale.
      *
      * @return string|null
      */
-    public function defaultSubject(): ?string;
+    public function defaultSubject( ?string $locale = null ): ?string;
 
     /**
-     * Default Twig source for the body.
+     * Default Twig source for the body in `$locale` (null: the current app
+     * locale).
      *
      * @since 1.0.0
      *
+     * @param  string|null  $locale  Locale.
+     *
      * @return string
      */
-    public function defaultBody(): string;
+    public function defaultBody( ?string $locale = null ): string;
 }

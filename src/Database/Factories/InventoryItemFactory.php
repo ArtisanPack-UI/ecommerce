@@ -39,7 +39,7 @@ class InventoryItemFactory extends Factory
     public function definition(): array
     {
         return [
-            'stockable_type'    => Product::class,
+            'stockable_type'    => ( new Product() )->getMorphClass(),
             'stockable_id'      => Product::factory(),
             'track_inventory'   => true,
             'quantity_on_hand'  => 10,

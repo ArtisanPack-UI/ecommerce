@@ -49,6 +49,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property array<string, mixed>      $options
  * @property array<string, mixed>      $meta
  * @property string                    $options_hash
+ * @property int                       $discount_amount
+ * @property int                       $tax_amount
  * @property Cart                      $cart
  * @property Product                   $product
  * @property ProductVariant|null       $variant
@@ -62,7 +64,7 @@ class CartItem extends Model
      *
      * @var string
      */
-    protected $table = 'cart_items';
+    protected $table = 'ecommerce_cart_items';
 
     /**
      * @since 1.0.0
@@ -80,6 +82,8 @@ class CartItem extends Model
         'line_subtotal_currency',
         'line_total_amount',
         'line_total_currency',
+        'discount_amount',
+        'tax_amount',
         'options',
         'meta',
         'options_hash',
@@ -122,6 +126,20 @@ class CartItem extends Model
     }
 
     /**
+     * Whether this line was added by a promotion (`meta.free_item`): it is
+     * priced at zero, never re-priced, and removed when the promotion stops
+     * applying.
+     *
+     * @since 1.0.0
+     *
+     * @return bool
+     */
+    public function isFreeItem(): bool
+    {
+        return true === ( $this->meta['free_item'] ?? false );
+    }
+
+    /**
      * Canonicalizes a cart-line options array and returns its SHA-256 hash.
      *
      * Associative keys are recursively sorted before encoding so semantically
@@ -157,6 +175,8 @@ class CartItem extends Model
             'unit_price_amount'    => 'integer',
             'line_subtotal_amount' => 'integer',
             'line_total_amount'    => 'integer',
+            'discount_amount'      => 'integer',
+            'tax_amount'           => 'integer',
             'options'              => 'array',
             'meta'                 => 'array',
         ];

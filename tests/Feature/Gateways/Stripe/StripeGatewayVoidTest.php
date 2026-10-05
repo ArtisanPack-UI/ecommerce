@@ -29,7 +29,9 @@ function fakeStripeHttp( array $responses ): object
         {
         }
 
-        public function request( $method, $absUrl, $headers, $params, $hasFile ): array
+        // stripe-php 17+ added `$apiMode` and `$maxNetworkRetries`; declaring
+        // them optional keeps the fake compatible with every supported major.
+        public function request( $method, $absUrl, $headers, $params, $hasFile, $apiMode = 'v1', $maxNetworkRetries = null ): array
         {
             $call          = strtoupper( $method ) . ' ' . parse_url( $absUrl, PHP_URL_PATH );
             $this->calls[] = $call;

@@ -54,7 +54,7 @@ class InventoryController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List inventory items', resource: InventoryItemResource::class, collection: true )]
+    #[ApiOperation( summary: 'List inventory items', resource: InventoryItemResource::class, collection: true, filters: [ 'stockable_id' => 'int-list', 'warehouse_id' => 'int-list', 'low_stock' => 'string' ], sorts: [ 'quantity_on_hand' ], includes: [ 'reservations' ] )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(

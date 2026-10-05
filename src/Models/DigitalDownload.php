@@ -70,7 +70,7 @@ class DigitalDownload extends Model
      *
      * @var string
      */
-    protected $table = 'digital_downloads';
+    protected $table = 'ecommerce_digital_downloads';
 
     /**
      * @since 1.0.0

@@ -33,6 +33,7 @@ use ArtisanPackUI\Ecommerce\Models\CustomerNote;
 use ArtisanPackUI\Ecommerce\Models\InventoryItem;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\Models\ProductVariant;
+use ArtisanPackUI\Ecommerce\Support\MorphType;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -240,11 +241,11 @@ class ActivityLogService
         $variantId = null;
         $product   = null;
 
-        if ( ( new ProductVariant() )->getMorphClass() === $item->stockable_type || ProductVariant::class === $item->stockable_type ) {
+        if ( MorphType::is( $item->stockable_type, ProductVariant::class ) ) {
             $variant   = ProductVariant::query()->find( $item->stockable_id );
             $variantId = $variant?->id;
             $product   = $variant?->product;
-        } elseif ( ( new Product() )->getMorphClass() === $item->stockable_type || Product::class === $item->stockable_type ) {
+        } elseif ( MorphType::is( $item->stockable_type, Product::class ) ) {
             $product = Product::query()->find( $item->stockable_id );
         }
 

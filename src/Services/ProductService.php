@@ -42,6 +42,7 @@ use ArtisanPackUI\Ecommerce\Models\ProductCategory;
 use ArtisanPackUI\Ecommerce\Models\ProductChild;
 use ArtisanPackUI\Ecommerce\Models\ProductImage;
 use ArtisanPackUI\Ecommerce\Models\ProductPrice;
+use ArtisanPackUI\Ecommerce\Models\ProductRelation;
 use ArtisanPackUI\Ecommerce\Models\ProductTag;
 use ArtisanPackUI\Ecommerce\Models\ProductVariant;
 use ArtisanPackUI\Ecommerce\Models\ProductVariantOptionValue;
@@ -91,6 +92,8 @@ class ProductService
         'width',
         'height',
         'dim_unit',
+        'is_featured',
+        'position',
         'meta',
         'published_at',
     ];
@@ -141,6 +144,24 @@ class ProductService
     public const STATUSES = [ 'draft', 'active', 'archived' ];
 
     /**
+     * Weight units for products and variants.
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    public const WEIGHT_UNITS = [ 'g', 'kg', 'oz', 'lb' ];
+
+    /**
+     * Dimension units for products and variants.
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    public const DIMENSION_UNITS = [ 'mm', 'cm', 'in' ];
+
+    /**
      * htmLawed config for product rich text: safe mode drops `<script>`,
      * embeds, event-handler attributes, and `javascript:` URLs, which
      * `kses()`'s default config keeps.
@@ -185,7 +206,9 @@ class ProductService
      * `starts_at`, `ends_at`), `category_ids`, `tag_ids`, `images` (rows of
      * `media_id` or `image_url`, plus `alt_text`), `featured_image_url`,
      * `attributes` (see {@see self::syncAttributes()}), `children` (rows of
-     * `product_id`, `variant_id`, `quantity`), `inventory` (the
+     * `product_id`, `variant_id`, `quantity`), `relations` (`upsell`,
+     * `cross_sell`, `related` → product ids, see {@see self::syncProductRelations()}),
+     * `inventory` (the
      * {@see self::INVENTORY_SETTINGS} plus an opening `quantity_on_hand`).
      *
      * @since 1.0.0
@@ -281,7 +304,8 @@ class ProductService
 
     /**
      * Deletes a product with its variants, prices, stock rows, gallery,
-     * attributes, links, and children.
+     * attributes, links, and children. Refused while the product sits in an
+     * open cart; lines in expired carts are removed with it.
      *
      * Order lines keep their snapshot; digital files are detached by their
      * foreign key.
@@ -294,11 +318,14 @@ class ProductService
      */
     public function delete( Product $product ): void
     {
-        if ( CartItem::query()->where( 'product_id', $product->id )->exists() ) {
+        if ( CartItem::query()->where( 'product_id', $product->id )->whereHas( 'cart', static fn ( $cart ) => $cart->open() )->exists() ) {
             throw ProductWriteException::field( 'id', 'in-carts', __( 'This product is in shoppers\' carts. Archive it instead, or wait for those carts to expire.' ) );
         }
 
         DB::transaction( function () use ( $product ): void {
+            // Lines left in expired carts no longer hold anything up.
+            CartItem::query()->where( 'product_id', $product->id )->delete();
+
             $variantIds = $product->variants()->pluck( 'id' )->all();
 
             $this->deletePolymorphicRows( ProductVariant::class, $variantIds );
@@ -574,6 +601,7 @@ class ProductService
         }
 
         return DB::transaction( function () use ( $priceable, $normalized ): Collection {
+            $this->lockPriceOwner( $priceable );
             $priceable->prices()->delete();
 
             foreach ( $normalized as $row ) {
@@ -601,19 +629,16 @@ class ProductService
         $this->assertOwnerEditable( $priceable );
 
         $clean = $this->normalizePrice( $row, null );
+        $key   = $this->windowKey( $clean['currency'], $clean['starts_at'], $clean['ends_at'] );
 
-        $query = $priceable->prices()->where( 'currency', $clean['currency'] );
+        return DB::transaction( function () use ( $priceable, $clean, $key ): ProductPrice {
+            $this->lockPriceOwner( $priceable );
 
-        foreach ( [ 'starts_at', 'ends_at' ] as $column ) {
-            null === $clean[ $column ]
-                ? $query->whereNull( $column )
-                : $query->where( $column, $clean[ $column ] );
-        }
+            $price = $priceable->prices()->where( 'window_key', $key )->first() ?? $priceable->prices()->make();
+            $price->fill( $clean )->save();
 
-        $price = $query->first() ?? $priceable->prices()->make();
-        $price->fill( $clean )->save();
-
-        return $price;
+            return $price;
+        } );
     }
 
     /**
@@ -645,21 +670,28 @@ class ProductService
             'ends_at'           => $price->ends_at,
         ], $row ), null );
 
-        $key   = $this->windowKey( $clean['currency'], $clean['starts_at'], $clean['ends_at'] );
-        $clash = ProductPrice::query()
-            ->where( 'priceable_type', $price->priceable_type )
-            ->where( 'priceable_id', $price->priceable_id )
-            ->whereKeyNot( $price->id )
-            ->get()
-            ->contains( fn ( ProductPrice $other ): bool => $this->windowKey( $other->currency, $other->starts_at, $other->ends_at ) === $key );
+        $key = $this->windowKey( $clean['currency'], $clean['starts_at'], $clean['ends_at'] );
 
-        if ( $clash ) {
-            throw ProductWriteException::field( 'currency', 'duplicate-price', __( 'Two prices share this currency and schedule.' ) );
-        }
+        return DB::transaction( function () use ( $price, $owner, $clean, $key ): ProductPrice {
+            if ( $owner instanceof Product || $owner instanceof ProductVariant ) {
+                $this->lockPriceOwner( $owner );
+            }
 
-        $price->fill( $clean )->save();
+            $clash = ProductPrice::query()
+                ->where( 'priceable_type', $price->priceable_type )
+                ->where( 'priceable_id', $price->priceable_id )
+                ->where( 'window_key', $key )
+                ->whereKeyNot( $price->id )
+                ->exists();
 
-        return $price;
+            if ( $clash ) {
+                throw ProductWriteException::field( 'currency', 'duplicate-price', __( 'Two prices share this currency and schedule.' ) );
+            }
+
+            $price->fill( $clean )->save();
+
+            return $price;
+        } );
     }
 
     /**
@@ -960,6 +992,61 @@ class ProductService
     }
 
     /**
+     * Replaces `$product`'s hand-picked `$type` links (#182) with
+     * `$ids`, in that order. A product can't link to itself or to the same
+     * product twice.
+     *
+     * @since 1.0.0
+     *
+     * @param  Product          $product  Product.
+     * @param  string           $type     {@see ProductRelation::TYPES}.
+     * @param  array<int, int>  $ids      Related product ids, in order.
+     *
+     * @throws ProductWriteException When the type or an id is invalid.
+     *
+     * @return Collection<int, ProductRelation>
+     */
+    public function syncProductRelations( Product $product, string $type, array $ids ): Collection
+    {
+        $this->assertEditable( $product );
+
+        if ( ! in_array( $type, ProductRelation::TYPES, true ) ) {
+            throw ProductWriteException::field( 'relations', 'invalid-relation-type', __( 'Unknown relation type ":type".', [ 'type' => $type ] ) );
+        }
+
+        $clean = [];
+
+        foreach ( array_values( $ids ) as $index => $id ) {
+            $id    = (int) $id;
+            $field = "relations.{$type}.{$index}";
+
+            if ( $id === (int) $product->id ) {
+                throw ProductWriteException::field( $field, 'relation-self', __( 'A product can\'t be related to itself.' ) );
+            }
+
+            if ( in_array( $id, $clean, true ) ) {
+                throw ProductWriteException::field( $field, 'duplicate-relation', __( 'That product is already in the list.' ) );
+            }
+
+            if ( ! Product::query()->whereKey( $id )->exists() ) {
+                throw ProductWriteException::field( $field, 'relation-missing', __( 'That product no longer exists.' ) );
+            }
+
+            $clean[] = $id;
+        }
+
+        return DB::transaction( function () use ( $product, $type, $clean ): Collection {
+            ProductRelation::query()->where( 'product_id', $product->id )->where( 'type', $type )->delete();
+
+            foreach ( $clean as $position => $id ) {
+                ProductRelation::query()->create( [ 'product_id' => $product->id, 'related_product_id' => $id, 'type' => $type, 'position' => $position ] );
+            }
+
+            return ProductRelation::query()->where( 'product_id', $product->id )->where( 'type', $type )->orderBy( 'position' )->get();
+        } );
+    }
+
+    /**
      * Replaces the members of a grouped or bundled product.
      *
      * Each row is `product_id`, optional `variant_id` (a variant of that
@@ -1103,11 +1190,17 @@ class ProductService
      */
     public function inventoryItemFor( Product|ProductVariant $stockable ): InventoryItem
     {
-        return InventoryItem::query()->firstOrCreate( [
+        $key = [
             'stockable_type' => $stockable->getMorphClass(),
             'stockable_id'   => $stockable->getKey(),
-            'warehouse_id'   => null,
-        ] );
+            'warehouse_id'   => InventoryItem::DEFAULT_WAREHOUSE,
+        ];
+
+        // Read first so the common case never attempts an insert; when the
+        // row is missing, createOrFirst() lets the unique index settle a race
+        // between two first-time callers instead of creating a second row.
+        return InventoryItem::query()->where( $key )->first()
+            ?? InventoryItem::query()->createOrFirst( $key );
     }
 
     /**
@@ -1150,6 +1243,22 @@ class ProductService
         if ( $product->typeIsMissing() ) {
             throw ProductWriteException::field( 'type', 'type-missing', (string) $product->typeWarning() );
         }
+    }
+
+    /**
+     * Locks the price owner's row so concurrent price writes for the same
+     * product or variant run one at a time. The unique window index stays
+     * the backstop.
+     *
+     * @since 1.0.0
+     *
+     * @param  Product|ProductVariant  $priceable  Owner.
+     *
+     * @return void
+     */
+    protected function lockPriceOwner( Product|ProductVariant $priceable ): void
+    {
+        $priceable->newQuery()->whereKey( $priceable->getKey() )->lockForUpdate()->first();
     }
 
     /**
@@ -1280,6 +1389,8 @@ class ProductService
             }
         }
 
+        $this->assertUnits( $values );
+
         if ( array_key_exists( 'meta', $values ) ) {
             // Each top-level meta key is replaced as a whole (not merged deeply).
             $values['meta'] = array_replace( (array) ( $product->meta ?? [] ), (array) $values['meta'] );
@@ -1346,6 +1457,10 @@ class ProductService
 
         if ( array_key_exists( 'children', $data ) ) {
             $this->syncChildren( $product, (array) $data['children'] );
+        }
+
+        foreach ( (array) ( $data['relations'] ?? [] ) as $type => $ids ) {
+            $this->syncProductRelations( $product, (string) $type, (array) $ids );
         }
     }
 
@@ -1422,6 +1537,8 @@ class ProductService
                 $values[ $column ] = $this->blankToNull( $values[ $column ] );
             }
         }
+
+        $this->assertUnits( $values );
 
         if ( array_key_exists( 'meta', $values ) ) {
             $values['meta'] = array_replace( (array) ( $variant->meta ?? [] ), (array) $values['meta'] );
@@ -1744,7 +1861,7 @@ class ProductService
      */
     protected function windowKey( string $currency, ?DateTimeInterface $starts, ?DateTimeInterface $ends ): string
     {
-        return $currency . '|' . ( $starts?->getTimestamp() ?? '' ) . '|' . ( $ends?->getTimestamp() ?? '' );
+        return ProductPrice::windowKeyFor( $currency, $starts, $ends );
     }
 
     /**
@@ -1957,6 +2074,30 @@ class ProductService
             ->where( 'sku', $sku )
             ->when( null !== $ignoreVariantId, static fn ( $query ) => $query->whereKeyNot( $ignoreVariantId ) )
             ->exists();
+    }
+
+    /**
+     * Refuses a weight or dimension unit outside {@see self::WEIGHT_UNITS}
+     * and {@see self::DIMENSION_UNITS}. The columns are plain strings, so
+     * this is the only check in-process callers get.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<string, mixed>  $values  Normalized product or variant values.
+     *
+     * @throws ProductWriteException When a unit isn't allowed.
+     *
+     * @return void
+     */
+    protected function assertUnits( array $values ): void
+    {
+        if ( null !== ( $values['weight_unit'] ?? null ) && ! in_array( $values['weight_unit'], self::WEIGHT_UNITS, true ) ) {
+            throw ProductWriteException::field( 'weight_unit', 'invalid-weight-unit', __( 'Choose a weight unit: :units.', [ 'units' => implode( ', ', self::WEIGHT_UNITS ) ] ) );
+        }
+
+        if ( null !== ( $values['dim_unit'] ?? null ) && ! in_array( $values['dim_unit'], self::DIMENSION_UNITS, true ) ) {
+            throw ProductWriteException::field( 'dim_unit', 'invalid-dimension-unit', __( 'Choose a dimension unit: :units.', [ 'units' => implode( ', ', self::DIMENSION_UNITS ) ] ) );
+        }
     }
 
     /**

@@ -29,8 +29,9 @@ use Illuminate\Console\Command;
  * (tax rates, shipping zones, promotions, coupons, kanban boards) — so it
  * can never mix demo rows into real data. `--fresh` empties the engine's data tables first
  * (host tables such as `users` and `migrations` are never touched); it
- * asks for confirmation unless `--force` is given, and in production it
- * refuses to run at all without `--force`.
+ * asks for confirmation unless `--force` is given. In production the
+ * command refuses to run without `--force`, and `--fresh` also needs
+ * `--i-understand-this-deletes-production-data`.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -47,7 +48,8 @@ class SeedDemoCommand extends Command
         {--products=50 : Number of products to create.}
         {--orders=200 : Number of orders to create (placed over the last 90 days).}
         {--seed= : Random seed; the same seed produces the same store.}
-        {--force : Skip the confirmation prompt and allow running in production.}';
+        {--force : Skip the confirmation prompt and allow running in production.}
+        {--i-understand-this-deletes-production-data : Required, as well as --force, to use --fresh in production.}';
 
     /**
      * @var string
@@ -68,6 +70,14 @@ class SeedDemoCommand extends Command
 
         if ( $this->laravel->environment( 'production' ) && ! $force ) {
             $this->error( __( 'Refusing to seed demo data in production. Re-run with --force if you really mean it.' ) );
+
+            return self::FAILURE;
+        }
+
+        // --force is easy to carry over from a staging script; wiping a live
+        // store takes its own, unmistakable flag (audit G6).
+        if ( $fresh && $this->laravel->environment( 'production' ) && ! (bool) $this->option( 'i-understand-this-deletes-production-data' ) ) {
+            $this->error( __( 'Refusing to empty the store in production. --fresh there also needs --i-understand-this-deletes-production-data.' ) );
 
             return self::FAILURE;
         }

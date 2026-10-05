@@ -14,7 +14,8 @@
  * - `get_product_ids` / `get_variant_ids` — reward items (default: the buy set).
  * - `buy_quantity`, `get_quantity` — positive integers.
  * - `percent` — discount on reward units (default 100).
- * - `max_applications` — optional cap on how many times it applies.
+ * - `max_applications` — optional cap on how many times it applies (0 or
+ *   empty: no limit).
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -84,7 +85,7 @@ class BuyXGetYAction extends AbstractPromotionAction
             ConfigField::make( 'get_product_ids', 'product', __( 'Get products' ), [ 'multiple' => true, 'help' => __( 'Leave empty to reward the products being bought.' ) ] ),
             ConfigField::make( 'get_variant_ids', 'variant', __( 'Get variants' ), [ 'multiple' => true ] ),
             ConfigField::make( 'percent', 'percent', __( 'Discount on the rewarded items' ), [ 'default' => 100 ] ),
-            ConfigField::make( 'max_applications', 'number', __( 'Maximum applications' ), [ 'rules' => [ 'integer', 'min:0' ] ] ),
+            ConfigField::make( 'max_applications', 'number', __( 'Maximum applications' ), [ 'rules' => [ 'integer', 'min:0' ], 'help' => __( 'Leave empty or 0 for no limit.' ) ] ),
         ];
     }
 
@@ -116,8 +117,9 @@ class BuyXGetYAction extends AbstractPromotionAction
             return;
         }
 
-        $maxApplications = isset( $config['max_applications'] ) && is_numeric( $config['max_applications'] )
-            ? max( 0, (int) $config['max_applications'] )
+        // Missing, empty, or 0 means unlimited (audit D17).
+        $maxApplications = isset( $config['max_applications'] ) && is_numeric( $config['max_applications'] ) && (int) $config['max_applications'] > 0
+            ? (int) $config['max_applications']
             : PHP_INT_MAX;
 
         // Remaining units per line, and per-line reward counts.

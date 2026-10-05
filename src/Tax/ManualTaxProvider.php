@@ -133,7 +133,7 @@ class ManualTaxProvider implements ContextAwareTaxProvider
         $items->loadMissing( 'product' );
 
         $zero      = new Money( 0, $currency );
-        $bases     = $this->lineBases( $cart, $items->all(), $currency );
+        $bases     = $this->lineBases( $cart, $items->all(), $currency, $context->lineDiscounts );
         $rateCache = [];
         $perLine   = [];
         $breakdown = [];
@@ -219,33 +219,40 @@ class ManualTaxProvider implements ContextAwareTaxProvider
     }
 
     /**
-     * Taxable base per line: the line total less its proportional share of
-     * the cart-level discount, keyed by cart-item id.
+     * The taxable base of each line: its total less its share of the
+     * discount. Discounts a promotion gave a specific line (`$lineDiscounts`,
+     * from the promotion ledger) come off that line only; whatever cart-level
+     * discount is left is spread across the lines in proportion to what they
+     * still cost. Without per-line discounts the whole cart discount is
+     * spread that way.
      *
      * @since 1.0.0
      *
-     * @param  Cart                 $cart      Cart being taxed.
-     * @param  array<int, CartItem> $items     Cart lines.
-     * @param  Currency             $currency  Cart currency.
+     * @param  Cart             $cart           Cart.
+     * @param  array<int, CartItem>  $items     Lines.
+     * @param  Currency         $currency       Cart currency.
+     * @param  array<int, int>  $lineDiscounts  Discount per line id.
      *
      * @return array<int, Money>
      */
-    protected function lineBases( Cart $cart, array $items, Currency $currency ): array
+    protected function lineBases( Cart $cart, array $items, Currency $currency, array $lineDiscounts = [] ): array
     {
         $bases = [];
 
         foreach ( $items as $item ) {
-            $bases[ $item->id ] = new Money( max( 0, (int) $item->line_total_amount ), $currency );
+            $own                = min( max( 0, (int) ( $lineDiscounts[ $item->id ] ?? 0 ) ), max( 0, (int) $item->line_total_amount ) );
+            $bases[ $item->id ] = new Money( max( 0, (int) $item->line_total_amount ) - $own, $currency );
         }
 
-        $sum      = array_sum( array_map( static fn ( Money $m ): int => (int) $m->getAmount(), $bases ) );
-        $discount = min( max( 0, (int) $cart->discount_amount ), $sum );
+        $sum       = array_sum( array_map( static fn ( Money $m ): int => (int) $m->getAmount(), $bases ) );
+        $remainder = max( 0, (int) $cart->discount_amount - array_sum( array_map( static fn ( mixed $amount ): int => max( 0, (int) $amount ), $lineDiscounts ) ) );
+        $remainder = min( $remainder, $sum );
 
-        if ( 0 === $discount || 0 === $sum ) {
+        if ( 0 === $remainder || 0 === $sum ) {
             return $bases;
         }
 
-        $shares = ( new Money( $discount, $currency ) )->allocate(
+        $shares = ( new Money( $remainder, $currency ) )->allocate(
             array_map( static fn ( Money $m ): int => (int) $m->getAmount(), $bases ),
         );
 

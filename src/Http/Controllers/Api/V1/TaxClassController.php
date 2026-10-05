@@ -39,7 +39,7 @@ class TaxClassController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List tax classes', resource: TaxClassResource::class, collection: true )]
+    #[ApiOperation( summary: 'List tax classes', resource: TaxClassResource::class, collection: true, filters: [ 'key' => 'string' ], sorts: [ 'key' ], includes: [ 'rates' ] )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse( TaxClass::query(), $request, TaxClassResource::class, [ 'key' => 'key' ], [ 'key' => 'key' ], [ 'rates' => 'rates' ], 'key' );

@@ -68,7 +68,7 @@ class OrderBoardAssignment extends Model
      *
      * @var string
      */
-    protected $table = 'order_board_assignments';
+    protected $table = 'ecommerce_order_board_assignments';
 
     /**
      * @since 1.0.0

@@ -2,7 +2,7 @@
 
 **Status:** Draft (schema-of-record for Phase 0)
 **Owner:** Jacob Martella
-**Last updated:** 2026-09-06
+**Last updated:** 2026-10-05
 **Parent plan:** [`12-ecommerce-package-plan.md`](../../../../../Herd/artisanpack-ui-dev/docs/plans/12-ecommerce-package-plan.md)
 **Sibling reference:** [`../hooks-spec.md`](../hooks-spec.md) — the authoritative hook-name catalog that this spec's §6 mirrors and extends.
 
@@ -372,6 +372,29 @@ CREATE TABLE product_children (
 ```
 
 `ProductService::syncChildren()` enforces the rules the schema can't: only `grouped` / `bundled` types (or a satellite type registered with `has_children => true`) have children, a product can't contain itself, a (product, variant) pair appears once, and a product can't contain anything that already contains it (no cycles at any depth).
+
+### 3.10b `product_relations`
+
+Hand-picked links between products (engine issue #182): `upsell` (offered on the product page instead of the product), `cross_sell` (suggested in the cart), and `related` ("you may also like"), each list ordered by `position`.
+
+```sql
+CREATE TABLE product_relations (
+    id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    product_id          BIGINT UNSIGNED NOT NULL,
+    related_product_id  BIGINT UNSIGNED NOT NULL,
+    type                VARCHAR(20) NOT NULL,                              -- upsell | cross_sell | related
+    position            INT UNSIGNED NOT NULL DEFAULT 0,
+    created_at          TIMESTAMP NULL,
+    updated_at          TIMESTAMP NULL,
+    UNIQUE KEY product_relations_uk (product_id, type, related_product_id),
+    KEY product_relations_product_type_idx (product_id, type, position),
+    KEY product_relations_related_idx (related_product_id),
+    CONSTRAINT product_relations_product_fk FOREIGN KEY (product_id)         REFERENCES products(id) ON DELETE CASCADE,
+    CONSTRAINT product_relations_related_fk FOREIGN KEY (related_product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+```
+
+Written through `ProductService::syncProductRelations()` (and the `relations` key of product writes, and `POST admin/products/{product}/relations`), which refuses self-links and duplicates. `Catalog\RelatedProducts::for()` returns the visible hand-picked products and, for `related`, fills the list from products sharing a category, then a tag (filter `ap.ecommerce.product.related`); `crossSellsForCart()` returns the cart products' cross-sells that aren't already in the cart (filter `ap.ecommerce.cart.crossSells`). Read over REST at `GET products/{product}/related?type=` and `GET carts/{cart}/cross-sells`.
 
 ### 3.11 `inventory_items`
 
@@ -2505,3 +2528,24 @@ Authorization: `EcommerceChannelPolicy` gates all three.
 - **2026-09-29** — Phase 5: `NotificationTemplate` gains `category()`, `defaultSubject()`, and `defaultBody()` (the catalog needs a preference category and shipped copy); `digitalFile` gains `viewAny` for `GET admin/digital-files`; `LicenseActivated` event added for new license activations. The §10 GraphQL fields for reviews, licenses, digital files, and notification preferences are deferred; the notification-template fields shipped.
 - **2026-10-04** — Admin prerequisites. Inventory writes in §9.6 (#140). `AdminMenuRegistry` (#144) and `NotificationChannelRegistry` (#150), with their §5 rows filled in. The webhook deliveries list and read (#150). Optional `Contracts\DescribesConfig` config schemas on promotion conditions and actions, shipping method types, kanban triggers, and card widgets; writes validate against them, and the new `admin/promotion-conditions`, `admin/promotion-actions`, and `admin/shipping-method-types` catalogs, plus `kanban/widgets` and `kanban/triggers`, return them (#149). The cms-framework decision in §6.18 (#151). `PaymentGateway::voidPendingPayment()` must be idempotent, and must throw rather than return when a void is refused, the payment was captured, or the outcome is unconfirmed; `StripeGateway` now does, and the fraud path catches it (#154). Label purchases claim the shipment instead of holding its lock during the carrier call, and `ShippingLabelProvider::buyLabel()` receives a stable claim key (#155).
 - **2026-10-01** — Catalog writes (#139): `ProductService` / `ProductCategoryService` / `ProductTagService` are the one write path for products, variants, prices, images, attributes, categories, tags, and stock; §9.5 admin REST endpoints and the §10.3 catalog mutations ship; `product_children` (§3.10a) stores grouped/bundled members; core now registers `variable`, `grouped`, and `bundled`; the §6.9 product lifecycle hooks fire from the models; digital products may override the download limit and expiry in `meta.digital`.
+- **2026-10-05** — 1.0 release-readiness audit (`docs/audits/1.0.0-release-readiness.md`). Design changes:
+  - **Checkout (Q1).** The engine provides checkout services and APIs, and storefronts build the flow and UI. `CheckoutService`, `OrderPlacementService`, and `CheckoutReservations` are new. REST `checkout/{cart}` (show, start, address, shipping-method, payment-gateway, session, finalize) and the matching GraphQL checkout query and mutations are added. Payment sessions are reconciled from webhooks and by `ecommerce:reconcile-payments`.
+  - **Storefront APIs.** New storefront endpoints:
+    - carts: `carts/{cart}/merge`, shipping rates and rate selection, `PATCH carts/{cart}`, `DELETE carts/{cart}/items`;
+    - the shopper's own account: `me`, `me/addresses`, `me/orders`, `me/claims`;
+    - catalog: `categories`, `categories/{category}`, `categories/{category}/products`, `tags`;
+    - `license/deactivate`;
+    - signed notification unsubscribe links.
+  - **Tables and dependencies.** Every table carries the `ecommerce_` prefix. Stripe (`stripe/stripe-php`) and GraphQL (`rebing/graphql-laravel`) are optional dependencies. Laravel 13 is supported.
+  - **New events and webhooks.** Each also derives a webhook (§8.3): `OrderPlaced`, `CartCompleted`, `CartAbandoned`, `CouponRedeemed`, `PromotionApplied`, `ShipmentCreated`, `ShipmentDelivered`, `OrderFulfilled`, `CustomerRegistered`, `CustomerUpdated`, `ProductStockLow`, `ProductOutOfStock`, and `LicenseDeactivated`.
+  - **New promotion rules.** Conditions: `min-quantity`, `cart-contains-category`, `cart-contains-tag`, `customer-lifetime-value-over`, `date-range`, `currency-is`. Action: `fixed-off-product`.
+  - **Contract changes.**
+    - `NotificationTemplate::defaultSubject()` / `defaultBody()` take an optional locale.
+    - Orders and customers gain `locale`.
+    - The APIs negotiate `Accept-Language` (`localization.supported_locales`).
+    - Notification mail carries a text part and, for opt-out categories, `List-Unsubscribe`.
+    - Token scopes `orders.refund`, `orders.cancel`, `customers.delete`, and `settings.write` are dedicated.
+    - Validation errors carry the rule name as `code`.
+    - The inbound webhook endpoint limits per IP. It counts a provider's allowance only after verification, and refuses unknown providers and oversized bodies without storing them.
+  - **Operations.** Ledger retention (`retention.*`, `ecommerce:prune-ledgers`). The schedule is configurable (`schedule.enabled`, `schedule.tasks`) and runs on one server.
+  - **Entry point.** `Ecommerce` hands out the main services (`cart()`, `checkout()`, `orders()`, `payments()`, `catalog()`, `customers()`, `inventory()`).

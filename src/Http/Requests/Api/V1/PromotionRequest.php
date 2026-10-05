@@ -19,6 +19,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Models\Promotion;
 use ArtisanPackUI\Ecommerce\Registries\PromotionActionRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PromotionConditionRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PromotionSourceRegistry;
@@ -42,7 +43,7 @@ class PromotionRequest extends ApiFormRequest
         $promotion = $this->route( 'promotion' );
 
         $rules = $this->sometimes( [
-            'key'                      => [ 'string', 'max:120', 'regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/', Rule::unique( 'promotions', 'key' )->ignore( $promotion ) ],
+            'key'                      => [ 'string', 'max:120', 'regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/', Rule::unique( Promotion::class, 'key' )->ignore( $promotion ) ],
             'name'                     => [ 'string', 'max:255' ],
             'description'              => [ 'nullable', 'string' ],
             'source_type'              => [ 'string', Rule::in( app( PromotionSourceRegistry::class )->keys() ) ],

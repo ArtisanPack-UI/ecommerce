@@ -17,11 +17,11 @@ require_once __DIR__ . '/KanbanTestHelpers.php';
 uses( RefreshDatabase::class );
 
 it( 'creates every kanban table from the engine migrations', function (): void {
-    foreach ( [ 'kanban_boards', 'kanban_columns', 'kanban_automations', 'kanban_card_widgets', 'order_board_assignments' ] as $table ) {
+    foreach ( [ 'ecommerce_kanban_boards', 'ecommerce_kanban_columns', 'ecommerce_kanban_automations', 'ecommerce_kanban_card_widgets', 'ecommerce_order_board_assignments' ] as $table ) {
         expect( Schema::hasTable( $table ) )->toBeTrue( $table );
     }
 
-    expect( Schema::hasColumns( 'order_board_assignments', [ 'order_id', 'board_id', 'substatus_id', 'assigned_at', 'moved_at', 'removed_at' ] ) )->toBeTrue();
+    expect( Schema::hasColumns( 'ecommerce_order_board_assignments', [ 'order_id', 'board_id', 'substatus_id', 'assigned_at', 'moved_at', 'removed_at' ] ) )->toBeTrue();
 } );
 
 it( 'defaults board JSON columns and flags', function (): void {

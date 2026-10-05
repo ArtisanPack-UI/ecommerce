@@ -55,7 +55,7 @@ class ProductVariant extends Model
     /**
      * @var string
      */
-    protected $table = 'product_variants';
+    protected $table = 'ecommerce_product_variants';
 
     /**
      * @var array<int, string>

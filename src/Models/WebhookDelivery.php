@@ -66,7 +66,7 @@ class WebhookDelivery extends Model
      *
      * @var string
      */
-    protected $table = 'webhook_deliveries';
+    protected $table = 'ecommerce_webhook_deliveries';
 
     /**
      * @since 1.0.0

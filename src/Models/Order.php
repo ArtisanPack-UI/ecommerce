@@ -21,6 +21,8 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Models;
 
 use ArtisanPackUI\Ecommerce\Database\Factories\OrderFactory;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -45,6 +47,7 @@ use Illuminate\Support\Carbon;
  * @property string                                                                 $payment_status
  * @property string                                                                 $fulfillment_status
  * @property string                                                                 $currency
+ * @property string|null                                                            $locale
  * @property string                                                                 $base_currency
  * @property int                                                                    $fx_rate_to_base_e8
  * @property int                                                                    $subtotal_amount
@@ -90,7 +93,7 @@ class Order extends Model
      *
      * @var string
      */
-    protected $table = 'orders';
+    protected $table = 'ecommerce_orders';
 
     /**
      * @since 1.0.0
@@ -107,6 +110,7 @@ class Order extends Model
         'payment_status',
         'fulfillment_status',
         'currency',
+        'locale',
         'base_currency',
         'fx_rate_to_base_e8',
         'subtotal_amount',
@@ -146,6 +150,21 @@ class Order extends Model
         'total_refunded_amount' => 0,
         'is_claimed'            => true,
     ];
+
+    /**
+     * Scope: orders that belong to `$customer`.
+     *
+     * @since 1.0.0
+     *
+     * @param  Builder<Order>  $query     Query.
+     * @param  Customer|int    $customer  Customer or id.
+     *
+     * @return Builder<Order>
+     */
+    public function scopeForCustomer( Builder $query, Customer|int $customer ): Builder
+    {
+        return $query->where( 'customer_id', $customer instanceof Customer ? $customer->getKey() : $customer );
+    }
 
     /**
      * The customer this order belongs to, if claimed.
@@ -193,6 +212,18 @@ class Order extends Model
     public function notes(): HasMany
     {
         return $this->hasMany( OrderNote::class );
+    }
+
+    /**
+     * Notes the shopper may read (`is_customer_visible`).
+     *
+     * @since 1.0.0
+     *
+     * @return HasMany<OrderNote, $this>
+     */
+    public function customerNotes(): HasMany
+    {
+        return $this->notes()->where( 'is_customer_visible', true );
     }
 
     /**
@@ -265,6 +296,21 @@ class Order extends Model
     public function boardAssignments(): HasMany
     {
         return $this->hasMany( OrderBoardAssignment::class );
+    }
+
+    /**
+     * Stores the email trimmed and lowercased, so lookups can use the
+     * index with a plain comparison.
+     *
+     * @since 1.0.0
+     *
+     * @return Attribute<string|null, string|null>
+     */
+    protected function email(): Attribute
+    {
+        return Attribute::make(
+            set: static fn ( ?string $value ): ?string => null === $value ? null : mb_strtolower( trim( $value ) ),
+        );
     }
 
     /**

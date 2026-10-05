@@ -84,4 +84,31 @@ class ProductRatingAggregator
             ] )->save();
         } );
     }
+
+    /**
+     * How many approved reviews of `$product` gave each star, 5 to 1 (#181).
+     *
+     * @since 1.0.0
+     *
+     * @param  Product  $product  Product.
+     *
+     * @return array<int, int>
+     */
+    public function histogram( Product $product ): array
+    {
+        $counts = ProductReview::query()
+            ->where( 'product_id', $product->id )
+            ->approved()
+            ->selectRaw( 'rating, COUNT(*) AS reviews' )
+            ->groupBy( 'rating' )
+            ->pluck( 'reviews', 'rating' );
+
+        $histogram = [];
+
+        foreach ( [ 5, 4, 3, 2, 1 ] as $stars ) {
+            $histogram[ $stars ] = (int) ( $counts[ $stars ] ?? 0 );
+        }
+
+        return $histogram;
+    }
 }

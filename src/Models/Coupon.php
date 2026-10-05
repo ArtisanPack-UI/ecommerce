@@ -51,7 +51,7 @@ class Coupon extends Model
      *
      * @var string
      */
-    protected $table = 'coupons';
+    protected $table = 'ecommerce_coupons';
 
     /**
      * @since 1.0.0

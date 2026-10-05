@@ -89,6 +89,27 @@ class LintTranslationsCommand extends Command
     ];
 
     /**
+     * Exceptions whose message reaches a client only from these paths
+     * (relative to a scan root): elsewhere they report programming errors.
+     * `InvalidArgumentException` from these services and the reports
+     * becomes an API `detail` (audit H4).
+     *
+     * @since 1.0.0
+     *
+     * @var array<string, array<int, string>>
+     */
+    public const USER_FACING_EXCEPTIONS_IN = [
+        'InvalidArgumentException' => [
+            'Reports/',
+            'Services/RefundService.php',
+            'Services/OrderCancellationService.php',
+            'Services/OrderNoteService.php',
+            'Services/CustomerNoteService.php',
+            'Services/ShipmentService.php',
+        ],
+    ];
+
+    /**
      * Array keys whose value is display text.
      *
      * @since 1.0.0
@@ -284,7 +305,8 @@ class LintTranslationsCommand extends Command
      *
      * Sinks: every argument of `Problem::make()`, `abort()`, a validation
      * rule's `$fail()`, `ValidationException::withMessages()`, and
-     * `new <UserFacingException>()`; `parent::__construct()` inside a
+     * `new <UserFacingException>()` (some only in the paths of
+     * {@see self::USER_FACING_EXCEPTIONS_IN}); `parent::__construct()` inside a
      * user-facing exception class; the body of a `messages()` method; and
      * the value of any {@see self::SINK_KEYS} array key.
      *
@@ -306,7 +328,7 @@ class LintTranslationsCommand extends Command
             $sink  = null;
             $start = null;
             $end   = null;
-            $open  = $this->callSinkOpen( $tokens, $i, $sink, $userFacing );
+            $open  = $this->callSinkOpen( $tokens, $i, $sink, $userFacing, $relative );
 
             if ( null !== $open ) {
                 $start = $open + 1;
@@ -620,10 +642,11 @@ class LintTranslationsCommand extends Command
      * @param  int                                                  $i       Index.
      * @param  string|null                                          $sink        Receives the sink name.
      * @param  bool                                                 $userFacing  Whether the file declares a user-facing exception.
+     * @param  string                                               $relative    Path relative to the scan root.
      *
      * @return int|null
      */
-    protected function callSinkOpen( array $tokens, int $i, ?string &$sink, bool $userFacing = false ): ?int
+    protected function callSinkOpen( array $tokens, int $i, ?string &$sink, bool $userFacing = false, string $relative = '' ): ?int
     {
         $text = $tokens[ $i ][1];
 
@@ -660,7 +683,7 @@ class LintTranslationsCommand extends Command
 
         if ( T_NEW === $tokens[ $i ][0]
             && in_array( $tokens[ $i + 1 ][0] ?? null, [ T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED ], true )
-            && in_array( $this->shortName( $tokens[ $i + 1 ][1] ), self::USER_FACING_EXCEPTIONS, true )
+            && $this->isUserFacingException( $this->shortName( $tokens[ $i + 1 ][1] ), $relative )
             && '(' === ( $tokens[ $i + 2 ][1] ?? null ) ) {
             $sink = 'new ' . $this->shortName( $tokens[ $i + 1 ][1] ) . '()';
 
@@ -668,6 +691,33 @@ class LintTranslationsCommand extends Command
         }
 
         return null;
+    }
+
+    /**
+     * Whether a `new $exception()` in the file at `$relative` reaches a
+     * client: always for {@see self::USER_FACING_EXCEPTIONS}, and inside
+     * the listed paths for {@see self::USER_FACING_EXCEPTIONS_IN}.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $exception  Short class name.
+     * @param  string  $relative   Path relative to the scan root.
+     *
+     * @return bool
+     */
+    protected function isUserFacingException( string $exception, string $relative ): bool
+    {
+        if ( in_array( $exception, self::USER_FACING_EXCEPTIONS, true ) ) {
+            return true;
+        }
+
+        foreach ( self::USER_FACING_EXCEPTIONS_IN[ $exception ] ?? [] as $path ) {
+            if ( str_contains( '/' . $relative, '/' . $path ) ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

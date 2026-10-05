@@ -61,7 +61,7 @@ class NotificationTemplate extends Model
      *
      * @var string
      */
-    protected $table = 'notification_templates';
+    protected $table = 'ecommerce_notification_templates';
 
     /**
      * @since 1.0.0

@@ -96,7 +96,7 @@ it( 'files product and variant price writes against the product', function (): v
 it( 'records inventory adjustments against the owning product', function (): void {
     $product = Product::factory()->create();
     $variant = ProductVariant::factory()->create( [ 'product_id' => $product->id ] );
-    $item    = InventoryItem::factory()->create( [ 'stockable_type' => ProductVariant::class, 'stockable_id' => $variant->id, 'quantity_on_hand' => 10 ] );
+    $item    = InventoryItem::factory()->create( [ 'stockable_type' => ( new ProductVariant() )->getMorphClass(), 'stockable_id' => $variant->id, 'quantity_on_hand' => 10 ] );
 
     app( InventoryService::class )->adjust( $item, -3, 'manual count' );
 

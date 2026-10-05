@@ -171,3 +171,17 @@ it( 'lets the ap.ecommerce.tax.rates filter rewrite the resolved rates', functio
 
     expect( $result->total->isZero() )->toBeTrue();
 } );
+
+it( 'matches postal codes with ZIP+4, ranges by leading digits, and leading zeros (D11)', function ( string $patterns, string $code, bool $matches ): void {
+    expect( TaxRate::postalMatches( $patterns, $code ) )->toBe( $matches );
+} )->with( [
+    'zip+4 in range'           => [ '60601...60699', '60614-1234', true ],
+    'zip+4 exact base'         => [ '60614', '60614-1234', true ],
+    'zip+4 glob'               => [ '606*', '60614-1234', true ],
+    'leading zeros out'        => [ '100...199', '00150', false ],
+    'leading digits in'        => [ '100...199', '15000', true ],
+    'mismatched bounds'        => [ '100...1999', '150', false ],
+    'spaces ignored'           => [ 'SW1A1AA', 'sw1a 1aa', true ],
+    'outside range'            => [ '60601...60699', '60700', false ],
+    'short code against range' => [ '60601...60699', '606', false ],
+] );

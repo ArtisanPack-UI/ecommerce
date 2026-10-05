@@ -34,6 +34,7 @@ use ArtisanPackUI\Ecommerce\Models\ProductPrice;
 use ArtisanPackUI\Ecommerce\Models\ProductVariant;
 use ArtisanPackUI\Ecommerce\Models\Promotion;
 use ArtisanPackUI\Ecommerce\Services\ActivityLogService;
+use ArtisanPackUI\Ecommerce\Support\MorphType;
 use BackedEnum;
 use DateTimeInterface;
 use Illuminate\Database\Eloquent\Model;
@@ -312,6 +313,6 @@ class RecordModelActivity
      */
     protected function matchesMorph( ?string $type, string $class ): bool
     {
-        return $class === $type || ( new $class() )->getMorphClass() === $type;
+        return MorphType::is( $type, $class );
     }
 }

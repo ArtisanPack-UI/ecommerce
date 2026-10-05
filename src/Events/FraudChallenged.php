@@ -26,6 +26,7 @@ namespace ArtisanPackUI\Ecommerce\Events;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\ValueObjects\FraudDecision;
 use ArtisanPackUI\Ecommerce\ValueObjects\PaymentSession;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 
 /**
  * @package    ArtisanPack_UI
@@ -33,7 +34,7 @@ use ArtisanPackUI\Ecommerce\ValueObjects\PaymentSession;
  *
  * @since      1.0.0
  */
-class FraudChallenged
+class FraudChallenged implements ShouldDispatchAfterCommit
 {
     /**
      * @since 1.0.0

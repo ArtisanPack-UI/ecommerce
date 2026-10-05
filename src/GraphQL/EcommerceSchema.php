@@ -52,6 +52,7 @@ use ArtisanPackUI\Ecommerce\GraphQL\Fields\Mutations;
 use ArtisanPackUI\Ecommerce\GraphQL\Fields\Queries;
 use ArtisanPackUI\Ecommerce\GraphQL\Fields\Subscriptions;
 use ArtisanPackUI\Ecommerce\GraphQL\Support\Resolvers;
+use ArtisanPackUI\Ecommerce\Support\Timestamp;
 use Closure;
 use DateTimeInterface;
 use GraphQL\Error\Error;
@@ -252,11 +253,11 @@ class EcommerceSchema
     {
         $registry->define( 'DateTime', static fn (): CustomScalarType => new CustomScalarType( [
             'name'         => 'DateTime',
-            'description'  => 'An ISO 8601 date-time string.',
+            'description'  => 'An RFC 3339 date-time string in UTC (e.g. 2026-03-02T15:04:05Z).',
             'serialize'    => static fn ( mixed $value ): ?string => match ( true ) {
                 null === $value                     => null,
-                $value instanceof DateTimeInterface => Carbon::instance( $value )->toIso8601String(),
-                default                             => Carbon::parse( (string) $value )->toIso8601String(),
+                $value instanceof DateTimeInterface => Timestamp::format( $value ),
+                default                             => Timestamp::format( Carbon::parse( (string) $value ) ),
             },
             'parseValue'   => static function ( mixed $value ): Carbon {
                 try {

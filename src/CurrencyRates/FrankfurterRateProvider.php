@@ -8,6 +8,11 @@
  * Bank reference rates, which are quoted once per business day — so rates
  * are cached at the daily granularity to avoid pounding the endpoint.
  *
+ * Every rate fetched is also kept as the pair's last good rate. When
+ * Frankfurter can't be reached, that rate is used (with a warning in the
+ * `ecommerce` log) instead of failing every conversion, and the fallback is
+ * cached briefly so an outage doesn't add a timeout to each request.
+ *
  * Engine spec §4.7, registry entry `frankfurter`.
  *
  * @package    ArtisanPack_UI
@@ -22,13 +27,15 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\CurrencyRates;
 
-use ArtisanPackUI\Ecommerce\Contracts\CurrencyRateProvider;
+use ArtisanPackUI\Ecommerce\Contracts\RefreshableRateProvider;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
 use Money\Currency;
 use RuntimeException;
+use Throwable;
 
 /**
  * FrankfurterRateProvider.
@@ -47,7 +54,7 @@ use RuntimeException;
  *
  * @since      1.0.0
  */
-final class FrankfurterRateProvider implements CurrencyRateProvider
+final class FrankfurterRateProvider implements RefreshableRateProvider
 {
     /**
      * Registry key.
@@ -62,6 +69,16 @@ final class FrankfurterRateProvider implements CurrencyRateProvider
      * @since 1.0.0
      */
     private const DEFAULT_BASE_URL = 'https://api.frankfurter.dev/v1';
+
+    /**
+     * Seconds a last-good fallback stands in for today's rate before the
+     * remote is tried again.
+     *
+     * @since 1.0.0
+     *
+     * @var int
+     */
+    private const FALLBACK_TTL = 300;
 
     /**
      * Constructs the provider.
@@ -108,19 +125,105 @@ final class FrankfurterRateProvider implements CurrencyRateProvider
             return 100_000_000;
         }
 
-        $cacheKey = sprintf(
-            'artisanpack.ecommerce.currency.frankfurter.%s.%s.%s',
-            Carbon::now( 'UTC' )->format( 'Y-m-d' ),
-            $fromCode,
-            $toCode,
-        );
+        $cached = $this->cache->get( $this->dailyKey( $fromCode, $toCode ) );
 
-        /** @var int $ttl */
-        $ttl = (int) $this->config->get( 'artisanpack.ecommerce.currency.frankfurter.cache_ttl', 86_400 );
+        if ( is_int( $cached ) && $cached > 0 ) {
+            return $cached;
+        }
 
-        return $this->cache->remember( $cacheKey, $ttl, function () use ( $fromCode, $toCode ): int {
-            return $this->fetchRateE8( $fromCode, $toCode );
-        } );
+        try {
+            return $this->refresh( $fromCode, $toCode );
+        } catch ( Throwable $exception ) {
+            $lastGood = $this->cache->get( $this->lastGoodKey( $fromCode, $toCode ) );
+
+            if ( ! is_int( $lastGood ) || $lastGood <= 0 ) {
+                throw $exception;
+            }
+
+            Log::channel( 'ecommerce' )->warning( 'Frankfurter is unavailable; using the last good exchange rate.', [
+                'from'  => $fromCode,
+                'to'    => $toCode,
+                'rate'  => $lastGood,
+                'error' => $exception->getMessage(),
+            ] );
+
+            // Don't retry the remote on every request during an outage.
+            $this->cache->put( $this->dailyKey( $fromCode, $toCode ), $lastGood, self::FALLBACK_TTL );
+
+            return $lastGood;
+        }
+    }
+
+    /**
+     * Fetches the rate from Frankfurter now, caching it for the day and as
+     * the pair's last good rate.
+     *
+     * @since 1.0.0
+     *
+     * @param  Currency  $from  Source currency.
+     * @param  Currency  $to    Target currency.
+     *
+     * @throws RuntimeException When Frankfurter can't provide the rate.
+     *
+     * @return int
+     */
+    public function refreshRateE8( Currency $from, Currency $to ): int
+    {
+        $fromCode = strtoupper( $from->getCode() );
+        $toCode   = strtoupper( $to->getCode() );
+
+        return $fromCode === $toCode ? 100_000_000 : $this->refresh( $fromCode, $toCode );
+    }
+
+    /**
+     * Fetches and caches one pair.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $from  Source code.
+     * @param  string  $to    Target code.
+     *
+     * @return int
+     */
+    private function refresh( string $from, string $to ): int
+    {
+        $rate = $this->fetchRateE8( $from, $to );
+        $ttl  = (int) $this->config->get( 'artisanpack.ecommerce.currency.frankfurter.cache_ttl', 86_400 );
+
+        $this->cache->put( $this->dailyKey( $from, $to ), $rate, $ttl );
+        $this->cache->forever( $this->lastGoodKey( $from, $to ), $rate );
+
+        return $rate;
+    }
+
+    /**
+     * Cache key for today's rate (ECB rates change once per business day).
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $from  Source code.
+     * @param  string  $to    Target code.
+     *
+     * @return string
+     */
+    private function dailyKey( string $from, string $to ): string
+    {
+        return sprintf( 'artisanpack.ecommerce.currency.frankfurter.%s.%s.%s', Carbon::now( 'UTC' )->format( 'Y-m-d' ), $from, $to );
+    }
+
+    /**
+     * Cache key for the pair's last good rate (no date).
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $from  Source code.
+     * @param  string  $to    Target code.
+     *
+     * @return string
+     */
+    private function lastGoodKey( string $from, string $to ): string
+    {
+        return sprintf( 'artisanpack.ecommerce.currency.frankfurter.last-good.%s.%s', $from, $to );
     }
 
     /**
@@ -172,23 +275,18 @@ final class FrankfurterRateProvider implements CurrencyRateProvider
             );
         }
 
-        // Multiply as a string via bcmath-style rounding without floats: the
-        // API's rates are documented as decimal strings with up to 4-6
-        // fractional digits, so multiplying via number_format keeps the
-        // arithmetic exact for the range we care about.
-        $scaled = (string) $rate;
+        // JSON numbers decode as floats, and a tiny rate (IDR, VND: 0.000061)
+        // casts to "6.1E-5". Format it as a plain decimal and round half up
+        // to eight places.
+        $decimal = is_string( $rate ) ? trim( $rate ) : rtrim( rtrim( sprintf( '%.12F', (float) $rate ), '0' ), '.' );
 
-        if ( 1 !== preg_match( '/^-?\d+(\.\d+)?$/', $scaled ) ) {
+        if ( 1 !== preg_match( '/^\d+(\.\d+)?$/', $decimal ) ) {
             throw new RuntimeException(
-                sprintf( 'Frankfurter response for %s → %s had an unparseable rate "%s".', $from, $to, $scaled ),
+                sprintf( 'Frankfurter response for %s → %s had an unparseable rate "%s".', $from, $to, $decimal ),
             );
         }
 
-        [ $whole, $fraction ] = array_pad( explode( '.', $scaled, 2 ), 2, '' );
-        $fraction             = substr( str_pad( $fraction, 8, '0' ), 0, 8 );
-
-        $e8 = (int) ( '' === ltrim( $whole, '0' ) ? '0' : $whole ) * 100_000_000
-            + (int) ( '' === $fraction ? '0' : $fraction );
+        $e8 = (int) bcadd( bcmul( $decimal, '100000000', 4 ), '0.5', 0 );
 
         if ( $e8 <= 0 ) {
             throw new RuntimeException(

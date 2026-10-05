@@ -3,6 +3,7 @@
 declare( strict_types=1 );
 
 use ArtisanPackUI\Ecommerce\Events\LicenseActivated;
+use ArtisanPackUI\Ecommerce\Events\LicenseDeactivated;
 use ArtisanPackUI\Ecommerce\Events\LicenseIssued;
 use ArtisanPackUI\Ecommerce\Events\LicenseRevoked;
 use ArtisanPackUI\Ecommerce\Models\Customer;
@@ -180,4 +181,92 @@ it( 'lets admins find and revoke keys', function (): void {
     $this->postJson( LICENSE_API . '/license/validate', [ 'key' => $key->key, 'fingerprint' => 'a' ], idem() )
         ->assertJsonPath( 'data.revoked', true )
         ->assertJsonPath( 'data.valid', false );
+} );
+
+it( 'stores keys encrypted and looks them up by hash', function (): void {
+    $license = app( LicenseService::class )->issue( OrderItem::factory()->create() );
+    $row     = Illuminate\Support\Facades\DB::table( 'ecommerce_license_keys' )->where( 'id', $license->id )->first();
+
+    expect( $row->key )->not->toBe( $license->key )
+        ->and( $row->key )->not->toContain( $license->key )
+        ->and( $row->key_hash )->toBe( LicenseKey::hashFor( $license->key ) )
+        ->and( $license->toArray() )->not->toHaveKey( 'key_hash' );
+
+    expect( app( LicenseService::class )->validate( strtolower( " {$license->key} " ), 'machine-1' )['valid'] )->toBeTrue()
+        ->and( app( LicenseService::class )->validate( 'AAAAA-BBBBB-CCCCC-DDDDD-EEEEE', 'machine-1' )['reason'] )->toBe( 'not-found' );
+} );
+
+it( 'keeps validating keys after an app key rotation', function (): void {
+    $license = app( LicenseService::class )->issue( OrderItem::factory()->create() );
+    $oldKey  = config( 'app.key' );
+    $oldHash = $license->key_hash;
+
+    // Rotate: the old key moves to previous_keys, as Laravel documents.
+    config()->set( 'app.previous_keys', [ $oldKey ] );
+    config()->set( 'app.key', 'base64:' . base64_encode( random_bytes( 32 ) ) );
+    app()->forgetInstance( 'encrypter' );
+    Illuminate\Support\Facades\Crypt::clearResolvedInstance( 'encrypter' );
+
+    expect( app( LicenseService::class )->validate( $license->key, 'machine-1' )['valid'] )->toBeTrue()
+        ->and( $license->fresh()->key_hash )->not->toBe( $oldHash )
+        ->and( $license->fresh()->key_hash )->toBe( LicenseKey::hashFor( $license->key ) );
+} );
+
+it( 'never stores a validation response for replay', function (): void {
+    $license = app( LicenseService::class )->issue( OrderItem::factory()->create() );
+
+    $this->postJson( LICENSE_API . '/license/validate', [ 'key' => $license->key, 'fingerprint' => 'a' ], idem() )->assertOk();
+
+    expect( (string) ArtisanPackUI\Ecommerce\Models\IdempotencyRecord::query()->value( 'response_body' ) )->not->toContain( 'valid' );
+} );
+
+it( 'filters admin listings by the plain key', function (): void {
+    $license = app( LicenseService::class )->issue( OrderItem::factory()->create() );
+    app( LicenseService::class )->issue( OrderItem::factory()->create() );
+
+    $this->actingAs( ecommerceAdmin(), 'sanctum' )
+        ->getJson( LICENSE_API . '/admin/license-keys?filter[key]=' . strtolower( $license->key ) )
+        ->assertOk()
+        ->assertJsonCount( 1, 'data' )
+        ->assertJsonPath( 'data.0.key', $license->key );
+} );
+
+it( 'frees an activation slot when a machine is deactivated', function (): void {
+    Event::fake( [ LicenseDeactivated::class ] );
+    $key = LicenseKey::factory()->create( [ 'activations_limit' => 2 ] );
+
+    licenses()->validate( $key->key, 'machine-a' );
+    licenses()->validate( $key->key, 'machine-b' );
+
+    expect( licenses()->validate( $key->key, 'machine-c' )['reason'] )->toBe( 'activation-limit-reached' );
+
+    expect( licenses()->deactivate( $key->fresh(), ' MACHINE-A ' ) )->toBeTrue()
+        ->and( $key->fresh()->activations_count )->toBe( 1 )
+        ->and( licenses()->validate( $key->key, 'machine-c' )['valid'] )->toBeTrue()
+        ->and( licenses()->deactivate( $key->fresh(), 'machine-a' ) )->toBeFalse();
+
+    Event::assertDispatchedTimes( LicenseDeactivated::class, 1 );
+} );
+
+it( 'deactivates through the public endpoint', function (): void {
+    $key = LicenseKey::factory()->create( [ 'activations_limit' => 1 ] );
+    licenses()->validate( $key->key, 'machine-a' );
+
+    $this->postJson( LICENSE_API . '/license/deactivate', [ 'key' => $key->key, 'fingerprint' => 'machine-a' ], idem() )
+        ->assertOk()
+        ->assertJsonPath( 'data.deactivated', true )
+        ->assertJsonPath( 'data.activations_count', 0 )
+        ->assertJsonPath( 'data.activations_limit', 1 );
+
+    $this->postJson( LICENSE_API . '/license/deactivate', [ 'key' => $key->key, 'fingerprint' => 'machine-a' ], idem() )
+        ->assertOk()
+        ->assertJsonPath( 'data.deactivated', false )
+        ->assertJsonPath( 'data.reason', 'not-activated' );
+
+    $this->postJson( LICENSE_API . '/license/deactivate', [ 'key' => 'AAAAA-BBBBB-CCCCC-DDDDD-EEEEE', 'fingerprint' => 'machine-a' ], idem() )
+        ->assertOk()
+        ->assertJsonPath( 'data.reason', 'not-found' );
+
+    $this->postJson( LICENSE_API . '/license/deactivate', [ 'key' => $key->key ], idem() )->assertStatus( 422 );
+    $this->postJson( LICENSE_API . '/license/deactivate', [ 'key' => $key->key, 'fingerprint' => 'machine-a' ] )->assertStatus( 400 );
 } );

@@ -18,6 +18,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Resources;
 
+use ArtisanPackUI\Ecommerce\Support\MorphType;
 use Illuminate\Http\Request;
 
 /**
@@ -48,7 +49,7 @@ class InventoryReservationResource extends EcommerceResource
     {
         return [
             'inventory_item_id' => $this->resource->inventory_item_id,
-            'reservable_type'   => class_basename( (string) $this->resource->reservable_type ),
+            'reservable_type'   => MorphType::basename( $this->resource->reservable_type ),
             'reservable_id'     => $this->resource->reservable_id,
             'quantity'          => $this->resource->quantity,
             'expires_at'        => $this->resource->expires_at,

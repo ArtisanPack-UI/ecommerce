@@ -82,13 +82,33 @@ final class ProductPriceResolver
      */
     public function resolve( Product|ProductVariant $priceable, string $currency, ?Carbon $at = null ): ?Money
     {
+        return $this->resolveWithCompareAt( $priceable, $currency, $at )['price'] ?? null;
+    }
+
+    /**
+     * Like {@see self::resolve()}, with the same row's `compare_at` price
+     * (null when the row has none). Both come from one row, converted
+     * together when the base-currency row is used (#172).
+     *
+     * @since 1.0.0
+     *
+     * @param  Product|ProductVariant  $priceable  Priceable row.
+     * @param  string                  $currency   Target ISO 4217 code.
+     * @param  Carbon|null             $at         Reference time (defaults to now).
+     *
+     * @throws InvalidArgumentException When `$currency` is not a valid ISO 4217 code.
+     *
+     * @return array{price: Money, compare_at: Money|null}|null
+     */
+    public function resolveWithCompareAt( Product|ProductVariant $priceable, string $currency, ?Carbon $at = null ): ?array
+    {
         $currencyCode = CurrencyVO::of( $currency )->code();
         $at ??= Carbon::now();
 
         $direct = $this->activeRowFor( $priceable, $currencyCode, $at );
 
         if ( null !== $direct ) {
-            return $this->rowToMoney( $direct, $currencyCode );
+            return $this->rowToPair( $direct, $currencyCode, $currencyCode );
         }
 
         /** @var string $baseCode */
@@ -100,13 +120,31 @@ final class ProductPriceResolver
 
         $baseRow = $this->activeRowFor( $priceable, $baseCode, $at );
 
-        if ( null === $baseRow ) {
-            return null;
+        return null === $baseRow ? null : $this->rowToPair( $baseRow, $baseCode, $currencyCode );
+    }
+
+    /**
+     * A row's price and compare-at price in `$toCode`.
+     *
+     * @since 1.0.0
+     *
+     * @param  ProductPrice  $row       Row.
+     * @param  string        $fromCode  The row's currency.
+     * @param  string        $toCode    Target currency.
+     *
+     * @return array{price: Money, compare_at: Money|null}
+     */
+    private function rowToPair( ProductPrice $row, string $fromCode, string $toCode ): array
+    {
+        $price     = $this->rowToMoney( $row, $fromCode );
+        $compareAt = null === $row->compare_at_amount ? null : new Money( (int) $row->compare_at_amount, new MoneyCurrency( $fromCode ) );
+
+        if ( $fromCode !== $toCode ) {
+            $price     = $this->convert( $price, $fromCode, $toCode );
+            $compareAt = null === $compareAt ? null : $this->convert( $compareAt, $fromCode, $toCode );
         }
 
-        $baseMoney = $this->rowToMoney( $baseRow, $baseCode );
-
-        return $this->convert( $baseMoney, $baseCode, $currencyCode );
+        return [ 'price' => $price, 'compare_at' => $compareAt ];
     }
 
     /**

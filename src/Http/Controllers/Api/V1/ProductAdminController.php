@@ -39,6 +39,16 @@ use Illuminate\Http\Request;
 class ProductAdminController extends ApiController
 {
     /**
+     * Accepted `include` values, for the OpenAPI document (the relations
+     * behind them are in {@see self::includes()}).
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    public const OPENAPI_INCLUDES = [ 'variants', 'variants.prices', 'prices', 'attributes', 'attributes.values', 'categories', 'tags', 'images', 'children' ];
+
+    /**
      * @since 1.0.0
      *
      * @param  ProductService  $products  Product writes.
@@ -56,7 +66,7 @@ class ProductAdminController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List products (admin)', resource: ProductResource::class, collection: true )]
+    #[ApiOperation( summary: 'List products (admin)', resource: ProductResource::class, collection: true, filters: [ 'type' => 'string', 'status' => 'string', 'sku' => 'string', 'slug' => 'string', 'search' => 'string' ], sorts: [ 'name', 'created_at', 'updated_at' ], includes: self::OPENAPI_INCLUDES )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(
@@ -89,7 +99,7 @@ class ProductAdminController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Get a product (admin)', resource: ProductResource::class )]
+    #[ApiOperation( summary: 'Get a product (admin)', resource: ProductResource::class, includes: self::OPENAPI_INCLUDES )]
     public function show( Request $request, Product $product ): JsonResponse
     {
         return $this->resourceResponse( $product, $request, ProductResource::class, self::includes() );
@@ -102,7 +112,7 @@ class ProductAdminController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Create a product', resource: ProductResource::class, status: 201 )]
+    #[ApiOperation( summary: 'Create a product', resource: ProductResource::class, status: 201, includes: self::OPENAPI_INCLUDES )]
     public function store( ProductRequest $request ): JsonResponse
     {
         return $this->resourceResponse( $this->products->create( $request->validated() ), $request, ProductResource::class, self::includes(), 201 );
@@ -116,7 +126,7 @@ class ProductAdminController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Update a product', resource: ProductResource::class )]
+    #[ApiOperation( summary: 'Update a product', resource: ProductResource::class, includes: self::OPENAPI_INCLUDES )]
     public function update( ProductRequest $request, Product $product ): JsonResponse
     {
         if ( $request->has( 'stock_adjustment' ) && null !== ( $denied = $this->forbiddenUnless( $request, 'inventory', 'adjust' ) ) ) {

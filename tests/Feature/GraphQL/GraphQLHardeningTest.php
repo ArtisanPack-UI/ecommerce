@@ -42,10 +42,17 @@ it( 'never loads admin-only relations for shoppers', function (): void {
         ->assertJsonPath( 'data.orders.nodes.0.notes.0.body', 'Staff only: fraud check pending' );
 } );
 
-it( 'does not reveal a cart\'s customer to token holders', function (): void {
-    $cart = Cart::factory()->create( [ 'customer_id' => Customer::factory()->create( [ 'email' => 'private@example.test' ] )->id ] );
+it( 'opens an account\'s cart only to that account and never renders its customer', function (): void {
+    $cart  = Cart::factory()->create( [ 'customer_id' => Customer::factory()->forUser( 7 )->create( [ 'email' => 'private@example.test' ] )->id ] );
+    $query = 'query ($t: String!) { cart(token: $t) { customer_id customer { email } } }';
 
-    gql( $this, 'query ($t: String!) { cart(token: $t) { customer_id customer { email } } }', [ 't' => $cart->token ] )
+    gql( $this, $query, [ 't' => $cart->token ] )->assertJsonPath( 'data.cart', null );
+
+    Sanctum::actingAs( ApiUser::make( 8 ), [ TokenAbilities::STOREFRONT ] );
+    gql( $this, $query, [ 't' => $cart->token ] )->assertJsonPath( 'data.cart', null );
+
+    Sanctum::actingAs( ApiUser::make( 7 ), [ TokenAbilities::STOREFRONT ] );
+    gql( $this, $query, [ 't' => $cart->token ] )
         ->assertJsonPath( 'data.cart.customer', null )
         ->assertJsonPath( 'data.cart.customer_id', $cart->customer_id );
 } );
@@ -136,3 +143,61 @@ it( 'keeps the webhook secret out of a stored GraphQL replay', function (): void
         ->and( (string) IdempotencyRecord::query()->value( 'response_body' ) )->not->toContain( $secret )
         ->and( WebhookSubscription::query()->count() )->toBe( 1 );
 } );
+
+it( 'governs its own schema whatever rebing\'s global security limits are', function (): void {
+    // rebing applies `graphql.security` to the global rules when its service
+    // is first resolved, so resolve it before standing in a host's limits.
+    app( Rebing\GraphQL\GraphQL::class );
+
+    // rebing 10's defaults are complexity 500, depth 13, introspection off.
+    $complexity    = GraphQL\Validator\DocumentValidator::getRule( GraphQL\Validator\Rules\QueryComplexity::class );
+    $depth         = GraphQL\Validator\DocumentValidator::getRule( GraphQL\Validator\Rules\QueryDepth::class );
+    $introspection = GraphQL\Validator\DocumentValidator::getRule( GraphQL\Validator\Rules\DisableIntrospection::class );
+    $complexity->setMaxQueryComplexity( 500 );
+    $depth->setMaxQueryDepth( 3 );
+    $introspection->setEnabled( GraphQL\Validator\Rules\DisableIntrospection::ENABLED );
+    config()->set( 'artisanpack.ecommerce.graphql.introspection', true );
+
+    try {
+        // Costs 1,851 and nests 5 deep: inside the engine's budget, over the global one.
+        gql( $this, '{ products(first: 25) { nodes { name prices { price { amount } } variants { sku prices { price { amount } } } } } }' )
+            ->assertJsonMissingPath( 'errors' );
+
+        gql( $this, '{ __schema { queryType { name } } }' )
+            ->assertJsonMissingPath( 'errors' )
+            ->assertJsonPath( 'data.__schema.queryType.name', 'Query' );
+
+        // The host's own settings are back once the request is done.
+        expect( $complexity->getMaxQueryComplexity() )->toBe( 500 )
+            ->and( $depth->getMaxQueryDepth() )->toBe( 3 )
+            ->and( ( fn (): int => $this->isEnabled )->call( $introspection ) )->toBe( GraphQL\Validator\Rules\DisableIntrospection::ENABLED );
+    } finally {
+        $complexity->setMaxQueryComplexity( 0 );
+        $depth->setMaxQueryDepth( 0 );
+        $introspection->setEnabled( GraphQL\Validator\Rules\DisableIntrospection::DISABLED );
+    }
+} );
+
+it( 'refuses introspection when it is turned off', function (): void {
+    config()->set( 'artisanpack.ecommerce.graphql.introspection', false );
+
+    gql( $this, '{ __schema { types { name } } }' )
+        ->assertJsonPath( 'data', null )
+        ->assertJsonPath( 'errors.0.message', GraphQL\Validator\Rules\DisableIntrospection::introspectionDisabledMessage() );
+
+    gql( $this, '{ products { nodes { id } } }' )->assertJsonMissingPath( 'errors' );
+} );
+
+it( 'allows introspection outside production by default', function ( string $environment, bool $allowed ): void {
+    config()->set( 'artisanpack.ecommerce.graphql.introspection', null );
+    app()->detectEnvironment( fn (): string => $environment );
+
+    $response = gql( $this, '{ __schema { queryType { name } } }' );
+
+    $allowed
+        ? $response->assertJsonPath( 'data.__schema.queryType.name', 'Query' )
+        : $response->assertJsonPath( 'data', null );
+} )->with( [
+    'local'      => [ 'local', true ],
+    'production' => [ 'production', false ],
+] );

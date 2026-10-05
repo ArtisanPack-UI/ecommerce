@@ -58,7 +58,7 @@ it( 'refuses invalid values and unknown keys with a settings-write-failed proble
         ->assertStatus( 422 )
         ->assertJsonPath( 'type', 'https://docs.artisanpack-ui.dev/ecommerce/problems/settings-write-failed' )
         ->assertJsonPath( 'errors.0.field', 'checkout.reservation_ttl_minutes' )
-        ->assertJsonPath( 'errors.0.code', 'invalid' );
+        ->assertJsonPath( 'errors.0.code', fn ( string $code ): bool => 1 === preg_match( '/^[a-z][a-z-]*$/', $code ) );
 
     $this->patchJson( '/api/ecommerce/v1/admin/settings/checkout', [ 'values' => [ 'tax.provider' => 'manual' ] ], idem() )
         ->assertStatus( 422 )

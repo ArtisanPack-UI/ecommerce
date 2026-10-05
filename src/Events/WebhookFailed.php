@@ -20,6 +20,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Events;
 
 use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Throwable;
 
 /**
@@ -28,7 +29,7 @@ use Throwable;
  *
  * @since      1.0.0
  */
-class WebhookFailed
+class WebhookFailed implements ShouldDispatchAfterCommit
 {
     /**
      * @since 1.0.0

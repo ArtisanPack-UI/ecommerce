@@ -18,6 +18,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Models;
 
+use ArtisanPackUI\Ecommerce\Catalog\CategoryTree;
 use ArtisanPackUI\Ecommerce\Database\Factories\ProductCategoryFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -56,7 +57,7 @@ class ProductCategory extends Model
      *
      * @var string
      */
-    protected $table = 'product_categories';
+    protected $table = 'ecommerce_product_categories';
 
     /**
      * Mass-assignable attributes.
@@ -119,7 +120,7 @@ class ProductCategory extends Model
      */
     public function products(): BelongsToMany
     {
-        return $this->belongsToMany( Product::class, 'product_category_product', 'product_category_id', 'product_id' );
+        return $this->belongsToMany( Product::class, 'ecommerce_product_category_product', 'product_category_id', 'product_id' );
     }
 
     /**
@@ -136,6 +137,19 @@ class ProductCategory extends Model
             'image_media_id' => 'integer',
             'position'       => 'integer',
         ];
+    }
+
+    /**
+     * Rebuilds the cached category tree whenever a category changes.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected static function booted(): void
+    {
+        static::saved( static fn () => CategoryTree::flush() );
+        static::deleted( static fn () => CategoryTree::flush() );
     }
 
     /**

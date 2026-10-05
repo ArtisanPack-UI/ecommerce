@@ -22,9 +22,8 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Testing\Verification;
 
-use Composer\InstalledVersions;
+use ArtisanPackUI\Ecommerce\Ecommerce;
 use Illuminate\Support\Carbon;
-use Throwable;
 
 /**
  * Runs satellite contract verification.
@@ -172,16 +171,6 @@ class SatelliteVerifier
      */
     protected function engineVersion(): string
     {
-        try {
-            if ( class_exists( InstalledVersions::class ) && InstalledVersions::isInstalled( 'artisanpack-ui/ecommerce' ) ) {
-                return (string) InstalledVersions::getPrettyVersion( 'artisanpack-ui/ecommerce' );
-            }
-        } catch ( Throwable ) {
-            // Fall through to composer.json.
-        }
-
-        $composer = json_decode( (string) @file_get_contents( dirname( __DIR__, 3 ) . '/composer.json' ), true );
-
-        return is_array( $composer ) ? (string) ( $composer['version'] ?? 'dev' ) : 'dev';
+        return Ecommerce::version();
     }
 }

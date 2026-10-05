@@ -39,6 +39,7 @@ use Illuminate\Support\Carbon;
  * @property int                                                                   $order_item_id
  * @property int|null                                                              $digital_file_id
  * @property string                                                                $key
+ * @property string                                                                $key_hash
  * @property int|null                                                              $activations_limit
  * @property int                                                                   $activations_count
  * @property Carbon|null                                                           $expires_at
@@ -60,7 +61,7 @@ class LicenseKey extends Model
      *
      * @var string
      */
-    protected $table = 'license_keys';
+    protected $table = 'ecommerce_license_keys';
 
     /**
      * @since 1.0.0
@@ -77,6 +78,17 @@ class LicenseKey extends Model
         'is_revoked',
         'revoked_at',
         'meta',
+    ];
+
+    /**
+     * The key is visible only through the attribute, never as raw hash.
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    protected $hidden = [
+        'key_hash',
     ];
 
     /**
@@ -102,6 +114,39 @@ class LicenseKey extends Model
     public static function normalize( string $key ): string
     {
         return strtoupper( trim( $key ) );
+    }
+
+    /**
+     * The `key_hash` of `$key` under the current app key: HMAC-SHA256 of
+     * the normalized key.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $key  Key, as typed or stored.
+     *
+     * @return string
+     */
+    public static function hashFor( string $key ): string
+    {
+        return self::hashUsing( $key, (string) config( 'app.key' ) );
+    }
+
+    /**
+     * Every `key_hash` `$key` may be stored under: the current app key's
+     * first, then each of `app.previous_keys`, so keys hashed before an app
+     * key rotation still validate.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $key  Key, as typed.
+     *
+     * @return array<int, string>
+     */
+    public static function hashCandidates( string $key ): array
+    {
+        $secrets = array_merge( [ (string) config( 'app.key' ) ], array_map( 'strval', (array) config( 'app.previous_keys', [] ) ) );
+
+        return array_values( array_unique( array_map( static fn ( string $secret ): string => self::hashUsing( $key, $secret ), array_filter( $secrets, static fn ( string $secret ): bool => '' !== $secret ) ) ) );
     }
 
     /**
@@ -159,6 +204,38 @@ class LicenseKey extends Model
     }
 
     /**
+     * HMAC-SHA256 of the normalized key under `$secret`.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $key     Key.
+     * @param  string  $secret  App key.
+     *
+     * @return string
+     */
+    protected static function hashUsing( string $key, string $secret ): string
+    {
+        return hash_hmac( 'sha256', self::normalize( $key ), $secret );
+    }
+
+    /**
+     * Normalizes the key and keeps `key_hash` in step with it.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected static function booted(): void
+    {
+        static::saving( static function ( LicenseKey $license ): void {
+            if ( $license->isDirty( 'key' ) || null === ( $license->getAttributes()['key_hash'] ?? null ) ) {
+                $license->key      = self::normalize( (string) $license->key );
+                $license->key_hash = self::hashFor( (string) $license->key );
+            }
+        } );
+    }
+
+    /**
      * @since 1.0.0
      *
      * @return array<string, string>
@@ -168,6 +245,7 @@ class LicenseKey extends Model
         return [
             'order_item_id'     => 'integer',
             'digital_file_id'   => 'integer',
+            'key'               => 'encrypted',
             'activations_limit' => 'integer',
             'activations_count' => 'integer',
             'expires_at'        => 'datetime',

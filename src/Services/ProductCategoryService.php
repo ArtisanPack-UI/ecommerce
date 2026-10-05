@@ -20,6 +20,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Services;
 
+use ArtisanPackUI\Ecommerce\Catalog\CategoryTree;
 use ArtisanPackUI\Ecommerce\Exceptions\ProductWriteException;
 use ArtisanPackUI\Ecommerce\Models\ProductCategory;
 use Illuminate\Database\Eloquent\Collection;
@@ -134,6 +135,9 @@ class ProductCategoryService
                 ProductCategory::query()->whereKey( $id )->update( [ 'position' => $position ] );
             }
         } );
+
+        // Bulk updates skip model events, so drop the cached tree here.
+        CategoryTree::flush();
 
         return ProductCategory::query()->where( 'parent_id', $parentId )->orderBy( 'position' )->get();
     }

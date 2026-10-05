@@ -68,6 +68,8 @@ class ProductResource extends EcommerceResource
             'dim_unit'                => $this->resource->dim_unit,
             'avg_rating'              => $this->resource->avg_rating,
             'reviews_count'           => $this->resource->reviews_count,
+            'is_featured'             => (bool) $this->resource->is_featured,
+            'position'                => (int) $this->resource->position,
             'meta'                    => $this->adminOnly( $request, $this->resource->meta ),
             'published_at'            => $this->resource->published_at,
             'created_at'              => $this->resource->created_at,

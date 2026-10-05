@@ -21,6 +21,7 @@ namespace ArtisanPackUI\Ecommerce\Events;
 
 use ArtisanPackUI\Ecommerce\Models\KanbanAutomation;
 use ArtisanPackUI\Ecommerce\Models\Order;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 
 /**
  * @package    ArtisanPack_UI
@@ -28,7 +29,7 @@ use ArtisanPackUI\Ecommerce\Models\Order;
  *
  * @since      1.0.0
  */
-class KanbanAutomationTriggered
+class KanbanAutomationTriggered implements ShouldDispatchAfterCommit
 {
     /**
      * @since 1.0.0

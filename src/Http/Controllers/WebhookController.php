@@ -8,16 +8,19 @@
  * resolves the gateway from `{provider}`, delegates signature verification
  * to its {@see \ArtisanPackUI\Ecommerce\Contracts\PaymentGateway::handleWebhook()}
  * implementation, dedupes replays via {@see IdempotencyRecord}, and
- * records the delivery (verified or not) in {@see InboundWebhookDelivery}
- * so operators can inspect and replay what came in.
+ * records the delivery in {@see InboundWebhookDelivery} so operators can
+ * inspect and replay what came in. Unknown providers (404) and bodies over
+ * `webhooks.inbound_max_bytes` (413) are refused before anything is
+ * stored; unverified requests keep only a hash, the size, and the first
+ * kilobyte. Every request counts against the caller's IP; only verified
+ * ones count against the provider's allowance.
  *
  * A verified event fans out to three hook names — the generic
  * `ap.ecommerce.webhook_received`, the provider-scoped
  * `ap.ecommerce.gateway.{provider}.webhook_received`, and the
  * payload-only `ap.ecommerce.payment.webhookReceived` from the hooks
  * spec — so downstream satellites can subscribe to a single provider or
- * every provider at once. An unverified request is still ledgered but
- * never dispatches.
+ * every provider at once. An unverified request never dispatches.
  *
  * Engine spec §4.2.
  *
@@ -33,9 +36,11 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Controllers;
 
+use ArtisanPackUI\Ecommerce\Jobs\ReconcilePaymentSession;
 use ArtisanPackUI\Ecommerce\Models\IdempotencyRecord;
 use ArtisanPackUI\Ecommerce\Models\InboundWebhookDelivery;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
+use ArtisanPackUI\Ecommerce\RateLimiting\EcommerceRateLimiter;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\ValueObjects\WebhookResult;
 use Illuminate\Database\QueryException;
@@ -72,24 +77,36 @@ class WebhookController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Receive a payment-provider webhook', description: 'Dispatched to the payment gateway registered under `{provider}`, which verifies the provider signature. Unknown providers are a 404.' )]
+    #[ApiOperation( summary: 'Receive a payment-provider webhook', description: 'Dispatched to the payment gateway registered under `{provider}`, which verifies the provider signature. Unknown providers are a 404 and bodies over webhooks.inbound_max_bytes a 413; neither is stored. Unverified requests are a 400.' )]
     public function handle( Request $request, string $provider ): JsonResponse
     {
         $gateway = $this->gateways->find( $provider );
 
+        // Unknown providers are refused without a ledger row: the segment is
+        // free text, so storing these would let anyone fill the table (G1).
         if ( null === $gateway ) {
             Log::channel( 'ecommerce' )->warning( 'Rejected inbound webhook for unregistered provider.', [
-                'provider' => $provider,
+                'provider' => mb_substr( $provider, 0, 60 ),
+                'ip'       => $request->ip(),
             ] );
 
-            $this->ledger( $request, $provider, WebhookResult::unverified(
-                'gateway_not_registered',
-                __( 'Payment gateway ":provider" is not registered.', [ 'provider' => $provider ] ),
-            ), 404, false );
+            return new JsonResponse(
+                [ 'code' => 'gateway_not_registered', 'message' => __( 'Payment gateway ":provider" is not registered.', [ 'provider' => mb_substr( $provider, 0, 60 ) ] ) ],
+                404,
+            );
+        }
+
+        $maxBytes = max( 1, (int) config( 'artisanpack.ecommerce.webhooks.inbound_max_bytes', 524_288 ) );
+
+        if ( (int) $request->headers->get( 'Content-Length', '0' ) > $maxBytes || strlen( (string) $request->getContent() ) > $maxBytes ) {
+            Log::channel( 'ecommerce' )->warning( 'Rejected oversized inbound webhook.', [
+                'provider' => $provider,
+                'ip'       => $request->ip(),
+            ] );
 
             return new JsonResponse(
-                [ 'code' => 'gateway_not_registered', 'message' => __( 'Payment gateway ":provider" is not registered.', [ 'provider' => $provider ] ) ],
-                404,
+                [ 'code' => 'payload_too_large', 'message' => __( 'The webhook body is larger than :bytes bytes.', [ 'bytes' => $maxBytes ] ) ],
+                413,
             );
         }
 
@@ -109,6 +126,21 @@ class WebhookController
                 400,
             );
         }
+
+        // Verified deliveries count against the provider's own allowance,
+        // which unverified traffic never touches.
+        $limiter  = app( EcommerceRateLimiter::class );
+        $exceeded = $limiter->exceeded( 'ecommerce.webhook.verified', $request );
+
+        if ( null !== $exceeded ) {
+            return new JsonResponse(
+                [ 'code' => 'rate_limited', 'message' => __( 'Too many webhook deliveries. Try again later.' ) ],
+                429,
+                [ 'Retry-After' => (string) $exceeded['retry_after'] ],
+            );
+        }
+
+        $limiter->hit( 'ecommerce.webhook.verified', $request );
 
         // Providers redeliver at-least-once. Atomically claim the event id
         // in `idempotency_records` before dispatching so a redelivery of the
@@ -131,6 +163,12 @@ class WebhookController
                 doAction( 'ap.ecommerce.webhook_received', $provider, $result, $request );
                 doAction( sprintf( 'ap.ecommerce.gateway.%s.webhook_received', $provider ), $result, $request );
                 doAction( 'ap.ecommerce.payment.webhookReceived', $result->payload, $provider );
+
+                // A payment outcome settles its checkout (a shopper who closed
+                // the tab still gets their order), off the request (#168).
+                if ( $result->hasPaymentOutcome() && null !== $result->sessionReference ) {
+                    ReconcilePaymentSession::dispatch( $provider, $result->sessionReference, (string) $result->outcome );
+                }
             } catch ( Throwable $e ) {
                 // A listener failed part-way, so not every hook ran. Release
                 // the claim so the provider's retry dispatches again instead
@@ -261,19 +299,26 @@ class WebhookController
         try {
             $body = (string) $request->getContent();
 
+            // An unverified body is untrusted and may be junk: keep enough
+            // to diagnose a misconfigured secret, not the whole thing.
+            $stored = $result->verified ? $body : mb_strcut( $body, 0, InboundWebhookDelivery::UNVERIFIED_PAYLOAD_BYTES );
+
             InboundWebhookDelivery::query()->create( [
-                'provider'        => $provider,
-                'event_id'        => $result->eventId,
-                'event_type'      => $result->eventType,
-                'verified'        => $result->verified,
-                'duplicate'       => $duplicate,
-                'error_code'      => $result->errorCode,
-                'payload_hash'    => hash( 'sha256', $body ),
-                'payload'         => $body,
-                'parsed'          => $result->verified ? $result->payload : null,
-                'response_status' => $responseStatus,
-                'correlation_id'  => $request->headers->get( 'X-Request-Id' ),
-                'received_at'     => Carbon::now(),
+                'provider'          => $provider,
+                'event_id'          => $result->eventId,
+                'event_type'        => $result->eventType,
+                'verified'          => $result->verified,
+                'duplicate'         => $duplicate,
+                'error_code'        => $result->errorCode,
+                'session_reference' => $result->verified ? $result->sessionReference : null,
+                'payload_hash'      => hash( 'sha256', $body ),
+                'payload_size'      => strlen( $body ),
+                'payload_truncated' => strlen( $stored ) < strlen( $body ),
+                'payload'           => $stored,
+                'parsed'            => $result->verified ? $result->payload : null,
+                'response_status'   => $responseStatus,
+                'correlation_id'    => $request->headers->get( 'X-Request-Id' ),
+                'received_at'       => Carbon::now(),
             ] );
         } catch ( Throwable $e ) {
             Log::channel( 'ecommerce' )->error( 'Failed to write inbound webhook delivery to ledger.', [

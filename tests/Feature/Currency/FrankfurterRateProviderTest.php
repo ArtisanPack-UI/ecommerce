@@ -100,3 +100,35 @@ it( 'handles rates greater than one', function (): void {
 
     expect( $rate )->toBe( 14_850_000_000 );
 } );
+
+it( 'converts rates below 0.0001 without scientific notation', function ( float $raw, int $e8 ): void {
+    Http::fake( [ 'api.frankfurter.dev/*' => Http::response( [ 'rates' => [ 'USD' => $raw ] ] ) ] );
+
+    expect( app( FrankfurterRateProvider::class )->getRateE8( new Currency( 'IDR' ), new Currency( 'USD' ) ) )->toBe( $e8 );
+} )->with( [
+    'IDR → USD'   => [ 0.000061, 6_100 ],
+    'VND → USD'   => [ 0.0000393, 3_930 ],
+    'rounds up'   => [ 0.000000015, 2 ],
+    'large rates' => [ 16_250.5, 1_625_050_000_000 ],
+] );
+
+it( 'falls back to the last good rate when Frankfurter fails on a later day', function (): void {
+    Http::fake( [ 'api.frankfurter.dev/*' => Http::sequence()->push( [ 'rates' => [ 'EUR' => 0.925 ] ] )->push( 'down', 500 )->push( 'down', 500 ) ] );
+    $provider = app( FrankfurterRateProvider::class );
+
+    expect( $provider->getRateE8( new Currency( 'USD' ), new Currency( 'EUR' ) ) )->toBe( 92_500_000 );
+
+    $this->travel( 1 )->days();
+
+    expect( $provider->getRateE8( new Currency( 'USD' ), new Currency( 'EUR' ) ) )->toBe( 92_500_000 );
+
+    // The fallback is cached briefly, so the next lookup doesn't call out.
+    expect( $provider->getRateE8( new Currency( 'USD' ), new Currency( 'EUR' ) ) )->toBe( 92_500_000 );
+    Http::assertSentCount( 2 );
+} );
+
+it( 'still throws when there is no rate to fall back to', function (): void {
+    Http::fake( [ 'api.frankfurter.dev/*' => Http::response( 'down', 500 ) ] );
+
+    app( FrankfurterRateProvider::class )->getRateE8( new Currency( 'USD' ), new Currency( 'JPY' ) );
+} )->throws( RuntimeException::class, 'HTTP 500' );

@@ -107,8 +107,9 @@ class CustomerFirstOrderCondition implements OrderAwarePromotionCondition, Descr
 
     /**
      * Whether the shopper identified by customer id or email has a
-     * non-failed order other than `$excludeOrderId`. An unknown shopper
-     * has none.
+     * non-failed order other than `$excludeOrderId`. An unknown shopper (no
+     * customer, no email) is treated as having one, so the condition fails
+     * rather than handing a first-order discount to anyone anonymous.
      *
      * @since 1.0.0
      *
@@ -122,8 +123,9 @@ class CustomerFirstOrderCondition implements OrderAwarePromotionCondition, Descr
     {
         $email = strtolower( trim( $email ) );
 
+        // Nobody to check: an anonymous cart can't prove it's a first order.
         if ( null === $customerId && '' === $email ) {
-            return false;
+            return true;
         }
 
         return Order::query()

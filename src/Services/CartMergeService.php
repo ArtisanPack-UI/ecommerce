@@ -3,20 +3,30 @@
 /**
  * CartMergeService.
  *
- * Merges a guest cart into a destination (authenticated-customer) cart per
- * engine spec §7.1:
+ * Merges a guest cart into a destination (signed-in customer's) cart, per
+ * parent plan §7.1:
  *
  * - lines with the same `(product_id, product_variant_id, options_hash)`
- *   sum their quantities;
- * - lines that differ in variant or options stay separate;
- * - on currency mismatch, the service throws
- *   {@see \ArtisanPackUI\Ecommerce\Exceptions\CartCurrencyMismatchException}
- *   unless the caller passes an explicit
- *   {@see \ArtisanPackUI\Ecommerce\ValueObjects\CartMergeResolution} — the
- *   engine never silently re-prices on FX drift.
+ *   sum their quantities, capped at {@see StorefrontCartService::MAX_LINE_QUANTITY}
+ *   and at what is in stock (a destination line never shrinks);
+ * - lines that differ in variant or options stay separate; guest lines past
+ *   `cart.max_lines` are left out;
+ * - promotion-granted free lines aren't carried — the merged cart's own
+ *   promotions decide them again;
+ * - the guest cart's stock reservations move to the destination;
+ * - every line is re-priced and the totals recomputed.
  *
- * On success the destination cart's token is rotated (defence against
- * cross-session cart hijacking) and the `CartMerged` event is dispatched.
+ * When the currencies differ the service throws
+ * {@see CartCurrencyMismatchException} unless the caller passes a
+ * {@see CartMergeResolution}, so the shopper chooses which currency to keep.
+ * Lines are always re-priced from the catalog in the kept currency (never
+ * converted from the other cart's prices); a line with no price there is
+ * dropped.
+ *
+ * Both carts are locked (lower id first) for the whole merge, and a cart
+ * that became an order or expired can't take part. On success the
+ * destination cart's token is rotated (defence against cross-session cart
+ * hijacking) and the `CartMerged` event is dispatched.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -32,6 +42,8 @@ namespace ArtisanPackUI\Ecommerce\Services;
 
 use ArtisanPackUI\Ecommerce\Events\CartMerged;
 use ArtisanPackUI\Ecommerce\Exceptions\CartCurrencyMismatchException;
+use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
+use ArtisanPackUI\Ecommerce\Inventory\StockLevels;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
 use ArtisanPackUI\Ecommerce\ValueObjects\CartMergeResolution;
@@ -49,33 +61,35 @@ class CartMergeService
     /**
      * @since 1.0.0
      *
-     * @param  CartService  $cartService  Used to rotate the destination cart's session token after a successful merge.
+     * @param  CartService            $cartService  Rotates the destination cart's token after a merge.
+     * @param  StorefrontCartService  $storefront   Re-prices and re-totals the merged cart.
+     * @param  StockLevels            $stock        Caps merged quantities at what is in stock.
+     * @param  InventoryService       $inventory    Moves the guest cart's reservations.
      */
     public function __construct(
         protected CartService $cartService,
+        protected StorefrontCartService $storefront,
+        protected StockLevels $stock,
+        protected InventoryService $inventory,
     ) {
     }
 
     /**
      * Merges `$guestCart` into `$destinationCart`.
      *
-     * When the two carts share a currency, the merge is unconditional: each
-     * guest line is added to the destination, summing quantities on same
-     * `(product, variant, options_hash)` and keeping separate lines
-     * otherwise.
+     * When the two carts share a currency, the merge is unconditional.
+     * When they differ, `$resolution` must be provided:
      *
-     * When the currencies differ, `$resolution` must be provided:
-     *
-     * - {@see CartMergeResolution::KeepGuestCurrency}: destination cart's
-     *   currency is rewritten to the guest cart's, its existing lines are
-     *   discarded, and the guest lines are carried over verbatim.
-     * - {@see CartMergeResolution::SwitchToAccountCurrency}: destination
-     *   cart's currency is retained, its lines are left untouched, and the
-     *   guest cart's lines are discarded.
-     * - {@see CartMergeResolution::CancelMerge}: destination cart is
+     * - {@see CartMergeResolution::KeepGuestCurrency}: the destination cart
+     *   switches to the guest cart's currency; both carts' lines are kept,
+     *   priced in that currency.
+     * - {@see CartMergeResolution::SwitchToAccountCurrency}: the destination
+     *   cart keeps its currency; the guest lines are carried over, priced in
+     *   that currency.
+     * - {@see CartMergeResolution::CancelMerge}: the destination cart is
      *   returned unchanged and the guest cart is discarded.
      *
-     * If `$resolution` is null and currencies differ, a
+     * If `$resolution` is null and the currencies differ, a
      * {@see CartCurrencyMismatchException} is raised for the caller to
      * present the choice to the shopper.
      *
@@ -85,13 +99,14 @@ class CartMergeService
      *
      * @since 1.0.0
      *
-     * @param  Cart                      $guestCart
-     * @param  Cart                      $destinationCart
-     * @param  CartMergeResolution|null  $resolution
+     * @param  Cart                      $guestCart        Guest cart (deleted by the merge).
+     * @param  Cart                      $destinationCart  Cart that survives.
+     * @param  CartMergeResolution|null  $resolution       Choice for a currency mismatch.
      *
      * @throws CartCurrencyMismatchException When currencies differ and no resolution is provided.
+     * @throws CartOperationException        When either cart became an order or expired.
      *
-     * @return Cart The surviving cart after the merge (always a rotated-token version of the destination cart's row, except on cancel-merge).
+     * @return Cart The surviving cart (the destination cart's row with a rotated token, except on cancel-merge).
      */
     public function merge( Cart $guestCart, Cart $destinationCart, ?CartMergeResolution $resolution = null ): Cart
     {
@@ -99,92 +114,92 @@ class CartMergeService
             return $destinationCart;
         }
 
-        if ( $guestCart->currency !== $destinationCart->currency && null === $resolution ) {
-            throw new CartCurrencyMismatchException( $guestCart, $destinationCart );
-        }
-
         return DB::transaction( function () use ( $guestCart, $destinationCart, $resolution ): Cart {
-            $carried = $this->carriedCountBeforeApply( $guestCart, $resolution );
+            [ $guest, $destination ] = $this->lockPair( $guestCart, $destinationCart );
 
-            $result = $this->applyMerge( $guestCart, $destinationCart, $resolution );
+            $this->storefront->assertOpen( $guest );
+            $this->storefront->assertOpen( $destination );
+
+            $sameCurrency = strtoupper( (string) $guest->currency ) === strtoupper( (string) $destination->currency );
+
+            if ( ! $sameCurrency && null === $resolution ) {
+                throw new CartCurrencyMismatchException( $guest, $destination );
+            }
+
+            if ( CartMergeResolution::CancelMerge === $resolution ) {
+                $this->discard( $guest );
+
+                return $destination;
+            }
+
+            if ( ! $sameCurrency && CartMergeResolution::KeepGuestCurrency === $resolution ) {
+                $this->rewriteDestinationCurrency( $destination, (string) $guest->currency );
+            }
+
+            $this->inventory->transferReservations( $guest, $destination, true );
+
+            $carriedIds = $this->transferItems( $guest, $destination );
+            $this->discard( $guest );
+
+            $this->storefront->recalculate( $destination );
+
+            // Re-pricing drops carried lines with no price in the kept currency.
+            $carried = [] === $carriedIds ? 0 : CartItem::query()->whereKey( $carriedIds )->count();
+
+            $result = $this->cartService->rotateToken( $destination );
 
             $filtered = applyFilters( 'ap.ecommerce.cart.merging', $result, $guestCart, $destinationCart );
+
             if ( $filtered instanceof Cart ) {
                 $result = $filtered;
             }
 
-            // Cancel-merge is not a merge — the guest cart is discarded and the
-            // destination is returned unchanged — so listeners of the merged
-            // action / event would be misled if we fired them here.
-            if ( CartMergeResolution::CancelMerge !== $resolution ) {
-                doAction( 'ap.ecommerce.cart.merged', $result, $carried );
-                Event::dispatch( new CartMerged( $result, $carried ) );
-            }
+            doAction( 'ap.ecommerce.cart.merged', $result, $carried );
+            Event::dispatch( new CartMerged( $result, $carried ) );
 
             return $result;
         } );
     }
 
     /**
-     * Counts how many guest lines will reach the destination cart, computed
-     * before {@see applyMerge()} runs (which deletes the guest cart).
+     * Locks both carts, lower id first so two merges of the same pair can't
+     * deadlock, and returns them as `[ guest, destination ]`.
      *
      * @since 1.0.0
      *
-     * @param  Cart                      $guestCart
-     * @param  CartMergeResolution|null  $resolution
+     * @param  Cart  $guest        Guest cart.
+     * @param  Cart  $destination  Destination cart.
      *
-     * @return int
+     * @return array{0: Cart, 1: Cart}
      */
-    protected function carriedCountBeforeApply( Cart $guestCart, ?CartMergeResolution $resolution ): int
+    protected function lockPair( Cart $guest, Cart $destination ): array
     {
-        if ( CartMergeResolution::CancelMerge === $resolution || CartMergeResolution::SwitchToAccountCurrency === $resolution ) {
-            return 0;
-        }
+        $locked = Cart::query()
+            ->whereKey( [ $guest->getKey(), $destination->getKey() ] )
+            ->orderBy( 'id' )
+            ->lockForUpdate()
+            ->get()
+            ->keyBy( 'id' );
 
-        return (int) $guestCart->items()->count();
+        return [
+            $locked->get( $guest->getKey() ) ?? throw new CartOperationException( 'cart', 'cart-not-found', __( 'That cart could not be found.' ) ),
+            $locked->get( $destination->getKey() ) ?? throw new CartOperationException( 'cart', 'cart-not-found', __( 'That cart could not be found.' ) ),
+        ];
     }
 
     /**
-     * Executes the actual line-level merge and returns the surviving cart.
+     * Deletes a cart and its lines.
      *
      * @since 1.0.0
      *
-     * @param  Cart                      $guestCart
-     * @param  Cart                      $destinationCart
-     * @param  CartMergeResolution|null  $resolution
+     * @param  Cart  $cart  Cart.
      *
-     * @return Cart
+     * @return void
      */
-    protected function applyMerge( Cart $guestCart, Cart $destinationCart, ?CartMergeResolution $resolution ): Cart
+    protected function discard( Cart $cart ): void
     {
-        $sameCurrency = $guestCart->currency === $destinationCart->currency;
-
-        if ( CartMergeResolution::CancelMerge === $resolution ) {
-            $guestCart->delete();
-
-            return $destinationCart->fresh() ?? $destinationCart;
-        }
-
-        if ( ! $sameCurrency && CartMergeResolution::SwitchToAccountCurrency === $resolution ) {
-            $guestCart->delete();
-
-            return $this->cartService->rotateToken( $destinationCart->fresh() ?? $destinationCart );
-        }
-
-        if ( ! $sameCurrency && CartMergeResolution::KeepGuestCurrency === $resolution ) {
-            $destinationCart->items()->delete();
-            $this->rewriteDestinationCurrency( $destinationCart, $guestCart->currency );
-            $this->transferItems( $guestCart, $destinationCart );
-            $guestCart->delete();
-
-            return $this->cartService->rotateToken( $destinationCart->fresh() ?? $destinationCart );
-        }
-
-        $this->transferItems( $guestCart, $destinationCart );
-        $guestCart->delete();
-
-        return $this->cartService->rotateToken( $destinationCart->fresh() ?? $destinationCart );
+        $cart->items()->delete();
+        $cart->delete();
     }
 
     /**
@@ -192,59 +207,119 @@ class CartMergeService
      *
      * @since 1.0.0
      *
-     * @param  Cart    $cart
-     * @param  string  $currency
+     * @param  Cart    $cart      Cart.
+     * @param  string  $currency  ISO 4217 code.
      *
      * @return void
      */
     protected function rewriteDestinationCurrency( Cart $cart, string $currency ): void
     {
-        $cart->currency          = $currency;
-        $cart->subtotal_currency = $currency;
-        $cart->discount_currency = $currency;
-        $cart->tax_currency      = $currency;
-        $cart->shipping_currency = $currency;
-        $cart->total_currency    = $currency;
-        $cart->save();
+        $currency = strtoupper( $currency );
+
+        $cart->forceFill( [
+            'currency'          => $currency,
+            'subtotal_currency' => $currency,
+            'discount_currency' => $currency,
+            'tax_currency'      => $currency,
+            'shipping_currency' => $currency,
+            'total_currency'    => $currency,
+        ] )->save();
     }
 
     /**
-     * Moves guest lines onto the destination cart, summing quantities where
-     * the destination already has a matching line.
+     * Moves the guest lines onto the destination cart and returns the ids
+     * of the destination lines they went into. A matching destination line takes the summed quantity,
+     * capped at the line limit and at what is in stock (never less than it
+     * already had); a new line is carried only while the cart is under
+     * `cart.max_lines` and while any of it is in stock.
      *
      * @since 1.0.0
      *
-     * @param  Cart  $guestCart
-     * @param  Cart  $destinationCart
+     * @param  Cart  $guest        Locked guest cart.
+     * @param  Cart  $destination  Locked destination cart.
      *
-     * @return void
+     * @return array<int, int>
      */
-    protected function transferItems( Cart $guestCart, Cart $destinationCart ): void
+    protected function transferItems( Cart $guest, Cart $destination ): array
     {
         $existing = CartItem::query()
-            ->where( 'cart_id', $destinationCart->id )
+            ->where( 'cart_id', $destination->id )
             ->get()
-            ->keyBy( fn ( CartItem $item ) => $this->lineKey( $item ) );
+            ->reject( static fn ( CartItem $item ): bool => $item->isFreeItem() )
+            ->keyBy( fn ( CartItem $item ): string => $this->lineKey( $item ) );
 
-        foreach ( $guestCart->items()->get() as $guestItem ) {
-            $key = $this->lineKey( $guestItem );
+        $lines   = $existing->count();
+        $carried = [];
 
-            if ( isset( $existing[ $key ] ) ) {
-                /** @var CartItem $match */
-                $match                     = $existing[ $key ];
-                $match->quantity += $guestItem->quantity;
-                $match->line_subtotal_amount = $match->unit_price_amount * $match->quantity;
-                $match->line_total_amount    = $match->line_subtotal_amount;
-                $match->save();
+        foreach ( $guest->items()->with( [ 'product', 'variant' ] )->get() as $guestItem ) {
+            if ( $guestItem->isFreeItem() || null === $guestItem->product ) {
+                continue;
+            }
 
-                $guestItem->delete();
+            $key   = $this->lineKey( $guestItem );
+            $match = $existing->get( $key );
+            $limit = $this->unitLimit( $destination, $guestItem );
+
+            if ( null !== $match ) {
+                $quantity = max( (int) $match->quantity, min( (int) $match->quantity + (int) $guestItem->quantity, $limit ) );
+
+                if ( $quantity !== (int) $match->quantity ) {
+                    $match->forceFill( [
+                        'quantity'             => $quantity,
+                        'line_subtotal_amount' => (int) $match->unit_price_amount * $quantity,
+                        'line_total_amount'    => (int) $match->unit_price_amount * $quantity,
+                    ] )->save();
+                }
+
+                $carried[] = (int) $match->id;
 
                 continue;
             }
 
-            $guestItem->cart_id = $destinationCart->id;
-            $guestItem->save();
+            $quantity = min( (int) $guestItem->quantity, $limit );
+
+            if ( $quantity < 1 || $lines >= $this->storefront->maxLines() ) {
+                continue;
+            }
+
+            $guestItem->forceFill( [
+                'cart_id'              => $destination->id,
+                'quantity'             => $quantity,
+                'line_subtotal_amount' => (int) $guestItem->unit_price_amount * $quantity,
+                'line_total_amount'    => (int) $guestItem->unit_price_amount * $quantity,
+            ] )->save();
+
+            $existing->put( $key, $guestItem );
+            ++$lines;
+            $carried[] = (int) $guestItem->id;
         }
+
+        return array_values( array_unique( $carried ) );
+    }
+
+    /**
+     * Most units of `$item`'s product the destination line may hold.
+     *
+     * @since 1.0.0
+     *
+     * @param  Cart      $destination  Destination cart (its reservations count as its own).
+     * @param  CartItem  $item         Guest line.
+     *
+     * @return int
+     */
+    protected function unitLimit( Cart $destination, CartItem $item ): int
+    {
+        $limit = StorefrontCartService::MAX_LINE_QUANTITY;
+
+        if ( null !== $item->product && ! $item->product->typeIsMissing() ) {
+            $available = $this->stock->sellable( $item->product, $item->variant, $destination );
+
+            if ( null !== $available ) {
+                $limit = min( $limit, $available );
+            }
+        }
+
+        return $limit;
     }
 
     /**
@@ -252,7 +327,7 @@ class CartMergeService
      *
      * @since 1.0.0
      *
-     * @param  CartItem  $item
+     * @param  CartItem  $item  Line.
      *
      * @return string
      */

@@ -32,6 +32,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Gateways\Stripe;
 
 use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
+use ArtisanPackUI\Ecommerce\Contracts\RendersClientPayment;
 use ArtisanPackUI\Ecommerce\Exceptions\PaymentCurrencyMismatchException;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\Order;
@@ -60,7 +61,7 @@ use Stripe\StripeClient;
  *
  * @since      1.0.0
  */
-class StripeGateway implements PaymentGateway
+class StripeGateway implements PaymentGateway, RendersClientPayment
 {
     /**
      * Registry key. Matches `orders.payment_gateway_key` for Stripe orders.
@@ -214,16 +215,24 @@ class StripeGateway implements PaymentGateway
             $this->requestOptions( $context ),
         );
 
-        return new PaymentSession(
-            gatewayKey: $this->key(),
-            reference: (string) $intent->id,
-            amount: $amount,
-            clientSecret: $intent->client_secret ?? null,
-            metadata: [
-                'publishable_key' => (string) $this->config->get( 'artisanpack.ecommerce.gateways.stripe.publishable_key', '' ),
-                'status'          => (string) ( $intent->status ?? '' ),
-            ],
-        );
+        return $this->sessionFromIntent( $intent );
+    }
+
+    /**
+     * Loads a PaymentIntent and reports it as a {@see PaymentSession} with
+     * its current amount, currency, and normalized status.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $reference  PaymentIntent id.
+     *
+     * @throws ApiErrorException When Stripe refuses the request or can't be reached.
+     *
+     * @return PaymentSession
+     */
+    public function retrievePaymentSession( string $reference ): PaymentSession
+    {
+        return $this->sessionFromIntent( $this->client()->paymentIntents->retrieve( $reference ) );
     }
 
     /**
@@ -260,7 +269,7 @@ class StripeGateway implements PaymentGateway
 
             if ( 'succeeded' === $intent->status ) {
                 return PaymentResult::success(
-                    $session->amount,
+                    $this->receivedAmount( $intent, $session ),
                     $this->latestChargeId( $intent ) ?? $intent->id,
                 );
             }
@@ -274,7 +283,7 @@ class StripeGateway implements PaymentGateway
 
                 if ( 'succeeded' === $intent->status ) {
                     return PaymentResult::success(
-                        $session->amount,
+                        $this->receivedAmount( $intent, $session ),
                         $this->latestChargeId( $intent ) ?? $intent->id,
                     );
                 }
@@ -372,15 +381,16 @@ class StripeGateway implements PaymentGateway
      *
      * @since 1.0.0
      *
-     * @param  Order        $order    The order the refund is being issued against.
-     * @param  Money        $amount   Amount to refund, in the order's payment currency.
-     * @param  string|null  $reason   Optional free-text reason forwarded to Stripe.
+     * @param  Order                 $order    The order the refund is being issued against.
+     * @param  Money                 $amount   Amount to refund, in the order's payment currency.
+     * @param  string|null           $reason   Optional free-text reason forwarded to Stripe.
+     * @param  array<string, mixed>  $context  `idempotency_key` and `refund_id` (see the contract).
      *
      * @throws PaymentCurrencyMismatchException When `$amount` is not in `$order->currency`.
      *
      * @return RefundResult
      */
-    public function refund( Order $order, Money $amount, ?string $reason = null ): RefundResult
+    public function refund( Order $order, Money $amount, ?string $reason = null, array $context = [] ): RefundResult
     {
         $orderCurrency = strtoupper( (string) $order->currency );
 
@@ -400,7 +410,10 @@ class StripeGateway implements PaymentGateway
         $params = [
             'payment_intent' => $reference,
             'amount'         => $this->toStripeAmount( $amount ),
-            'metadata'       => [ 'ap_ec_order_id' => (string) $order->getKey() ],
+            'metadata'       => array_filter( [
+                'ap_ec_order_id'  => (string) $order->getKey(),
+                'ap_ec_refund_id' => isset( $context['refund_id'] ) ? (string) $context['refund_id'] : null,
+            ], static fn ( ?string $value ): bool => null !== $value ),
         ];
 
         $mappedReason = $this->mapRefundReason( $reason );
@@ -409,20 +422,18 @@ class StripeGateway implements PaymentGateway
             $params[ 'reason' ] = $mappedReason;
         }
 
-        // Derive a stable per-attempt idempotency key from the number of
-        // refund rows already recorded against the order. The RefundService
-        // ledger row is written AFTER the gateway call, so a retry of a
-        // failed attempt observes the same count and re-uses the same key —
-        // Stripe dedupes and never moves money twice. Once a refund
-        // succeeds and the ledger row is committed, the count advances and
-        // the next partial refund gets a fresh key. Engine spec §11.2.
-        $priorRefunds   = Refund::query()->where( 'order_id', $order->getKey() )->count();
-        $idempotencyKey = sprintf(
-            'ap-ec-refund-%s-%d-%s',
-            $reference,
-            $priorRefunds + 1,
-            $amount->getAmount(),
-        );
+        // The engine passes a key per refund row, so a retry of the same
+        // refund never moves money twice. Without one, derive a key from the
+        // refunds already recorded for the order (a retry of a failed
+        // attempt sees the same count and reuses it).
+        $idempotencyKey = isset( $context['idempotency_key'] ) && '' !== (string) $context['idempotency_key']
+            ? (string) $context['idempotency_key']
+            : sprintf(
+                'ap-ec-refund-%s-%d-%s',
+                $reference,
+                Refund::query()->where( 'order_id', $order->getKey() )->count() + 1,
+                $amount->getAmount(),
+            );
 
         try {
             $refund = $this->client()->refunds->create(
@@ -465,9 +476,9 @@ class StripeGateway implements PaymentGateway
      */
     public function handleWebhook( Request $request ): WebhookResult
     {
-        $secret = (string) $this->config->get( 'artisanpack.ecommerce.gateways.stripe.webhook_secret', '' );
+        $secrets = $this->webhookSecrets();
 
-        if ( '' === $secret ) {
+        if ( [] === $secrets ) {
             return WebhookResult::unverified( 'webhook_secret_not_configured', 'Stripe webhook secret is not configured.' );
         }
 
@@ -477,19 +488,60 @@ class StripeGateway implements PaymentGateway
             return WebhookResult::unverified( 'signature_missing', 'Stripe-Signature header is missing.' );
         }
 
-        try {
-            $event = $this->verifier->verify( $request->getContent(), $signature, $secret );
-        } catch ( SignatureVerificationException $e ) {
-            return WebhookResult::unverified( 'signature_mismatch', $e->getMessage() );
+        // Several secrets are accepted at once so an endpoint secret can be
+        // rotated without dropping deliveries signed with the old one.
+        $event = null;
+        $error = null;
+
+        foreach ( $secrets as $secret ) {
+            try {
+                $event = $this->verifier->verify( $request->getContent(), $signature, $secret );
+
+                break;
+            } catch ( SignatureVerificationException $e ) {
+                $error = $e;
+            }
+        }
+
+        if ( null === $event ) {
+            return WebhookResult::unverified( 'signature_mismatch', $error?->getMessage() );
         }
 
         $payload = $event->toArray();
+        $type    = (string) $event->type;
+        $object  = (array) ( $payload['data']['object'] ?? [] );
 
-        return WebhookResult::verified(
-            (string) $event->type,
-            (string) $event->id,
-            $payload,
-        );
+        [ $outcome, $reference, $refundReference ] = $this->webhookOutcome( $type, $object );
+
+        return WebhookResult::verified( $type, (string) $event->id, $payload, $outcome, $reference, $refundReference );
+    }
+
+    /**
+     * Describes the client-side step for `$session`: Stripe's Payment
+     * Element, with the publishable key and the PaymentIntent's client
+     * secret (both meant to reach the browser; card data never touches the
+     * server).
+     *
+     * @since 1.0.0
+     *
+     * @param  Cart            $cart     Cart being paid for.
+     * @param  PaymentSession  $session  Session from createPaymentSession().
+     *
+     * @return array{driver: string, flow: string, publishable_key: string, client_secret: string|null, redirect_url: null, options: array<string, mixed>}
+     */
+    public function clientConfig( Cart $cart, PaymentSession $session ): array
+    {
+        return [
+            'driver'          => 'stripe-payment-element',
+            'flow'            => 'embedded',
+            'publishable_key' => (string) $this->config->get( 'artisanpack.ecommerce.gateways.stripe.publishable_key', '' ),
+            'client_secret'   => $session->clientSecret,
+            'redirect_url'    => null,
+            'options'         => [
+                'locale'     => str_replace( '_', '-', (string) app()->getLocale() ),
+                'appearance' => (array) $this->config->get( 'artisanpack.ecommerce.gateways.stripe.appearance', [] ),
+            ],
+        ];
     }
 
     /**
@@ -614,6 +666,123 @@ class StripeGateway implements PaymentGateway
         }
 
         return PaymentResult::retryableFailure( $amount, $code, $exception->getMessage() );
+    }
+
+    /**
+     * Builds a {@see PaymentSession} from a PaymentIntent.
+     *
+     * @since 1.0.0
+     *
+     * @param  PaymentIntent  $intent  The intent.
+     *
+     * @return PaymentSession
+     */
+    private function sessionFromIntent( PaymentIntent $intent ): PaymentSession
+    {
+        $currency = strtoupper( (string) ( $intent->currency ?? 'usd' ) );
+
+        return new PaymentSession(
+            gatewayKey: $this->key(),
+            reference: (string) $intent->id,
+            amount: new Money( (int) ( $intent->amount ?? 0 ), new Currency( $currency ) ),
+            clientSecret: $intent->client_secret ?? null,
+            metadata: [
+                'publishable_key' => (string) $this->config->get( 'artisanpack.ecommerce.gateways.stripe.publishable_key', '' ),
+                'status'          => (string) ( $intent->status ?? '' ),
+                'charge'          => $this->latestChargeId( $intent ),
+            ],
+            status: $this->normalizeStatus( (string) ( $intent->status ?? '' ) ),
+        );
+    }
+
+    /**
+     * Maps a PaymentIntent status onto {@see PaymentSession}'s statuses.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $status  Stripe status.
+     *
+     * @return string|null
+     */
+    private function normalizeStatus( string $status ): ?string
+    {
+        return match ( $status ) {
+            'requires_payment_method', 'requires_confirmation' => PaymentSession::STATUS_REQUIRES_PAYMENT_METHOD,
+            'requires_action'                                  => PaymentSession::STATUS_REQUIRES_ACTION,
+            'processing'                                       => PaymentSession::STATUS_PROCESSING,
+            'requires_capture'                                 => PaymentSession::STATUS_AUTHORIZED,
+            'succeeded'                                        => PaymentSession::STATUS_SUCCEEDED,
+            'canceled'                                         => PaymentSession::STATUS_CANCELED,
+            default                                            => null,
+        };
+    }
+
+    /**
+     * What Stripe actually captured on a succeeded PaymentIntent
+     * (`amount_received` in its own currency), falling back to the session
+     * amount when Stripe doesn't report it.
+     *
+     * @since 1.0.0
+     *
+     * @param  PaymentIntent   $intent   Captured intent.
+     * @param  PaymentSession  $session  Session being captured.
+     *
+     * @return Money
+     */
+    private function receivedAmount( PaymentIntent $intent, PaymentSession $session ): Money
+    {
+        if ( ! isset( $intent->amount_received ) ) {
+            return $session->amount;
+        }
+
+        $currency = strtoupper( (string) ( $intent->currency ?? $session->amount->getCurrency()->getCode() ) );
+
+        return new Money( (int) $intent->amount_received, new Currency( $currency ) );
+    }
+
+    /**
+     * The configured webhook secrets: `webhook_secret` may be one secret, a
+     * comma-separated list, or an array (to rotate without downtime).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, string>
+     */
+    private function webhookSecrets(): array
+    {
+        $configured = $this->config->get( 'artisanpack.ecommerce.gateways.stripe.webhook_secret', '' );
+        $secrets    = is_array( $configured ) ? $configured : explode( ',', (string) $configured );
+
+        return array_values( array_filter( array_map( static fn ( mixed $secret ): string => trim( (string) $secret ), $secrets ), static fn ( string $secret ): bool => '' !== $secret ) );
+    }
+
+    /**
+     * The normalized outcome of a Stripe event: `[outcome, session reference, refund id]`.
+     *
+     * @since 1.0.0
+     *
+     * @param  string                $type    Event type.
+     * @param  array<string, mixed>  $object  `data.object`.
+     *
+     * @return array{0: string|null, 1: string|null, 2: string|null}
+     */
+    private function webhookOutcome( string $type, array $object ): array
+    {
+        $intentId = static fn ( mixed $value ): ?string => is_string( $value ) && '' !== $value ? $value : ( is_array( $value ) && isset( $value['id'] ) ? (string) $value['id'] : null );
+
+        return match ( $type ) {
+            // Captured, or (manual capture) authorized and ready to capture.
+            'payment_intent.succeeded',
+            'payment_intent.amount_capturable_updated' => [ WebhookResult::OUTCOME_SUCCEEDED, $intentId( $object['id'] ?? null ), null ],
+            'payment_intent.payment_failed',
+            'payment_intent.canceled'                  => [ WebhookResult::OUTCOME_FAILED, $intentId( $object['id'] ?? null ), null ],
+            'payment_intent.requires_action'           => [ WebhookResult::OUTCOME_REQUIRES_ACTION, $intentId( $object['id'] ?? null ), null ],
+            'charge.refunded'                          => [ WebhookResult::OUTCOME_REFUNDED, $intentId( $object['payment_intent'] ?? null ), null ],
+            'refund.created', 'refund.updated'         => 'succeeded' === ( $object['status'] ?? null )
+                ? [ WebhookResult::OUTCOME_REFUNDED, $intentId( $object['payment_intent'] ?? null ), isset( $object['id'] ) ? (string) $object['id'] : null ]
+                : [ null, null, null ],
+            default                                    => [ null, null, null ],
+        };
     }
 
     /**

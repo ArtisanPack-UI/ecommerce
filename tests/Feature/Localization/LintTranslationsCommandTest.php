@@ -199,3 +199,15 @@ it( 'passes a translated Blade template', function (): void {
     $this->artisan( 'ecommerce:lint:translations', [ '--path' => [ $this->src ], '--lang' => $lang, '--no-engine' => true ] )
         ->assertExitCode( 0 );
 } );
+
+it( 'treats InvalidArgumentException as user-facing only where it reaches the API', function (): void {
+    File::ensureDirectoryExists( $this->src . '/Registries' );
+    File::put( $this->src . '/Registries/Thing.php', "<?php\nthrow new InvalidArgumentException( 'Registry key must not be empty.' );\n" );
+
+    lintTranslations()->assertExitCode( 0 );
+
+    File::ensureDirectoryExists( $this->src . '/Reports' );
+    File::put( $this->src . '/Reports/Thing.php', "<?php\nthrow new InvalidArgumentException( 'The report needs a date range.' );\n" );
+
+    lintTranslations()->assertExitCode( 1 );
+} );

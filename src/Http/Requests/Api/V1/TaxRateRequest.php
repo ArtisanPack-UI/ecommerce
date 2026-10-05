@@ -19,6 +19,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Models\TaxClass;
 use ArtisanPackUI\Ecommerce\Support\TaxRateMath;
 use Illuminate\Validation\Rule;
 use InvalidArgumentException;
@@ -39,7 +40,7 @@ class TaxRateRequest extends ApiFormRequest
     public function rules(): array
     {
         return $this->sometimes( [
-            'tax_class_key'       => [ 'string', Rule::exists( 'tax_classes', 'key' ) ],
+            'tax_class_key'       => [ 'string', Rule::exists( TaxClass::class, 'key' ) ],
             'country_code'        => [ 'string', 'size:2' ],
             'region_code'         => [ 'nullable', 'string', 'max:10' ],
             'postal_pattern'      => [ 'nullable', 'string', 'max:60' ],

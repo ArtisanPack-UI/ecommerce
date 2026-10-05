@@ -18,6 +18,8 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Policies;
 
+use ArtisanPackUI\Ecommerce\Models\Customer;
+use ArtisanPackUI\Ecommerce\Policies\Concerns\ChecksShopperOwnership;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 
@@ -29,6 +31,8 @@ use Illuminate\Database\Eloquent\Model;
  */
 class CustomerPolicy extends EcommercePolicy
 {
+    use ChecksShopperOwnership;
+
     /**
      * @since 1.0.0
      *
@@ -51,7 +55,7 @@ class CustomerPolicy extends EcommercePolicy
     }
 
     /**
-     * `ecommerce.customer.view`.
+     * `ecommerce.customer.view`, or the shopper's own record.
      *
      * @since 1.0.0
      *
@@ -62,11 +66,11 @@ class CustomerPolicy extends EcommercePolicy
      */
     public function view( Authenticatable $user, Model $subject ): bool
     {
-        return $this->decide( $user, 'view', $subject );
+        return $this->decide( $user, 'view', $subject ) || ( $subject instanceof Customer && $this->ownsCustomer( $user, $subject ) );
     }
 
     /**
-     * `ecommerce.customer.update`.
+     * `ecommerce.customer.update`, or the shopper's own record.
      *
      * @since 1.0.0
      *
@@ -77,7 +81,7 @@ class CustomerPolicy extends EcommercePolicy
      */
     public function update( Authenticatable $user, Model $subject ): bool
     {
-        return $this->decide( $user, 'update', $subject );
+        return $this->decide( $user, 'update', $subject ) || ( $subject instanceof Customer && $this->ownsCustomer( $user, $subject ) );
     }
 
     /**

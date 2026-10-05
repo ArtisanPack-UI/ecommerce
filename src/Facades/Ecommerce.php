@@ -20,6 +20,15 @@ use Illuminate\Support\Facades\Facade;
 /**
  * Ecommerce Facade.
  *
+ * @method static \ArtisanPackUI\Ecommerce\Services\StorefrontCartService cart()
+ * @method static \ArtisanPackUI\Ecommerce\Services\CheckoutService checkout()
+ * @method static \ArtisanPackUI\Ecommerce\Orders\OrderServices orders()
+ * @method static \ArtisanPackUI\Ecommerce\Services\PaymentOrchestrator payments()
+ * @method static \ArtisanPackUI\Ecommerce\Catalog\CatalogQuery catalog()
+ * @method static \ArtisanPackUI\Ecommerce\Services\CustomerService customers()
+ * @method static \ArtisanPackUI\Ecommerce\Services\InventoryService inventory()
+ * @method static string version()
+ *
  * @see \ArtisanPackUI\Ecommerce\Ecommerce
  *
  * @package    ArtisanPack_UI

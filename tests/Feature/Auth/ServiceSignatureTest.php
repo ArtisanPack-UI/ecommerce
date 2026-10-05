@@ -102,3 +102,14 @@ it( 'parses only Signature authorization headers', function (): void {
         ->and( ServiceSignature::parse( 'Signature keyId="a",algorithm="hmac-sha256",headers="date",signature="xyz="' ) )
         ->toBe( [ 'keyId' => 'a', 'algorithm' => 'hmac-sha256', 'headers' => 'date', 'signature' => 'xyz=' ] );
 } );
+
+it( 'remembers used signatures in the configured cache store (F13)', function (): void {
+    config()->set( 'cache.stores.signatures', [ 'driver' => 'array' ] );
+    config()->set( 'artisanpack.ecommerce.api.signature_cache_store', 'signatures' );
+
+    expect( ArtisanPackUI\Ecommerce\Http\Middleware\ServiceSignatureMiddleware::replayStoreDriver() )->toBe( 'array' );
+
+    ArtisanPackUI\Ecommerce\Http\Middleware\ServiceSignatureMiddleware::replayStore()->put( 'probe', true, 60 );
+
+    expect( Illuminate\Support\Facades\Cache::store( 'signatures' )->get( 'probe' ) )->toBeTrue();
+} );

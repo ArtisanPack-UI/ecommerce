@@ -38,11 +38,15 @@ final class ApiOperation
     /**
      * @since 1.0.0
      *
-     * @param  string       $summary      One-line summary.
-     * @param  string|null  $resource     Resource class rendered in `data`, or null for no body.
-     * @param  bool         $collection   Whether `data` is a cursor-paginated list.
-     * @param  int          $status       Success status code.
-     * @param  string|null  $description  Longer description.
+     * @param  string                                                                  $summary      One-line summary.
+     * @param  string|null                                                             $resource     Resource class rendered in `data`, or null for no body.
+     * @param  bool                                                                    $collection   Whether `data` is a list (cursor-paginated when it declares filters or sorts).
+     * @param  int                                                                     $status       Success status code.
+     * @param  string|null                                                             $description  Longer description.
+     * @param  array<string, string>                                                   $filters      `filter[...]` keys a list accepts → JSON type, or `int-list` for comma-separated ids.
+     * @param  array<int|string, mixed>                                                $sorts        `sort` values a list accepts (a list, or a map keyed by them).
+     * @param  array<int|string, mixed>                                                $includes     `include` values the endpoint accepts (a list, or a map keyed by them).
+     * @param  array<string, array{schema: array<string, mixed>, required?: bool, description?: string, style?: string}>  $query  Other query parameters.
      */
     public function __construct(
         public readonly string $summary,
@@ -50,6 +54,10 @@ final class ApiOperation
         public readonly bool $collection = false,
         public readonly int $status = 200,
         public readonly ?string $description = null,
+        public readonly array $filters = [],
+        public readonly array $sorts = [],
+        public readonly array $includes = [],
+        public readonly array $query = [],
     ) {
     }
 }

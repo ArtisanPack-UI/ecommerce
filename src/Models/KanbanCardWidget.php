@@ -56,7 +56,7 @@ class KanbanCardWidget extends Model
      *
      * @var string
      */
-    protected $table = 'kanban_card_widgets';
+    protected $table = 'ecommerce_kanban_card_widgets';
 
     /**
      * @since 1.0.0

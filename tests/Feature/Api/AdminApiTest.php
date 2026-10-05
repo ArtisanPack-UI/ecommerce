@@ -74,7 +74,7 @@ it( 'requires an Idempotency-Key on mutations and replays the original response'
 } );
 
 it( 'creates and updates shipments through the order', function (): void {
-    $order = Order::factory()->create();
+    $order = Order::factory()->withSystemStatus( 'processing' )->create();
     $line  = OrderItem::factory()->create( [ 'order_id' => $order->id, 'quantity' => 2 ] );
     $this->actingAs( ecommerceAdmin(), 'sanctum' );
 
@@ -100,7 +100,7 @@ it( 'creates and updates shipments through the order', function (): void {
 } );
 
 it( 'never exposes the local-pickup code hash', function (): void {
-    $order = Order::factory()->create();
+    $order = Order::factory()->withSystemStatus( 'processing' )->create();
     OrderItem::factory()->create( [ 'order_id' => $order->id ] );
     $this->actingAs( ecommerceAdmin(), 'sanctum' );
 

@@ -104,7 +104,7 @@ class Shipment extends Model
      *
      * @var string
      */
-    protected $table = 'shipments';
+    protected $table = 'ecommerce_shipments';
 
     /**
      * @since 1.0.0

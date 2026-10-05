@@ -28,6 +28,7 @@ namespace ArtisanPackUI\Ecommerce\Services;
 
 use ArtisanPackUI\Ecommerce\Events\DigitalDownloadTokenIssued;
 use ArtisanPackUI\Ecommerce\Exceptions\DigitalDownloadException;
+use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\DigitalDownload;
 use ArtisanPackUI\Ecommerce\Models\DigitalDownloadEvent;
 use ArtisanPackUI\Ecommerce\Models\DigitalFile;
@@ -131,7 +132,8 @@ class DigitalDownloadService
 
     /**
      * The digital files an order line unlocks: its variant's files plus the
-     * product's product-wide (variant-less) files.
+     * product's product-wide (variant-less) files. Archived files issue
+     * nothing new.
      *
      * @since 1.0.0
      *
@@ -146,6 +148,7 @@ class DigitalDownloadService
         }
 
         return DigitalFile::query()
+            ->whereNull( 'archived_at' )
             ->where( function ( Builder $query ) use ( $item ): void {
                 if ( null !== $item->product_variant_id ) {
                     $query->orWhere( 'product_variant_id', $item->product_variant_id );
@@ -188,6 +191,69 @@ class DigitalDownloadService
             throw new DigitalDownloadException( 'download-not-found', 404, __( 'This download link is not valid.' ) );
         }
 
+        return $this->redeemEntitlement( (int) $id, $mode, $request, $counted );
+    }
+
+    /**
+     * Redeems entitlement `$downloadId` for its owner, signed in from their
+     * account (#174) — the plain token only ever exists in the email. Same
+     * limits, expiry, counting, and streaming-only rule as a token
+     * redemption. Another customer's entitlement is a 404.
+     *
+     * @since 1.0.0
+     *
+     * @param  Customer  $customer    Signed-in owner.
+     * @param  int       $downloadId  Entitlement id.
+     * @param  string    $mode        {@see self::MODE_DOWNLOAD} or {@see self::MODE_STREAM}.
+     * @param  Request   $request     Request (for the audit row).
+     * @param  bool      $counted     Whether this request spends a download.
+     *
+     * @throws DigitalDownloadException When the entitlement isn't theirs or can't be redeemed.
+     *
+     * @return DigitalDownload
+     */
+    public function redeemOwned( Customer $customer, int $downloadId, string $mode, Request $request, bool $counted = true ): DigitalDownload
+    {
+        if ( ! $this->forCustomer( $customer )->whereKey( $downloadId )->exists() ) {
+            throw new DigitalDownloadException( 'download-not-found', 404, __( 'That download doesn\'t exist.' ) );
+        }
+
+        return $this->redeemEntitlement( $downloadId, $mode, $request, $counted );
+    }
+
+    /**
+     * The entitlements of `$customer`'s orders, newest first, with their
+     * file and order line (#174).
+     *
+     * @since 1.0.0
+     *
+     * @param  Customer  $customer  Customer.
+     *
+     * @return Builder<DigitalDownload>
+     */
+    public function forCustomer( Customer $customer ): Builder
+    {
+        return DigitalDownload::query()
+            ->whereHas( 'orderItem.order', static fn ( Builder $orders ) => $orders->where( 'customer_id', $customer->id ) )
+            ->with( [ 'file', 'orderItem' ] );
+    }
+
+    /**
+     * Spends one use of entitlement `$id` (see {@see self::redeem()}).
+     *
+     * @since 1.0.0
+     *
+     * @param  int      $id       Entitlement id.
+     * @param  string   $mode     Redemption mode.
+     * @param  Request  $request  Request.
+     * @param  bool     $counted  Whether this request spends a download.
+     *
+     * @throws DigitalDownloadException When it can't be redeemed.
+     *
+     * @return DigitalDownload
+     */
+    protected function redeemEntitlement( int $id, string $mode, Request $request, bool $counted ): DigitalDownload
+    {
         $refusal = DB::transaction( function () use ( $id, $mode, $counted, $request ): ?DigitalDownloadException {
             /** @var DigitalDownload $download */
             $download = DigitalDownload::query()->with( 'file' )->lockForUpdate()->findOrFail( $id );

@@ -21,8 +21,13 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Services;
 
 use ArtisanPackUI\Ecommerce\Contracts\ShippingLabelProvider;
+use ArtisanPackUI\Ecommerce\Events\OrderFulfilled;
+use ArtisanPackUI\Ecommerce\Events\ShipmentCreated;
+use ArtisanPackUI\Ecommerce\Events\ShipmentDelivered;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
+use ArtisanPackUI\Ecommerce\Models\Refund;
+use ArtisanPackUI\Ecommerce\Models\RefundItem;
 use ArtisanPackUI\Ecommerce\Models\Shipment;
 use ArtisanPackUI\Ecommerce\Models\ShipmentItem;
 use ArtisanPackUI\Ecommerce\Registries\ShippingLabelProviderRegistry;
@@ -32,6 +37,7 @@ use ArtisanPackUI\Ecommerce\ValueObjects\ShippingLabel;
 use ArtisanPackUI\Ecommerce\ValueObjects\TrackingStatus;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -63,6 +69,16 @@ class ShipmentService
      * @var array<int, string>
      */
     public const UNSHIPPABLE_STATUSES = [ 'cancelled', 'refunded', 'failed' ];
+
+    /**
+     * Order system statuses a shipment may be created in: the order is paid.
+     * `fulfillment.allow_unpaid_shipments` also allows `pending` orders.
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    public const SHIPPABLE_STATUSES = [ 'processing', 'complete' ];
 
     /**
      * @since 1.0.0
@@ -107,6 +123,10 @@ class ShipmentService
 
             if ( in_array( $locked->system_status, self::UNSHIPPABLE_STATUSES, true ) ) {
                 throw new InvalidArgumentException( __( 'Order :id is :status and can no longer be shipped.', [ 'id' => $order->id, 'status' => $locked->system_status ] ) );
+            }
+
+            if ( ! in_array( $locked->system_status, self::SHIPPABLE_STATUSES, true ) && ! (bool) config( 'artisanpack.ecommerce.fulfillment.allow_unpaid_shipments', false ) ) {
+                throw new InvalidArgumentException( __( 'Order :id hasn\'t been paid yet, so it can\'t be shipped.', [ 'id' => $order->id ] ) );
             }
 
             $remaining = $this->remainingQuantities( $locked );
@@ -170,6 +190,7 @@ class ShipmentService
         }
 
         doAction( 'ap.ecommerce.shipping.shipmentCreated', $shipment, $order );
+        Event::dispatch( new ShipmentCreated( $shipment, $order ) );
         doAction( 'ap.ecommerce.order.shipped', $order, $shipment );
 
         foreach ( $fulfilledItems as $item ) {
@@ -178,10 +199,12 @@ class ShipmentService
 
         if ( $orderFulfilled ) {
             doAction( 'ap.ecommerce.order.fulfilled', $order );
+            Event::dispatch( new OrderFulfilled( $order ) );
         }
 
         if ( Shipment::STATUS_DELIVERED === $shipment->status ) {
             doAction( 'ap.ecommerce.order.delivered', $order, $shipment );
+            Event::dispatch( new ShipmentDelivered( $shipment, $order ) );
         }
 
         return $shipment->load( 'items' );
@@ -205,26 +228,45 @@ class ShipmentService
             throw new InvalidArgumentException( __( 'Unknown shipment status ":status".', [ 'status' => $status->status ] ) );
         }
 
-        $wasDelivered = Shipment::STATUS_DELIVERED === $shipment->status;
+        // Under the shipment's lock, so two carrier callbacks can't both
+        // claim the delivery (and fire `order.delivered` twice).
+        $wasDelivered = DB::transaction( function () use ( $shipment, $status ): bool {
+            $locked       = Shipment::query()->lockForUpdate()->findOrFail( $shipment->id );
+            $wasDelivered = Shipment::STATUS_DELIVERED === $locked->status;
 
-        $shipment->status          = $status->status;
-        $shipment->tracking_number = $this->trackingValue( $status->trackingNumber, $shipment->tracking_number );
-        $shipment->tracking_url    = $this->trackingValue( $status->trackingUrl, $shipment->tracking_url );
+            // Changes the caller made to its instance (carrier, a cleared
+            // tracking number, …) are saved with the update.
+            $locked->forceFill( $shipment->getDirty() );
 
-        if ( Shipment::STATUS_IN_TRANSIT === $status->status && null === $shipment->shipped_at ) {
-            $shipment->shipped_at = $status->occurredAt ?? Carbon::now();
-        }
+            // A delivered parcel can only stay delivered or turn into an
+            // exception (damaged, returned); it never goes back in transit.
+            if ( $wasDelivered && ! in_array( $status->status, [ Shipment::STATUS_DELIVERED, Shipment::STATUS_EXCEPTION ], true ) ) {
+                throw new InvalidArgumentException( __( 'A delivered shipment can\'t move back to ":status".', [ 'status' => $status->status ] ) );
+            }
 
-        if ( Shipment::STATUS_DELIVERED === $status->status && null === $shipment->delivered_at ) {
-            $shipment->delivered_at = $status->occurredAt ?? Carbon::now();
-        }
+            $locked->status          = $status->status;
+            $locked->tracking_number = $this->trackingValue( $status->trackingNumber, $locked->tracking_number );
+            $locked->tracking_url    = $this->trackingValue( $status->trackingUrl, $locked->tracking_url );
 
-        $shipment->save();
+            if ( Shipment::STATUS_IN_TRANSIT === $status->status && null === $locked->shipped_at ) {
+                $locked->shipped_at = $status->occurredAt ?? Carbon::now();
+            }
+
+            if ( Shipment::STATUS_DELIVERED === $status->status && null === $locked->delivered_at ) {
+                $locked->delivered_at = $status->occurredAt ?? Carbon::now();
+            }
+
+            $locked->save();
+            $shipment->setRawAttributes( $locked->getAttributes(), true );
+
+            return $wasDelivered;
+        } );
 
         doAction( 'ap.ecommerce.shipping.trackingUpdated', $shipment, $status );
 
         if ( ! $wasDelivered && Shipment::STATUS_DELIVERED === $status->status ) {
             doAction( 'ap.ecommerce.order.delivered', $shipment->order, $shipment );
+            Event::dispatch( new ShipmentDelivered( $shipment, $shipment->order ) );
         }
 
         return $shipment;
@@ -332,6 +374,7 @@ class ShipmentService
     public function remainingQuantities( Order $order ): array
     {
         $shipped   = $this->shippedQuantities( $order );
+        $refunded  = $this->refundedQuantities( $order );
         $remaining = [];
 
         /** @var OrderItem $item */
@@ -340,7 +383,7 @@ class ShipmentService
                 continue;
             }
 
-            $remaining[ $item->id ] = max( 0, (int) $item->quantity - (int) ( $shipped[ $item->id ] ?? 0 ) );
+            $remaining[ $item->id ] = max( 0, (int) $item->quantity - (int) ( $refunded[ $item->id ] ?? 0 ) - (int) ( $shipped[ $item->id ] ?? 0 ) );
         }
 
         return $remaining;
@@ -387,7 +430,30 @@ class ShipmentService
     }
 
     /**
+     * Refunded quantity per order item (refunds that moved money or are
+     * moving it), keyed by order-item id. Refunded units no longer need
+     * shipping.
+     *
+     * @since 1.0.0
+     *
+     * @param  Order  $order  Order.
+     *
+     * @return array<int, int>
+     */
+    protected function refundedQuantities( Order $order ): array
+    {
+        return RefundItem::query()
+            ->whereIn( 'refund_id', Refund::query()->where( 'order_id', $order->id )->counting()->select( 'id' ) )
+            ->groupBy( 'order_item_id' )
+            ->selectRaw( 'order_item_id, SUM(quantity) as refunded' )
+            ->pluck( 'refunded', 'order_item_id' )
+            ->map( static fn ( mixed $qty ): int => (int) $qty )
+            ->all();
+    }
+
+    /**
      * Rolls shipped quantities up into line and order `fulfillment_status`.
+     * A line is fulfilled once everything not refunded has shipped.
      *
      * @since 1.0.0
      *
@@ -398,6 +464,7 @@ class ShipmentService
     protected function rollUpFulfillment( Order $order ): array
     {
         $shipped        = $this->shippedQuantities( $order );
+        $refunded       = $this->refundedQuantities( $order );
         $justFulfilled  = [];
         $allFulfilled   = true;
         $anyShipped     = false;
@@ -409,8 +476,9 @@ class ShipmentService
             }
 
             $qty    = (int) ( $shipped[ $item->id ] ?? 0 );
+            $target = max( 0, (int) $item->quantity - (int) ( $refunded[ $item->id ] ?? 0 ) );
             $status = match ( true ) {
-                $qty >= (int) $item->quantity => 'fulfilled',
+                $qty >= $target               => 'fulfilled',
                 $qty > 0                      => 'partial',
                 default                       => 'unfulfilled',
             };

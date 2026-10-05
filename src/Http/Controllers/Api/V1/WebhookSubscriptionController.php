@@ -78,7 +78,7 @@ class WebhookSubscriptionController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List webhook subscriptions', resource: WebhookSubscriptionResource::class, collection: true )]
+    #[ApiOperation( summary: 'List webhook subscriptions', resource: WebhookSubscriptionResource::class, collection: true, filters: [ 'is_active' => 'boolean' ], sorts: [ 'name', 'created_at' ], includes: [ 'deliveries' ] )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(
@@ -126,7 +126,7 @@ class WebhookSubscriptionController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Update a webhook subscription', resource: WebhookSubscriptionResource::class )]
+    #[ApiOperation( summary: 'Update a webhook subscription', resource: WebhookSubscriptionResource::class, includes: [ 'deliveries' ] )]
     public function update( WebhookSubscriptionRequest $request, WebhookSubscription $subscription ): JsonResponse
     {
         return $this->resourceResponse(
@@ -168,7 +168,7 @@ class WebhookSubscriptionController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List a webhook subscription\'s deliveries', resource: WebhookDeliveryResource::class, collection: true )]
+    #[ApiOperation( summary: 'List a webhook subscription\'s deliveries', resource: WebhookDeliveryResource::class, collection: true, filters: [ 'event' => 'string', 'status' => 'string' ], sorts: [ 'id', 'created_at' ] )]
     public function deliveries( Request $request, WebhookSubscription $subscription ): JsonResponse
     {
         return $this->listResponse(
@@ -229,6 +229,27 @@ class WebhookSubscriptionController extends ApiController
         }
 
         return $this->resourceResponse( $replayed, $request, WebhookDeliveryResource::class, [], 202 );
+    }
+
+    /**
+     * Requeues the deliveries parked while the subscription was inactive
+     * (see {@see WebhookSubscriptionService::replayParked()}).
+     *
+     * @since 1.0.0
+     *
+     * @param  Request              $request       Request.
+     * @param  WebhookSubscription  $subscription  Subscription.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Requeue deliveries parked while a subscription was inactive', status: 202 )]
+    public function replayParked( Request $request, WebhookSubscription $subscription ): JsonResponse
+    {
+        if ( ! $subscription->is_active ) {
+            return Problem::make( 422, 'webhook-subscription-inactive', __( 'Subscription inactive' ), __( 'Re-enable the subscription before replaying its deliveries.' ), $request );
+        }
+
+        return new JsonResponse( [ 'data' => [ 'requeued' => $this->subscriptions->replayParked( $subscription ) ] ], 202 );
     }
 
     /**

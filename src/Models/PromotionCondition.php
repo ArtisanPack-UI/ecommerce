@@ -58,7 +58,7 @@ class PromotionCondition extends Model
      *
      * @var string
      */
-    protected $table = 'promotion_conditions';
+    protected $table = 'ecommerce_promotion_conditions';
 
     /**
      * @since 1.0.0

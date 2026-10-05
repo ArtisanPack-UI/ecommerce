@@ -72,7 +72,7 @@ class OrderItem extends Model
      *
      * @var string
      */
-    protected $table = 'order_items';
+    protected $table = 'ecommerce_order_items';
 
     /**
      * @since 1.0.0

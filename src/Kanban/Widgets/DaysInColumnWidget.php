@@ -70,10 +70,12 @@ class DaysInColumnWidget extends AbstractKanbanCardWidget
      */
     public function render( Order $order, KanbanColumn $column ): array
     {
-        $assignment = OrderBoardAssignment::query()
-            ->where( 'order_id', $order->id )
-            ->where( 'board_id', $column->board_id )
-            ->first();
+        $assignment = $order->relationLoaded( 'boardAssignments' )
+            ? $order->boardAssignments->firstWhere( 'board_id', $column->board_id )
+            : OrderBoardAssignment::query()
+                ->where( 'order_id', $order->id )
+                ->where( 'board_id', $column->board_id )
+                ->first();
 
         $since = $assignment?->moved_at ?? $assignment?->assigned_at;
 

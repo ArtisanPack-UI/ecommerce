@@ -55,7 +55,7 @@ class LicenseKeyResource extends EcommerceResource
             'expires_at'        => $this->resource->expires_at,
             'is_revoked'        => $this->resource->is_revoked,
             'revoked_at'        => $this->resource->revoked_at,
-            'meta'              => $this->resource->meta,
+            'meta'              => $this->adminOnly( $request, $this->resource->meta ),
             'created_at'        => $this->resource->created_at,
             'updated_at'        => $this->resource->updated_at,
         ];
@@ -70,6 +70,7 @@ class LicenseKeyResource extends EcommerceResource
     {
         return [
             'activations' => [ 'activations', LicenseActivationResource::class ],
+            'order_item'  => [ 'orderItem', OrderItemResource::class ],
         ];
     }
 }

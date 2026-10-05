@@ -34,6 +34,8 @@ use ArtisanPackUI\Ecommerce\Contracts\ProductType;
 use ArtisanPackUI\Ecommerce\Contracts\PromotionAction;
 use ArtisanPackUI\Ecommerce\Contracts\PromotionCondition;
 use ArtisanPackUI\Ecommerce\Contracts\ReviewModerator;
+use ArtisanPackUI\Ecommerce\Contracts\SearchIndexer;
+use ArtisanPackUI\Ecommerce\Contracts\SearchProvider;
 use ArtisanPackUI\Ecommerce\Contracts\ShippingLabelProvider;
 use ArtisanPackUI\Ecommerce\Contracts\ShippingMethodType;
 use ArtisanPackUI\Ecommerce\Contracts\ShippingRateProvider;
@@ -48,6 +50,8 @@ use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PromotionActionRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PromotionConditionRegistry;
+use ArtisanPackUI\Ecommerce\Registries\SearchIndexerRegistry;
+use ArtisanPackUI\Ecommerce\Registries\SearchProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingLabelProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingMethodTypeRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingRateProviderRegistry;
@@ -64,6 +68,7 @@ use ArtisanPackUI\Ecommerce\Testing\Contracts\ProductTypeContractTest;
 use ArtisanPackUI\Ecommerce\Testing\Contracts\PromotionActionContractTest;
 use ArtisanPackUI\Ecommerce\Testing\Contracts\PromotionConditionContractTest;
 use ArtisanPackUI\Ecommerce\Testing\Contracts\ReviewModeratorContractTest;
+use ArtisanPackUI\Ecommerce\Testing\Contracts\SearchProviderContractTest;
 use ArtisanPackUI\Ecommerce\Testing\Contracts\ShippingRateProviderContractTest;
 use ArtisanPackUI\Ecommerce\Testing\Contracts\TaxProviderContractTest;
 
@@ -99,6 +104,8 @@ final class ContractSuiteMap
         KanbanAutomationRegistry::class              => KanbanAutomationTrigger::class,
         NotificationTemplateRegistry::class          => NotificationTemplate::class,
         ShippingMethodTypeRegistry::class            => ShippingMethodType::class,
+        SearchProviderRegistry::class                => SearchProvider::class,
+        SearchIndexerRegistry::class                 => SearchIndexer::class,
     ];
 
     /**
@@ -137,6 +144,7 @@ final class ContractSuiteMap
         CartStorage::class                   => CartStorageContractTest::class,
         OrderNumberGenerator::class          => OrderNumberGeneratorContractTest::class,
         ReviewModerator::class               => ReviewModeratorContractTest::class,
+        SearchProvider::class                => SearchProviderContractTest::class,
     ];
 
     /**

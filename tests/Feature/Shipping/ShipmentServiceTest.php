@@ -17,7 +17,7 @@ uses( RefreshDatabase::class );
 
 beforeEach( function (): void {
     $this->service = app( ShipmentService::class );
-    $this->order   = Order::factory()->create();
+    $this->order   = Order::factory()->withSystemStatus( 'processing' )->create();
     $this->lineA   = OrderItem::factory()->create( [ 'order_id' => $this->order->id, 'quantity' => 3 ] );
     $this->lineB   = OrderItem::factory()->create( [ 'order_id' => $this->order->id, 'quantity' => 1 ] );
 } );

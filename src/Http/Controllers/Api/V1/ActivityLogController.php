@@ -46,7 +46,7 @@ class ActivityLogController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List a product\'s activity', resource: ActivityLogEntryResource::class, collection: true )]
+    #[ApiOperation( summary: 'List a product\'s activity', resource: ActivityLogEntryResource::class, collection: true, filters: [ 'event_type' => 'string' ], sorts: [ 'created_at' ] )]
     public function product( Request $request, Product $product ): JsonResponse
     {
         return $this->entries( $request, $product );
@@ -60,7 +60,7 @@ class ActivityLogController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List a customer\'s activity', resource: ActivityLogEntryResource::class, collection: true )]
+    #[ApiOperation( summary: 'List a customer\'s activity', resource: ActivityLogEntryResource::class, collection: true, filters: [ 'event_type' => 'string' ], sorts: [ 'created_at' ] )]
     public function customer( Request $request, Customer $customer ): JsonResponse
     {
         return $this->entries( $request, $customer );
@@ -74,7 +74,7 @@ class ActivityLogController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List a promotion\'s activity', resource: ActivityLogEntryResource::class, collection: true )]
+    #[ApiOperation( summary: 'List a promotion\'s activity', resource: ActivityLogEntryResource::class, collection: true, filters: [ 'event_type' => 'string' ], sorts: [ 'created_at' ] )]
     public function promotion( Request $request, Promotion $promotion ): JsonResponse
     {
         return $this->entries( $request, $promotion );

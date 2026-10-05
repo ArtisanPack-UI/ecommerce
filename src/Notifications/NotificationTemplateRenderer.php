@@ -35,7 +35,12 @@ namespace ArtisanPackUI\Ecommerce\Notifications;
 
 use ArtisanPackUI\Ecommerce\Exceptions\NotificationTemplateException;
 use ArtisanPackUI\Ecommerce\Support\LocalizedDate;
+use BackedEnum;
 use DateTimeInterface;
+use Illuminate\Contracts\Support\Arrayable;
+use JsonSerializable;
+use Stringable;
+use Traversable;
 use Twig\Environment;
 use Twig\Error\Error as TwigError;
 use Twig\Extension\SandboxExtension;
@@ -183,11 +188,40 @@ class NotificationTemplateRenderer
      */
     public function render( string $source, array $variables, bool $html, string $field = 'body' ): string
     {
+        $variables = $this->plainContext( $variables, $field );
+
         try {
             return $this->environment()->createTemplate( $source, ( $html ? 'html:' : 'text:' ) . $field )->render( $variables );
         } catch ( TwigError $error ) {
             throw new NotificationTemplateException( [ $this->errorFor( $field, $error ) ], $error );
         }
+    }
+
+    /**
+     * Reduces the render context to scalars and arrays, so nothing a filter
+     * adds (`ap.ecommerce.notification.templateVariables` can inject models
+     * or other objects) reaches the sandbox as an object: dates become ISO
+     * 8601 strings, backed enums their value, `Arrayable`, `JsonSerializable`
+     * and `Traversable` values plain arrays, and `Stringable` values strings.
+     * Any other object is refused.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<array-key, mixed>  $variables  Render context.
+     * @param  string                   $field      Field name, for error reporting.
+     * @param  string                   $path       Dotted path of `$variables` in the context.
+     *
+     * @throws NotificationTemplateException When the context holds an object that can't be reduced.
+     *
+     * @return array<array-key, mixed>
+     */
+    public function plainContext( array $variables, string $field = 'body', string $path = '' ): array
+    {
+        foreach ( $variables as $key => $value ) {
+            $variables[ $key ] = $this->plainValue( $value, $field, '' === $path ? (string) $key : $path . '.' . $key );
+        }
+
+        return $variables;
     }
 
     /**
@@ -251,6 +285,49 @@ class NotificationTemplateRenderer
     public function policy(): SecurityPolicy
     {
         return new SecurityPolicy( self::ALLOWED_TAGS, self::ALLOWED_FILTERS, [], [], self::ALLOWED_FUNCTIONS, self::ALLOWED_TESTS );
+    }
+
+    /**
+     * Reduces one context value; see {@see self::plainContext()}.
+     *
+     * @since 1.0.0
+     *
+     * @param  mixed   $value  The value.
+     * @param  string  $field  Field name, for error reporting.
+     * @param  string  $path   Dotted path of the value in the context.
+     *
+     * @throws NotificationTemplateException When the value is an object that can't be reduced.
+     *
+     * @return mixed
+     */
+    protected function plainValue( mixed $value, string $field, string $path ): mixed
+    {
+        if ( null === $value || is_scalar( $value ) ) {
+            return $value;
+        }
+
+        if ( is_array( $value ) ) {
+            return $this->plainContext( $value, $field, $path );
+        }
+
+        $plain = match ( true ) {
+            $value instanceof DateTimeInterface => $value->format( DateTimeInterface::ATOM ),
+            $value instanceof BackedEnum        => $value->value,
+            $value instanceof Arrayable         => $value->toArray(),
+            $value instanceof JsonSerializable  => $value->jsonSerialize(),
+            $value instanceof Traversable       => iterator_to_array( $value ),
+            $value instanceof Stringable        => (string) $value,
+            default                             => throw new NotificationTemplateException( [ [
+                'field'   => $field,
+                'code'    => 'context-invalid',
+                'message' => __( 'The notification variable :variable is a :type, which templates cannot read. Pass plain values or arrays.', [
+                    'variable' => $path,
+                    'type'     => get_debug_type( $value ),
+                ] ),
+            ] ] ),
+        };
+
+        return $this->plainValue( $plain, $field, $path );
     }
 
     /**

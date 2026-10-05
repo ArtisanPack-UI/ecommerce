@@ -21,6 +21,7 @@ namespace ArtisanPackUI\Ecommerce\Events;
 
 use ArtisanPackUI\Ecommerce\Models\DigitalFile;
 use ArtisanPackUI\Ecommerce\Models\Product;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 
 /**
  * @package    ArtisanPack_UI
@@ -28,7 +29,7 @@ use ArtisanPackUI\Ecommerce\Models\Product;
  *
  * @since      1.0.0
  */
-class DigitalProductUpdated
+class DigitalProductUpdated implements ShouldDispatchAfterCommit
 {
     /**
      * @since 1.0.0

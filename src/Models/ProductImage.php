@@ -51,7 +51,7 @@ class ProductImage extends Model
      *
      * @var string
      */
-    protected $table = 'product_images';
+    protected $table = 'ecommerce_product_images';
 
     /**
      * Mass-assignable attributes.

@@ -24,6 +24,7 @@ namespace ArtisanPackUI\Ecommerce\Events;
 
 use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
 use ArtisanPackUI\Ecommerce\Models\Order;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Throwable;
 
 /**
@@ -32,7 +33,7 @@ use Throwable;
  *
  * @since      1.0.0
  */
-class PaymentFailed
+class PaymentFailed implements ShouldDispatchAfterCommit
 {
     /**
      * @since 1.0.0

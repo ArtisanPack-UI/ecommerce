@@ -20,12 +20,17 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Models;
 
 use ArtisanPackUI\Ecommerce\Database\Factories\CustomerFactory;
+use ArtisanPackUI\Ecommerce\Events\CustomerRegistered;
+use ArtisanPackUI\Ecommerce\Events\CustomerUpdated;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Translation\HasLocalePreference;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Event;
 
 /**
  * Customer Eloquent model.
@@ -41,6 +46,7 @@ use Illuminate\Support\Carbon;
  * @property string|null                                                             $first_name
  * @property string|null                                                             $last_name
  * @property string|null                                                             $phone
+ * @property string|null                                                             $locale
  * @property bool                                                                    $accepts_marketing
  * @property Carbon|null                                                             $accepts_marketing_at
  * @property int                                                                     $total_spent_amount
@@ -53,17 +59,27 @@ use Illuminate\Support\Carbon;
  * @property \Illuminate\Database\Eloquent\Collection<int, CustomerNotificationPreference>  $notificationPreferences
  * @property \Illuminate\Database\Eloquent\Collection<int, CustomerNote>             $notes
  */
-class Customer extends Model
+class Customer extends Model implements HasLocalePreference
 {
     use HasFactory;
     use Notifiable;
+
+    /**
+     * Columns the engine maintains itself; a change to only these isn't a
+     * profile update.
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    public const MAINTAINED_COLUMNS = [ 'total_spent_amount', 'total_spent_currency', 'orders_count', 'last_ordered_at', 'updated_at', 'created_at' ];
 
     /**
      * @since 1.0.0
      *
      * @var string
      */
-    protected $table = 'customers';
+    protected $table = 'ecommerce_customers';
 
     /**
      * @since 1.0.0
@@ -76,6 +92,7 @@ class Customer extends Model
         'first_name',
         'last_name',
         'phone',
+        'locale',
         'accepts_marketing',
         'accepts_marketing_at',
         'total_spent_amount',
@@ -110,6 +127,18 @@ class Customer extends Model
         $id = $user?->getAuthIdentifier();
 
         return is_numeric( $id ) ? self::query()->where( 'user_id', (int) $id )->first() : null;
+    }
+
+    /**
+     * Orders that belong to this customer.
+     *
+     * @since 1.0.0
+     *
+     * @return HasMany<Order, $this>
+     */
+    public function orders(): HasMany
+    {
+        return $this->hasMany( Order::class );
     }
 
     /**
@@ -161,6 +190,34 @@ class Customer extends Model
     }
 
     /**
+     * The language notifications to this customer are sent in (null: the
+     * app locale). Laravel's notification sender reads this.
+     *
+     * @since 1.0.0
+     *
+     * @return string|null
+     */
+    public function preferredLocale(): ?string
+    {
+        return '' === (string) $this->locale ? null : (string) $this->locale;
+    }
+
+    /**
+     * Stores the email trimmed and lowercased, so lookups can use the
+     * index with a plain comparison.
+     *
+     * @since 1.0.0
+     *
+     * @return Attribute<string|null, string|null>
+     */
+    protected function email(): Attribute
+    {
+        return Attribute::make(
+            set: static fn ( ?string $value ): ?string => null === $value ? null : mb_strtolower( trim( $value ) ),
+        );
+    }
+
+    /**
      * @since 1.0.0
      *
      * @return array<string, string>
@@ -186,5 +243,28 @@ class Customer extends Model
     protected static function newFactory(): CustomerFactory
     {
         return CustomerFactory::new();
+    }
+
+    /**
+     * Fires {@see CustomerRegistered} and {@see CustomerUpdated} (audit I1)
+     * for every way a customer is created or changed.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected static function booted(): void
+    {
+        static::created( static function ( self $customer ): void {
+            Event::dispatch( new CustomerRegistered( $customer ) );
+        } );
+
+        static::updated( static function ( self $customer ): void {
+            $changes = array_values( array_diff( array_keys( $customer->getChanges() ), self::MAINTAINED_COLUMNS ) );
+
+            if ( [] !== $changes ) {
+                Event::dispatch( new CustomerUpdated( $customer, $changes ) );
+            }
+        } );
     }
 }

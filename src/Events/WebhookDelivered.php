@@ -19,6 +19,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Events;
 
 use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 
 /**
  * @package    ArtisanPack_UI
@@ -26,7 +27,7 @@ use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
  *
  * @since      1.0.0
  */
-class WebhookDelivered
+class WebhookDelivered implements ShouldDispatchAfterCommit
 {
     /**
      * @since 1.0.0

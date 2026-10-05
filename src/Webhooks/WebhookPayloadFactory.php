@@ -29,6 +29,7 @@ namespace ArtisanPackUI\Ecommerce\Webhooks;
 
 use ArtisanPackUI\Ecommerce\Api\ResourceSchemas;
 use ArtisanPackUI\Ecommerce\Http\Middleware\EnsureEcommerceAbility;
+use ArtisanPackUI\Ecommerce\Support\Timestamp;
 use BackedEnum;
 use DateTimeInterface;
 use Illuminate\Database\Eloquent\Model;
@@ -111,7 +112,7 @@ class WebhookPayloadFactory
             is_array( $value )                   => array_map( fn ( mixed $item ): mixed => $this->serialize( $item ), $value ),
             $value instanceof Model              => $this->model( $value ),
             $value instanceof Money              => [ 'amount' => (int) $value->getAmount(), 'currency' => $value->getCurrency()->getCode() ],
-            $value instanceof DateTimeInterface  => $value->format( DATE_ATOM ),
+            $value instanceof DateTimeInterface  => Timestamp::format( $value ),
             $value instanceof BackedEnum         => $value->value,
             $value instanceof Throwable          => [ 'type' => class_basename( $value ), 'message' => $value->getMessage() ],
             ! is_object( $value )                => null,

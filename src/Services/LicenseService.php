@@ -32,14 +32,19 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Services;
 
 use ArtisanPackUI\Ecommerce\Events\LicenseActivated;
+use ArtisanPackUI\Ecommerce\Events\LicenseDeactivated;
 use ArtisanPackUI\Ecommerce\Events\LicenseIssued;
 use ArtisanPackUI\Ecommerce\Events\LicenseRevoked;
+use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\DigitalFile;
 use ArtisanPackUI\Ecommerce\Models\LicenseActivation;
 use ArtisanPackUI\Ecommerce\Models\LicenseKey;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
+use ArtisanPackUI\Ecommerce\Support\AfterCommit;
+use ArtisanPackUI\Ecommerce\Support\Timestamp;
 use DateTimeInterface;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use RuntimeException;
@@ -86,7 +91,7 @@ class LicenseService
             'meta'              => [],
         ] );
 
-        doAction( 'ap.ecommerce.license.issued', $key, $item );
+        AfterCommit::action( 'ap.ecommerce.license.issued', $key, $item );
         Event::dispatch( new LicenseIssued( $key, $item ) );
 
         return $key;
@@ -144,15 +149,9 @@ class LicenseService
     {
         $normalized  = LicenseKey::normalize( $key );
         $fingerprint = self::normalizeFingerprint( $fingerprint );
-        $license     = LicenseKey::query()->with( 'orderItem' )->where( 'key', $normalized )->first();
+        $license     = $this->findByKey( $normalized );
 
-        // The indexed lookup decides the match; hash_equals() re-checks the
-        // exact bytes (the column may use a case-insensitive collation).
-        // Guessing is infeasible anyway: 25 characters from 32 is ~125 bits,
-        // and validation is rate-limited per key and per IP.
-        $matches = hash_equals( $license?->key ?? str_repeat( "\0", strlen( $normalized ) ), $normalized );
-
-        if ( null === $license || ! $matches ) {
+        if ( null === $license ) {
             return $this->result( $key, $fingerprint, null, false, 'not-found' );
         }
 
@@ -195,11 +194,128 @@ class LicenseService
         } );
 
         if ( $activation instanceof LicenseActivation ) {
-            doAction( 'ap.ecommerce.license.activated', $activation );
+            AfterCommit::action( 'ap.ecommerce.license.activated', $activation );
             Event::dispatch( new LicenseActivated( $activation ) );
         }
 
         return $this->result( $key, $fingerprint, $license->refresh(), null === $reason, $reason );
+    }
+
+    /**
+     * Frees the activation slot `$fingerprint` holds on `$license` (the
+     * customer moved to a new machine). Works on revoked and expired keys
+     * too, so their records can be tidied. Fires
+     * `ap.ecommerce.license.deactivated` and {@see LicenseDeactivated}.
+     *
+     * @since 1.0.0
+     *
+     * @param  LicenseKey  $license      Key.
+     * @param  string      $fingerprint  Machine fingerprint.
+     *
+     * @return bool Whether the machine was activated (and now isn't).
+     */
+    public function deactivate( LicenseKey $license, string $fingerprint ): bool
+    {
+        $fingerprint = self::normalizeFingerprint( $fingerprint );
+
+        $removed = DB::transaction( function () use ( $license, $fingerprint ): bool {
+            /** @var LicenseKey $locked */
+            $locked  = LicenseKey::query()->lockForUpdate()->findOrFail( $license->id );
+            $deleted = $locked->activations()->where( 'machine_fingerprint', $fingerprint )->delete();
+
+            if ( 0 === $deleted ) {
+                return false;
+            }
+
+            $locked->forceFill( [ 'activations_count' => max( 0, (int) $locked->activations_count - $deleted ) ] )->save();
+
+            return true;
+        } );
+
+        if ( $removed ) {
+            $license->refresh();
+
+            AfterCommit::action( 'ap.ecommerce.license.deactivated', $license, $fingerprint );
+            Event::dispatch( new LicenseDeactivated( $license, $fingerprint ) );
+        }
+
+        return $removed;
+    }
+
+    /**
+     * Deactivates `$fingerprint` on the license with `$key`, for the public
+     * endpoint.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $key          Key as sent by the customer's app.
+     * @param  string  $fingerprint  Machine fingerprint.
+     *
+     * @return array{deactivated: bool, activations_count: int|null, activations_limit: int|null, reason: string|null}
+     */
+    public function deactivateByKey( string $key, string $fingerprint ): array
+    {
+        $license = $this->findByKey( $key );
+
+        if ( null === $license ) {
+            return [ 'deactivated' => false, 'activations_count' => null, 'activations_limit' => null, 'reason' => 'not-found' ];
+        }
+
+        $deactivated = $this->deactivate( $license, $fingerprint );
+
+        return [
+            'deactivated'       => $deactivated,
+            'activations_count' => (int) $license->activations_count,
+            'activations_limit' => null === $license->activations_limit ? null : (int) $license->activations_limit,
+            'reason'            => $deactivated ? null : 'not-activated',
+        ];
+    }
+
+    /**
+     * The license keys of `$customer`'s orders, newest first, with their
+     * activations and order line (#174).
+     *
+     * @since 1.0.0
+     *
+     * @param  Customer  $customer  Customer.
+     *
+     * @return Builder<LicenseKey>
+     */
+    public function forCustomer( Customer $customer ): Builder
+    {
+        return LicenseKey::query()
+            ->whereHas( 'orderItem.order', static fn ( Builder $orders ) => $orders->where( 'customer_id', $customer->id ) )
+            ->with( [ 'activations', 'orderItem' ] );
+    }
+
+    /**
+     * Finds a license by its key, through `key_hash` (keys are stored
+     * encrypted). A key hashed under a previous app key is found too and
+     * re-hashed under the current one.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $key  Key, as typed.
+     *
+     * @return LicenseKey|null
+     */
+    public function findByKey( string $key ): ?LicenseKey
+    {
+        $normalized = LicenseKey::normalize( $key );
+        $license    = LicenseKey::query()->with( 'orderItem' )->whereIn( 'key_hash', LicenseKey::hashCandidates( $normalized ) )->first();
+
+        // The hash decides the match; hash_equals() re-checks the decrypted
+        // key in constant time. Guessing is infeasible anyway (25 characters
+        // from 32 is ~125 bits) and validation is rate-limited.
+        if ( null === $license || ! hash_equals( (string) $license->key, $normalized ) ) {
+            return null;
+        }
+
+        if ( LicenseKey::hashFor( $normalized ) !== $license->key_hash ) {
+            $license->forceFill( [ 'key_hash' => LicenseKey::hashFor( $normalized ) ] )->saveQuietly();
+        }
+
+        return $license;
     }
 
     /**
@@ -241,7 +357,7 @@ class LicenseService
 
         $license->forceFill( [ 'is_revoked' => true, 'revoked_at' => now(), 'meta' => $meta ] )->save();
 
-        doAction( 'ap.ecommerce.license.revoked', $license, $reason );
+        AfterCommit::action( 'ap.ecommerce.license.revoked', $license, $reason );
         Event::dispatch( new LicenseRevoked( $license, $reason ) );
 
         return $license;
@@ -285,7 +401,7 @@ class LicenseService
         for ( $attempt = 0; $attempt < 5; $attempt++ ) {
             $key = $this->generateKey();
 
-            if ( ! LicenseKey::query()->where( 'key', $key )->exists() ) {
+            if ( ! LicenseKey::query()->whereIn( 'key_hash', LicenseKey::hashCandidates( $key ) )->exists() ) {
                 return $key;
             }
         }
@@ -312,7 +428,7 @@ class LicenseService
 
         return (array) applyFilters( 'ap.ecommerce.license.validating', [
             'valid'      => $valid,
-            'expires_at' => $license?->expires_at?->toIso8601String(),
+            'expires_at' => Timestamp::format( $license?->expires_at ),
             'product'    => null === $item ? null : [
                 'id'   => $item->product_id,
                 'name' => $item->product_snapshot['name'] ?? null,

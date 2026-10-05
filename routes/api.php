@@ -3,7 +3,7 @@
 /**
  * Ecommerce REST routes (`/api/ecommerce/v1`).
  *
- * Loaded by {@see \ArtisanPackUI\Ecommerce\Providers\EcommerceServiceProvider::registerRestRoutes()}
+ * Loaded by {@see ArtisanPackUI\Ecommerce\Providers\EcommerceServiceProvider::registerRestRoutes()}
  * inside a group carrying the prefix, `ecommerce.api.` name prefix, and the
  * `artisanpack.ecommerce.api.middleware` stack. Each route adds its own
  * auth / ability / rate-limit / idempotency middleware per engine spec §9:
@@ -30,6 +30,8 @@ declare( strict_types=1 );
 
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ActivityLogController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CartController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CatalogController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CheckoutController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ConfigCatalogController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CouponController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CustomerAddressController;
@@ -37,6 +39,7 @@ use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CustomerController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CustomerNoteController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\DigitalDownloadController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\DigitalFileController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\GuestOrderController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\InventoryController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanAssignmentController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanAutomationController;
@@ -45,6 +48,7 @@ use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanCardController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanCatalogController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanColumnController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\LicenseKeyController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\MeController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\NotificationPreferenceController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\NotificationTemplateController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\OrderCancelController;
@@ -90,12 +94,18 @@ $admin = static fn ( string $resource, string $action, bool $mutates = false ): 
 );
 
 // Catalog (public).
-Route::middleware( 'ecommerce.rate-limit:ecommerce.catalog.read' )->group( function (): void {
+Route::middleware( [ 'ecommerce.rate-limit:ecommerce.catalog.read', 'ecommerce.cache:public' ] )->group( function (): void {
     Route::get( 'products', [ ProductController::class, 'index' ] )->name( 'products.index' );
     Route::get( 'products/{product}', [ ProductController::class, 'show' ] )->whereNumber( 'product' )->name( 'products.show' );
     Route::get( 'products/{product}/variants', [ ProductController::class, 'variants' ] )->whereNumber( 'product' )->name( 'products.variants' );
+    Route::get( 'products/{product}/related', [ ProductController::class, 'related' ] )->whereNumber( 'product' )->name( 'products.related' );
+    Route::get( 'products/{product}/purchase-options', [ ProductController::class, 'purchaseOptions' ] )->whereNumber( 'product' )->name( 'products.purchase-options' );
     Route::get( 'products/{product}/reviews', [ ProductReviewController::class, 'index' ] )->whereNumber( 'product' )->name( 'products.reviews.index' );
     Route::get( 'search', [ SearchController::class, 'index' ] )->name( 'search' );
+    Route::get( 'categories', [ CatalogController::class, 'categories' ] )->name( 'categories.index' );
+    Route::get( 'categories/{category}', [ CatalogController::class, 'category' ] )->where( 'category', '[A-Za-z0-9_-]+' )->name( 'categories.show' );
+    Route::get( 'categories/{category}/products', [ CatalogController::class, 'categoryProducts' ] )->where( 'category', '[A-Za-z0-9_-]+' )->name( 'categories.products' );
+    Route::get( 'tags', [ CatalogController::class, 'tags' ] )->name( 'tags.index' );
 } );
 
 // Reviews (engine spec §9.1): signed-in customers or, when allowed, guests.
@@ -103,6 +113,10 @@ Route::post( 'products/{product}/reviews', [ ProductReviewController::class, 'st
     ->whereNumber( 'product' )
     ->middleware( [ 'ecommerce.optional-auth', 'ecommerce.rate-limit:ecommerce.review.submit', 'ecommerce.idempotency' ] )
     ->name( 'products.reviews.store' );
+Route::get( 'products/{product}/reviews/eligibility', [ ProductReviewController::class, 'eligibility' ] )
+    ->whereNumber( 'product' )
+    ->middleware( [ 'ecommerce.optional-auth', 'ecommerce.rate-limit:ecommerce.catalog.read', 'ecommerce.cache:private' ] )
+    ->name( 'products.reviews.eligibility' );
 
 // Digital delivery (engine spec §9.9): the token is the credential.
 Route::where( [ 'token' => '[A-Za-z0-9]{64}' ] )
@@ -112,30 +126,77 @@ Route::where( [ 'token' => '[A-Za-z0-9]{64}' ] )
         Route::get( 'downloads/{token}/stream', [ DigitalDownloadController::class, 'stream' ] )->name( 'downloads.stream' );
     } );
 
+// Guest order access (#175): email + order number, or a signed link.
+Route::middleware( [ 'ecommerce.rate-limit:ecommerce.lookup.attempt', 'ecommerce.cache:private' ] )->group( function (): void {
+    Route::get( 'orders/guest-lookup', [ GuestOrderController::class, 'lookup' ] )->name( 'orders.guest-lookup' );
+    Route::get( 'order-views/{token}', [ GuestOrderController::class, 'view' ] )->where( 'token', '[0-9a-f-]+' )->name( 'order-views.show' );
+} );
+
+// Storefronts report product views (#179).
+Route::post( 'products/{product}/views', [ ProductController::class, 'recordView' ] )
+    ->whereNumber( 'product' )
+    ->middleware( [ 'ecommerce.optional-auth', 'ecommerce.rate-limit:ecommerce.catalog.read', 'ecommerce.idempotency' ] )
+    ->name( 'products.views.store' );
+
 Route::post( 'license/validate', [ LicenseKeyController::class, 'validateKey' ] )
     ->middleware( [ 'ecommerce.rate-limit:ecommerce.license.validate', 'ecommerce.idempotency' ] )
     ->name( 'license.validate' );
+Route::post( 'license/deactivate', [ LicenseKeyController::class, 'deactivate' ] )
+    ->middleware( [ 'ecommerce.rate-limit:ecommerce.license.validate', 'ecommerce.idempotency' ] )
+    ->name( 'license.deactivate' );
 
 // Cart (token is the credential).
 Route::post( 'carts', [ CartController::class, 'store' ] )
-    ->middleware( [ 'ecommerce.rate-limit:ecommerce.cart.mutate', 'ecommerce.idempotency' ] )
+    ->middleware( [ 'ecommerce.optional-auth', 'ecommerce.rate-limit:ecommerce.cart.mutate', 'ecommerce.idempotency' ] )
     ->name( 'carts.store' );
 
-Route::where( [ 'cart' => '[A-Za-z0-9]{40}', 'item' => '[0-9]+' ] )->group( function (): void {
+// A guest cart's token is its credential; an account's cart also needs that
+// account's session or Sanctum token, so these routes resolve the user.
+Route::where( [ 'cart' => '[A-Za-z0-9]{40}', 'item' => '[0-9]+' ] )->middleware( [ 'ecommerce.optional-auth', 'ecommerce.cache:private' ] )->group( function (): void {
     Route::get( 'carts/{cart}', [ CartController::class, 'show' ] )
         ->middleware( 'ecommerce.rate-limit:ecommerce.cart.mutate' )
         ->name( 'carts.show' );
+    Route::get( 'carts/{cart}/shipping-rates', [ CartController::class, 'shippingRates' ] )
+        ->middleware( 'ecommerce.rate-limit:ecommerce.cart.mutate' )
+        ->name( 'carts.shipping-rates.index' );
+    Route::get( 'carts/{cart}/cross-sells', [ CartController::class, 'crossSells' ] )
+        ->middleware( 'ecommerce.rate-limit:ecommerce.cart.mutate' )
+        ->name( 'carts.cross-sells.index' );
 
     Route::middleware( [ 'ecommerce.rate-limit:ecommerce.cart.mutate', 'ecommerce.idempotency' ] )->group( function (): void {
         Route::post( 'carts/{cart}/items', [ CartController::class, 'addItem' ] )->name( 'carts.items.store' );
         Route::patch( 'carts/{cart}/items/{item}', [ CartController::class, 'updateItem' ] )->name( 'carts.items.update' );
         Route::delete( 'carts/{cart}/items/{item}', [ CartController::class, 'removeItem' ] )->name( 'carts.items.destroy' );
         Route::delete( 'carts/{cart}/coupons/{code}', [ CartController::class, 'removeCoupon' ] )->name( 'carts.coupons.destroy' );
+        Route::post( 'carts/{cart}/merge', [ CartController::class, 'merge' ] )->name( 'carts.merge' );
+        Route::patch( 'carts/{cart}', [ CartController::class, 'update' ] )->name( 'carts.update' );
+        Route::delete( 'carts/{cart}/items', [ CartController::class, 'clear' ] )->name( 'carts.items.clear' );
+        Route::put( 'carts/{cart}/shipping-rate', [ CartController::class, 'selectShippingRate' ] )->name( 'carts.shipping-rate.update' );
     } );
 
     Route::post( 'carts/{cart}/coupons', [ CartController::class, 'applyCoupon' ] )
         ->middleware( [ 'ecommerce.rate-limit:ecommerce.coupon.attempt', 'ecommerce.idempotency' ] )
         ->name( 'carts.coupons.store' );
+} );
+
+// Checkout (engine spec §9.2): the cart token is the credential for a guest
+// cart; an account's cart also needs that account's session.
+Route::where( [ 'cart' => '[A-Za-z0-9]{40}' ] )->middleware( [ 'ecommerce.optional-auth', 'ecommerce.cache:private' ] )->group( function (): void {
+    Route::get( 'checkout/{cart}', [ CheckoutController::class, 'show' ] )
+        ->middleware( 'ecommerce.rate-limit:ecommerce.cart.mutate' )
+        ->name( 'checkout.show' );
+
+    Route::middleware( [ 'ecommerce.rate-limit:ecommerce.cart.mutate', 'ecommerce.idempotency' ] )->group( function (): void {
+        Route::post( 'checkout/{cart}/start', [ CheckoutController::class, 'start' ] )->name( 'checkout.start' );
+        Route::post( 'checkout/{cart}/address', [ CheckoutController::class, 'address' ] )->name( 'checkout.address' );
+        Route::post( 'checkout/{cart}/shipping-method', [ CheckoutController::class, 'shippingMethod' ] )->name( 'checkout.shipping-method' );
+        Route::post( 'checkout/{cart}/payment-gateway', [ CheckoutController::class, 'paymentGateway' ] )->name( 'checkout.payment-gateway' );
+    } );
+
+    Route::middleware( [ 'ecommerce.rate-limit:ecommerce.checkout.finalize', 'ecommerce.idempotency' ] )->group( function (): void {
+        Route::post( 'checkout/{cart}/session', [ CheckoutController::class, 'session' ] )->name( 'checkout.session' );
+        Route::post( 'checkout/{cart}/finalize', [ CheckoutController::class, 'finalize' ] )->name( 'checkout.finalize' );
+    } );
 } );
 
 // Orders.
@@ -180,6 +241,31 @@ Route::get( 'me/notification-preferences', [ NotificationPreferenceController::c
 Route::patch( 'me/notification-preferences', [ NotificationPreferenceController::class, 'update' ] )
     ->middleware( array_merge( $auth, [ 'ecommerce.rate-limit:ecommerce.admin.mutate', 'ecommerce.idempotency' ] ) )
     ->name( 'me.notification-preferences.update' );
+
+Route::where( [ 'order' => '[0-9]+', 'address' => '[0-9]+' ] )->group( function () use ( $auth ): void {
+    Route::middleware( array_merge( $auth, [ 'ecommerce.rate-limit:ecommerce.admin.mutate' ] ) )->group( function (): void {
+        Route::get( 'me', [ MeController::class, 'show' ] )->name( 'me.show' );
+        Route::get( 'me/addresses', [ MeController::class, 'addresses' ] )->name( 'me.addresses.index' );
+        Route::get( 'me/orders', [ MeController::class, 'orders' ] )->name( 'me.orders.index' );
+        Route::get( 'me/orders/{order}', [ MeController::class, 'order' ] )->name( 'me.orders.show' );
+        Route::get( 'me/downloads', [ MeController::class, 'downloads' ] )->name( 'me.downloads.index' );
+        Route::get( 'me/downloads/{download}', [ MeController::class, 'download' ] )->whereNumber( 'download' )->name( 'me.downloads.show' );
+        Route::get( 'me/downloads/{download}/stream', [ MeController::class, 'streamDownload' ] )->whereNumber( 'download' )->name( 'me.downloads.stream' );
+        Route::get( 'me/license-keys', [ MeController::class, 'licenseKeys' ] )->name( 'me.license-keys.index' );
+        Route::get( 'me/account-menu', [ MeController::class, 'accountMenu' ] )->name( 'me.account-menu' );
+    } );
+
+    Route::middleware( array_merge( $auth, [ 'ecommerce.rate-limit:ecommerce.admin.mutate', 'ecommerce.idempotency' ] ) )->group( function (): void {
+        Route::patch( 'me', [ MeController::class, 'update' ] )->name( 'me.update' );
+        Route::post( 'me/addresses', [ MeController::class, 'storeAddress' ] )->name( 'me.addresses.store' );
+        Route::patch( 'me/addresses/{address}', [ MeController::class, 'updateAddress' ] )->name( 'me.addresses.update' );
+        Route::delete( 'me/addresses/{address}', [ MeController::class, 'destroyAddress' ] )->name( 'me.addresses.destroy' );
+    } );
+
+    Route::post( 'me/claims', [ MeController::class, 'claim' ] )
+        ->middleware( array_merge( $auth, [ 'ecommerce.rate-limit:ecommerce.claim.attempt', 'ecommerce.idempotency' ] ) )
+        ->name( 'me.claims.store' );
+} );
 
 // Kanban (engine spec §9.10, parent plan §9.5).
 Route::prefix( 'kanban' )
@@ -252,6 +338,7 @@ Route::prefix( 'admin' )->name( 'admin.' )->group( function () use ( $admin, $au
         Route::post( 'products/{product}/categories', [ ProductLinkController::class, 'categories' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.categories' );
         Route::post( 'products/{product}/tags', [ ProductLinkController::class, 'tags' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.tags' );
         Route::post( 'products/{product}/children', [ ProductLinkController::class, 'children' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.children' );
+        Route::post( 'products/{product}/relations', [ ProductLinkController::class, 'relations' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.relations' );
         // Stock adjustments use the inventory ability (engine issue #148), so
         // warehouse staff can count stock without editing products.
         Route::post( 'products/{product}/stock', [ ProductLinkController::class, 'stock' ] )->middleware( $admin( 'inventory', 'adjust', true ) )->name( 'products.stock' );
@@ -361,6 +448,9 @@ Route::prefix( 'admin' )->name( 'admin.' )->group( function () use ( $admin, $au
         ->scopeBindings()
         ->middleware( $admin( 'webhookSubscription', 'viewAny' ) )
         ->name( 'webhook-subscriptions.deliveries.show' );
+    Route::post( 'webhook-subscriptions/{subscription}/replay-parked', [ WebhookSubscriptionController::class, 'replayParked' ] )
+        ->middleware( $admin( 'webhookSubscription', 'update', true ) )
+        ->name( 'webhook-subscriptions.replay-parked' );
     Route::post( 'webhook-subscriptions/{subscription}/replay/{delivery}', [ WebhookSubscriptionController::class, 'replay' ] )
         ->scopeBindings()
         ->middleware( $admin( 'webhookSubscription', 'update', true ) )

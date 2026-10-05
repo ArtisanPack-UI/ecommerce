@@ -33,6 +33,7 @@ use ArtisanPackUI\Ecommerce\Models\NotificationTemplate;
 use ArtisanPackUI\Ecommerce\Notifications\NotificationContext;
 use ArtisanPackUI\Ecommerce\Notifications\NotificationTemplateRenderer;
 use ArtisanPackUI\Ecommerce\Registries\NotificationTemplateRegistry;
+use ArtisanPackUI\Ecommerce\Support\SupportedLocales;
 
 /**
  * @package    ArtisanPack_UI
@@ -92,8 +93,8 @@ class NotificationTemplateService
                     'channel' => $definition->channel(),
                     'locale'  => $locale,
                 ], [
-                    'subject'      => $definition->defaultSubject(),
-                    'body'         => $definition->defaultBody(),
+                    'subject'      => $definition->defaultSubject( $locale ),
+                    'body'         => $definition->defaultBody( $locale ),
                     'variables'    => $definition->variables(),
                     'preview_data' => $definition->previewData(),
                     'is_active'    => true,
@@ -154,8 +155,10 @@ class NotificationTemplateService
     }
 
     /**
-     * Renders `$key` with the store's current copy (or the catalog
-     * default when the store has none).
+     * Renders `$key` in `$locale` (default: the app locale) with, in order:
+     * the store's copy in that locale; the catalog default translated into
+     * it, when the engine supports that locale; the store's default-locale
+     * copy; the catalog default.
      *
      * @since 1.0.0
      *
@@ -170,13 +173,20 @@ class NotificationTemplateService
      */
     public function render( string $key, string $channel, array $variables, ?string $locale = null ): array
     {
-        $row        = $this->find( $key, $channel, $locale );
+        $locale ??= app()->getLocale();
         $definition = $this->registry->has( $key ) ? $this->registry->get( $key ) : null;
+        $row        = NotificationTemplate::query()->where( 'key', $key )->where( 'channel', $channel )->where( 'locale', $locale )->first();
+
+        if ( null === $row && null !== $definition && $this->translatesCatalog( $locale ) ) {
+            return $this->renderer->renderTemplate( $key, $definition->defaultSubject( $locale ), $definition->defaultBody( $locale ), $variables, $channel );
+        }
+
+        $row ??= $this->find( $key, $channel, $this->defaultLocale() );
 
         return $this->renderer->renderTemplate(
             $key,
-            $row?->subject ?? $definition?->defaultSubject(),
-            (string) ( $row?->body ?? $definition?->defaultBody() ?? '' ),
+            $row?->subject ?? $definition?->defaultSubject( $this->defaultLocale() ),
+            (string) ( $row?->body ?? $definition?->defaultBody( $this->defaultLocale() ) ?? '' ),
             $variables,
             $channel,
         );
@@ -260,6 +270,23 @@ class NotificationTemplateService
     public function declaredVariables( NotificationTemplate $template ): array
     {
         return $template->definition()?->variables() ?? (array) $template->variables;
+    }
+
+    /**
+     * Whether catalog copy in `$locale` is a real translation: a supported
+     * locale (or regional variant of one) other than the default locale,
+     * whose store row wins instead.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $locale  Locale.
+     *
+     * @return bool
+     */
+    protected function translatesCatalog( string $locale ): bool
+    {
+        return SupportedLocales::covers( $locale )
+            && SupportedLocales::language( $locale ) !== SupportedLocales::language( $this->defaultLocale() );
     }
 
     /**

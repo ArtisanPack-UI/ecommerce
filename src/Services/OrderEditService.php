@@ -13,10 +13,12 @@
  * `paymentActionRequired` / `refundDelta` fields describe what has to happen
  * downstream; payment satellites listen on {@see OrderEdited} and act.
  *
- * Tax and shipping recompute go through the same hook seam the placement
- * pipeline will use — `ap.ecommerce.order.recomputingTotals` — so once a
- * `TaxProvider` / `ShippingRateProvider` is wired in, both code paths pick it
- * up without further changes here.
+ * When an edit changes the lines, the shipping amount, or the shipping
+ * address (and doesn't set the tax itself), tax is recalculated through the
+ * active tax provider and shipping re-split across the lines, as at
+ * placement (audit D8). The totals then run through
+ * `ap.ecommerce.order.recomputingTotals`. Added lines must be priced in the
+ * order's currency.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -32,11 +34,21 @@ namespace ArtisanPackUI\Ecommerce\Services;
 
 use ArtisanPackUI\Ecommerce\Events\OrderEdited;
 use ArtisanPackUI\Ecommerce\Exceptions\OrderNotEditableException;
+use ArtisanPackUI\Ecommerce\Fulfillment\LineAllocator;
+use ArtisanPackUI\Ecommerce\Models\Cart;
+use ArtisanPackUI\Ecommerce\Models\CartItem;
+use ArtisanPackUI\Ecommerce\Models\DigitalDownload;
+use ArtisanPackUI\Ecommerce\Models\LicenseKey;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderEdit;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
 use ArtisanPackUI\Ecommerce\Models\OrderTimelineEntry;
+use ArtisanPackUI\Ecommerce\Models\RefundItem;
+use ArtisanPackUI\Ecommerce\Models\ShipmentItem;
+use ArtisanPackUI\Ecommerce\Support\AfterCommit;
+use ArtisanPackUI\Ecommerce\ValueObjects\Address;
 use ArtisanPackUI\Ecommerce\ValueObjects\OrderEditResult;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use InvalidArgumentException;
@@ -89,6 +101,28 @@ class OrderEditService
      * @var int
      */
     protected const MAX_ITEMS_PER_DIRECTIVE = 200;
+
+    /**
+     * System statuses in which an order can't be edited (or rolled back):
+     * its money and stock have already been settled.
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    protected const LOCKED_STATUSES = [ 'cancelled', 'refunded', 'failed' ];
+
+    /**
+     * @since 1.0.0
+     *
+     * @param  TaxService     $taxes  Recalculates tax after line or shipping changes.
+     * @param  LineAllocator  $lines  Splits shipping and shipping tax across the lines.
+     */
+    public function __construct(
+        protected TaxService $taxes,
+        protected LineAllocator $lines,
+    ) {
+    }
 
     /**
      * Applies an edit to `$order`.
@@ -204,6 +238,10 @@ class OrderEditService
             $order->load( 'items' );
             $snapshot = $this->snapshotOrder( $order );
 
+            // A rollback is an edit: the same lifecycle rules apply to the
+            // fields and lines it would put back.
+            $this->guardEditability( $order, $this->rollbackKeys( $snapshot, (array) $target ) );
+
             $this->restoreFromSnapshot( $order, $target );
 
             $order->save();
@@ -249,6 +287,11 @@ class OrderEditService
         $this->applyItemChanges( $locked, $filtered );
 
         $this->applyTotalOverrides( $locked, $filtered );
+
+        if ( $this->changesTaxBasis( $filtered ) ) {
+            $this->recomputeTax( $locked );
+        }
+
         $this->recomputeItemTotals( $locked );
         $this->recomputeOrderTotals( $locked );
 
@@ -294,6 +337,13 @@ class OrderEditService
      */
     protected function guardEditability( Order $order, array $edit ): void
     {
+        if ( in_array( (string) $order->system_status, self::LOCKED_STATUSES, true ) ) {
+            throw new OrderNotEditableException( __( 'Order :order is :status and can no longer be edited.', [
+                'order'  => $order->id,
+                'status' => (string) $order->system_status,
+            ] ) );
+        }
+
         $fulfillment = (string) $order->fulfillment_status;
 
         if ( 'unfulfilled' === $fulfillment ) {
@@ -362,6 +412,7 @@ class OrderEditService
 
         if ( ! empty( $items['remove'] ) ) {
             $ids = array_map( 'intval', (array) $items['remove'] );
+            $this->guardRemovable( $order, $ids );
             OrderItem::query()
                 ->where( 'order_id', $order->id )
                 ->whereIn( 'id', $ids )
@@ -386,6 +437,10 @@ class OrderEditService
                 $changes = (array) $changes;
                 $this->assertChangeBounds( (int) $id, $changes );
 
+                if ( array_key_exists( 'quantity', $changes ) ) {
+                    $this->guardQuantity( $order, $item, (int) $changes['quantity'] );
+                }
+
                 foreach ( [ 'quantity', 'unit_price_amount', 'tax_amount', 'shipping_amount', 'discount_amount' ] as $field ) {
                     if ( array_key_exists( $field, $changes ) ) {
                         $item->{$field} = (int) $changes[ $field ];
@@ -404,7 +459,15 @@ class OrderEditService
             foreach ( (array) $items['add'] as $line ) {
                 $this->validateNewLine( (array) $line );
 
-                $currency = (string) $line['unit_price_currency'];
+                $currency = strtoupper( (string) $line['unit_price_currency'] );
+
+                if ( $currency !== strtoupper( (string) $order->currency ) ) {
+                    throw new InvalidArgumentException( sprintf(
+                        'Order edit items.add line is priced in %s; the order is in %s.',
+                        $currency,
+                        $order->currency,
+                    ) );
+                }
 
                 OrderItem::query()->create( [
                     'order_id'            => $order->id,
@@ -463,7 +526,140 @@ class OrderEditService
     }
 
     /**
-     * Rewrites each line's `total_amount` as `unit * qty + tax + shipping - discount`.
+     * Whether an edit changes what tax is charged on: the lines, the
+     * shipping amount, or the shipping address — and doesn't set the tax
+     * itself (an order-level `tax_amount`, or a line's `tax_amount`).
+     *
+     * @since 1.0.0
+     *
+     * @param  array<string, mixed>  $edit  Filtered edit.
+     *
+     * @return bool
+     */
+    protected function changesTaxBasis( array $edit ): bool
+    {
+        if ( array_key_exists( 'tax_amount', $edit ) ) {
+            return false;
+        }
+
+        $items = (array) ( $edit['items'] ?? [] );
+
+        foreach ( (array) ( $items['change'] ?? [] ) as $changes ) {
+            if ( is_array( $changes ) && array_key_exists( 'tax_amount', $changes ) ) {
+                return false;
+            }
+        }
+
+        foreach ( (array) ( $items['add'] ?? [] ) as $line ) {
+            if ( is_array( $line ) && array_key_exists( 'tax_amount', $line ) ) {
+                return false;
+            }
+        }
+
+        return [] !== array_filter( [ $items['add'] ?? null, $items['remove'] ?? null, $items['change'] ?? null ] )
+            || array_key_exists( 'shipping_amount', $edit )
+            || array_key_exists( 'shipping_address', $edit );
+    }
+
+    /**
+     * Recalculates the order's tax through the active tax provider for its
+     * edited lines and address (audit D8), then splits shipping and
+     * shipping tax across the lines. The provider sees a transient cart
+     * built from the order (it isn't saved). An order with no address keeps
+     * its tax.
+     *
+     * @since 1.0.0
+     *
+     * @param  Order  $order  Locked order with its items.
+     *
+     * @return void
+     */
+    protected function recomputeTax( Order $order ): void
+    {
+        $address = $order->shipping_address ?? $order->billing_address;
+
+        if ( ! is_array( $address ) || 2 !== strlen( (string) ( $address['country_code'] ?? '' ) ) ) {
+            return;
+        }
+
+        $order->load( 'items.product' );
+
+        $currency = strtoupper( (string) $order->currency );
+        $cart     = new Cart( [ 'currency' => $currency ] );
+        $cart->forceFill( [
+            'currency'        => $currency,
+            'discount_amount' => (int) $order->discount_amount,
+            'shipping_amount' => (int) $order->shipping_amount,
+        ] );
+
+        $lines = $order->items->map( static function ( OrderItem $item ) use ( $currency ): CartItem {
+            $line = new CartItem();
+            $line->forceFill( [
+                'id'                  => $item->id,
+                'product_id'          => $item->product_id,
+                'product_variant_id'  => $item->product_variant_id,
+                'quantity'            => (int) $item->quantity,
+                'unit_price_amount'   => (int) $item->unit_price_amount,
+                'unit_price_currency' => $currency,
+                'line_total_amount'   => (int) $item->unit_price_amount * (int) $item->quantity,
+                'discount_amount'     => (int) $item->discount_amount,
+            ] );
+            $line->setRelation( 'product', $item->product );
+
+            return $line;
+        } );
+
+        $cart->setRelation( 'items', new EloquentCollection( $lines->all() ) );
+
+        $result = $this->taxes->calculate(
+            $cart,
+            Address::fromArray( $address ),
+            $order->items->mapWithKeys( static fn ( OrderItem $item ): array => [ (int) $item->id => (int) $item->discount_amount ] )->all(),
+        );
+
+        $order->tax_amount = (int) $result->total->getAmount();
+
+        $meta                  = (array) ( $order->meta ?? [] );
+        $meta['tax_breakdown'] = array_values( array_map( static fn ( array $row ): array => [
+            'label'        => $row['label'],
+            'rate_ubps'    => $row['rate_ubps'],
+            'amount'       => (int) $row['amount']->getAmount(),
+            'is_compound'  => $row['is_compound'],
+            'country_code' => strtoupper( (string) $address['country_code'] ),
+            'region_code'  => $address['region_code'] ?? null,
+        ], $result->breakdown ) );
+        $order->meta = $meta;
+
+        $this->lines->allocate(
+            $order,
+            $order->items,
+            array_map( static fn ( $money ): int => (int) $money->getAmount(), $result->perLine ),
+            $this->pricesIncludeTax( $order ),
+        );
+
+        $order->load( 'items' );
+    }
+
+    /**
+     * Whether the order's prices include tax (recorded at placement; the
+     * store setting for orders placed before it was recorded).
+     *
+     * @since 1.0.0
+     *
+     * @param  Order  $order  Order.
+     *
+     * @return bool
+     */
+    protected function pricesIncludeTax( Order $order ): bool
+    {
+        $recorded = ( (array) ( $order->meta ?? [] ) )['prices_include_tax'] ?? null;
+
+        return null === $recorded ? (bool) config( 'artisanpack.ecommerce.tax.prices_include_tax', false ) : (bool) $recorded;
+    }
+
+    /**
+     * Rewrites each line's `total_amount` as `unit * qty - discount +
+     * shipping + tax` (without the tax when prices include it).
      *
      * @since 1.0.0
      *
@@ -473,10 +669,12 @@ class OrderEditService
      */
     protected function recomputeItemTotals( Order $order ): void
     {
+        $inclusive = $this->pricesIncludeTax( $order );
+
         foreach ( $order->items as $item ) {
             $lineSubtotal       = $item->unit_price_amount * $item->quantity;
             $item->total_amount = $lineSubtotal
-                + (int) $item->tax_amount
+                + ( $inclusive ? 0 : (int) $item->tax_amount )
                 + (int) $item->shipping_amount
                 - (int) $item->discount_amount;
             $item->save();
@@ -523,7 +721,7 @@ class OrderEditService
 
         $order->total_amount = (int) $order->subtotal_amount
             + (int) $order->shipping_amount
-            + (int) $order->tax_amount
+            + ( $this->pricesIncludeTax( $order ) ? 0 : (int) $order->tax_amount )
             - (int) $order->discount_amount;
     }
 
@@ -612,6 +810,14 @@ class OrderEditService
 
         $targetItems = (array) ( $snapshot['items'] ?? [] );
         $targetIds   = array_map( 'intval', array_keys( $targetItems ) );
+
+        $this->guardRemovable( $order, $order->items->pluck( 'id' )->map( 'intval' )->diff( $targetIds )->values()->all() );
+
+        foreach ( $order->items as $current ) {
+            if ( isset( $targetItems[ $current->id ]['quantity'] ) ) {
+                $this->guardQuantity( $order, $current, (int) $targetItems[ $current->id ]['quantity'] );
+            }
+        }
 
         OrderItem::query()
             ->where( 'order_id', $order->id )
@@ -807,7 +1013,7 @@ class OrderEditService
 
         [ $paymentActionRequired, $refundDelta ] = $this->totalDelta( $preEditSnapshot, $order );
 
-        doAction( 'ap.ecommerce.order.edited', $order, $diff, $editRow );
+        AfterCommit::action( 'ap.ecommerce.order.edited', $order, $diff, $editRow );
         Event::dispatch( new OrderEdited( $order, $diff, $editRow ) );
 
         return new OrderEditResult(
@@ -817,6 +1023,107 @@ class OrderEditService
             $paymentActionRequired,
             $refundDelta,
         );
+    }
+
+    /**
+     * Refuses to remove lines that have history: refunds, shipments,
+     * license keys, or download entitlements reference them, and deleting
+     * the line would delete (or orphan) that record of what happened.
+     *
+     * @since 1.0.0
+     *
+     * @param  Order           $order  The locked order.
+     * @param  array<int, int> $ids    Ids of the lines to remove.
+     *
+     * @throws OrderNotEditableException When a line has history.
+     *
+     * @return void
+     */
+    protected function guardRemovable( Order $order, array $ids ): void
+    {
+        if ( [] === $ids ) {
+            return;
+        }
+
+        $history = [
+            'refunds'       => RefundItem::query()->whereIn( 'order_item_id', $ids )->whereHas( 'refund', static fn ( $query ) => $query->counting() )->pluck( 'order_item_id' ),
+            'shipments'     => ShipmentItem::query()->whereIn( 'order_item_id', $ids )->pluck( 'order_item_id' ),
+            'license keys'  => LicenseKey::query()->whereIn( 'order_item_id', $ids )->pluck( 'order_item_id' ),
+            'downloads'     => DigitalDownload::query()->whereIn( 'order_item_id', $ids )->pluck( 'order_item_id' ),
+        ];
+
+        foreach ( $history as $kind => $itemIds ) {
+            if ( $itemIds->isNotEmpty() ) {
+                throw new OrderNotEditableException( __( 'Line :item on order :order has :history and can\'t be removed.', [
+                    'item'    => (int) $itemIds->first(),
+                    'order'   => $order->id,
+                    'history' => match ( $kind ) {
+                        'refunds'      => __( 'refunds' ),
+                        'shipments'    => __( 'shipments' ),
+                        'license keys' => __( 'license keys' ),
+                        default        => __( 'download entitlements' ),
+                    },
+                ] ) );
+            }
+        }
+    }
+
+    /**
+     * Refuses to set a line's quantity below what has already been refunded
+     * or shipped from it.
+     *
+     * @since 1.0.0
+     *
+     * @param  Order      $order     The locked order.
+     * @param  OrderItem  $item      The line.
+     * @param  int        $quantity  The new quantity.
+     *
+     * @throws OrderNotEditableException When the quantity is too low.
+     *
+     * @return void
+     */
+    protected function guardQuantity( Order $order, OrderItem $item, int $quantity ): void
+    {
+        $refunded = (int) RefundItem::query()->where( 'order_item_id', $item->id )->whereHas( 'refund', static fn ( $query ) => $query->counting() )->sum( 'quantity' );
+        $shipped  = (int) ShipmentItem::query()->where( 'order_item_id', $item->id )->sum( 'quantity' );
+        $floor    = max( $refunded, $shipped );
+
+        if ( $quantity < $floor ) {
+            throw new OrderNotEditableException( __( 'Line :item on order :order can\'t go below :floor: that many units were already refunded or shipped.', [
+                'item'  => $item->id,
+                'order' => $order->id,
+                'floor' => $floor,
+            ] ) );
+        }
+    }
+
+    /**
+     * The edit keys a rollback from `$current` back to `$target` amounts to,
+     * for {@see self::guardEditability()}.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<string, mixed>  $current  Snapshot of the order now.
+     * @param  array<string, mixed>  $target   Snapshot the rollback restores.
+     *
+     * @return array<string, true>
+     */
+    protected function rollbackKeys( array $current, array $target ): array
+    {
+        $diff = $this->buildDiff( $current, $target );
+        $keys = array_fill_keys( array_keys( $diff['fields'] ), true );
+
+        if ( [] !== $diff['items']['added'] || [] !== $diff['items']['removed'] || [] !== $diff['items']['changed'] ) {
+            $keys['items'] = true;
+        }
+
+        foreach ( [ 'shipping_amount', 'tax_amount', 'discount_amount' ] as $field ) {
+            if ( ( $diff['totals']['before'][ $field ] ?? null ) !== ( $diff['totals']['after'][ $field ] ?? null ) ) {
+                $keys[ $field ] = true;
+            }
+        }
+
+        return $keys;
     }
 
     /**

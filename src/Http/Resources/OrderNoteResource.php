@@ -48,7 +48,7 @@ class OrderNoteResource extends EcommerceResource
     {
         return [
             'order_id'            => $this->resource->order_id,
-            'author_user_id'      => $this->resource->author_user_id,
+            'author_user_id'      => $this->adminOnly( $request, $this->resource->author_user_id ),
             'body'                => $this->resource->body,
             'is_customer_visible' => $this->resource->is_customer_visible,
             'created_at'          => $this->resource->created_at,

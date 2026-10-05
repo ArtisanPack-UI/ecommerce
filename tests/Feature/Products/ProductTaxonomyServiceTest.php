@@ -87,7 +87,7 @@ it( 'links products to categories and tags through the product service', functio
     $products->setCategories( $product, [ $b->id ], 'attach' );
     $products->setCategories( $product, [ $a->id ], 'detach' );
 
-    expect( $product->categories()->pluck( 'product_categories.id' )->all() )->toBe( [ $b->id ] )
+    expect( $product->categories()->pluck( 'ecommerce_product_categories.id' )->all() )->toBe( [ $b->id ] )
         ->and( fn () => $products->setTags( $product, [ 999 ] ) )->toThrow( ProductWriteException::class );
 } );
 

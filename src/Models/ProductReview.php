@@ -107,7 +107,7 @@ class ProductReview extends Model
      *
      * @var string
      */
-    protected $table = 'product_reviews';
+    protected $table = 'ecommerce_product_reviews';
 
     /**
      * @since 1.0.0

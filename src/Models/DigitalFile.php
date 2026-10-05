@@ -70,7 +70,7 @@ class DigitalFile extends Model
      *
      * @var string
      */
-    protected $table = 'digital_files';
+    protected $table = 'ecommerce_digital_files';
 
     /**
      * @since 1.0.0
@@ -87,6 +87,7 @@ class DigitalFile extends Model
         'version',
         'is_streaming_only',
         'checksum_sha256',
+        'archived_at',
     ];
 
     /**
@@ -190,6 +191,7 @@ class DigitalFile extends Model
             'product_variant_id' => 'integer',
             'media_id'           => 'integer',
             'is_streaming_only'  => 'boolean',
+            'archived_at'        => 'datetime',
         ];
     }
 

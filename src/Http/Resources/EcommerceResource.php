@@ -28,6 +28,7 @@ namespace ArtisanPackUI\Ecommerce\Http\Resources;
 
 use ArtisanPackUI\Ecommerce\Api\ResourceSchemas;
 use ArtisanPackUI\Ecommerce\Http\Middleware\EnsureEcommerceAbility;
+use ArtisanPackUI\Ecommerce\Support\Timestamp;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -73,11 +74,12 @@ abstract class EcommerceResource extends JsonResource
         // Strip conditional values (admin-only fields) before listeners see
         // the payload, so a filter never has to handle MissingValue.
         // The envelope keys are merged last so no model column can shadow them.
-        $data = $this->filter( array_merge(
+        // Dates go out as RFC 3339 UTC (audit F15).
+        $data = Timestamp::inArray( $this->filter( array_merge(
             $this->fields( $request ),
             $this->includes( $request ),
             [ 'id' => $this->resource->getKey(), 'type' => static::NAME ],
-        ) );
+        ) ) );
 
         return (array) applyFilters( 'ap.ecommerce.api.resource.' . static::NAME, $data, $this->resource, $request );
     }
@@ -207,5 +209,33 @@ abstract class EcommerceResource extends JsonResource
     protected function adminOnly( Request $request, mixed $value ): mixed
     {
         return $this->isAdmin( $request ) ? $value : new MissingValue();
+    }
+
+    /**
+     * The model's `meta` for this request: all of it for admins; for
+     * everyone else only the keys `$hook` (a filter, given `$defaultKeys`
+     * and the model) allows — staff-internal entries such as fraud verdicts
+     * never reach a shopper (audit F1).
+     *
+     * @since 1.0.0
+     *
+     * @param  Request             $request      Request.
+     * @param  string              $hook         `ap.ecommerce.*.publicMetaKeys` filter.
+     * @param  array<int, string>  $defaultKeys  Keys shoppers see by default.
+     *
+     * @return array<string, mixed>
+     */
+    protected function publicMetaFor( Request $request, string $hook, array $defaultKeys ): array
+    {
+        $meta = (array) ( $this->resource->meta ?? [] );
+
+        if ( $this->isAdmin( $request ) ) {
+            return $meta;
+        }
+
+        $keys = applyFilters( $hook, $defaultKeys, $this->resource );
+        $keys = is_array( $keys ) ? array_values( array_filter( $keys, 'is_string' ) ) : $defaultKeys;
+
+        return array_intersect_key( $meta, array_flip( $keys ) );
     }
 }

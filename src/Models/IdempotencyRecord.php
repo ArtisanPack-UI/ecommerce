@@ -52,7 +52,7 @@ class IdempotencyRecord extends Model
      *
      * @var string
      */
-    protected $table = 'idempotency_records';
+    protected $table = 'ecommerce_idempotency_records';
 
     /**
      * @since 1.0.0

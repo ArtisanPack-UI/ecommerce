@@ -50,6 +50,7 @@ use ArtisanPackUI\Ecommerce\Exceptions\SubstatusTransitionRejectedException;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderSubstatus;
 use ArtisanPackUI\Ecommerce\Models\OrderTimelineEntry;
+use ArtisanPackUI\Ecommerce\Support\AfterCommit;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 
@@ -145,7 +146,7 @@ class OrderStatusMachine
                 ],
             ] );
 
-            doAction( 'ap.ecommerce.order.statusChanged', $refreshed, $from, $to );
+            AfterCommit::action( 'ap.ecommerce.order.statusChanged', $refreshed, $from, $to );
             Event::dispatch( new OrderStatusChanged( $refreshed, $from, $to ) );
 
             return $refreshed;
@@ -250,7 +251,7 @@ class OrderStatusMachine
                 ],
             ] );
 
-            doAction( 'ap.ecommerce.order.substatusChanged', $refreshed, $from, $to, $boardId );
+            AfterCommit::action( 'ap.ecommerce.order.substatusChanged', $refreshed, $from, $to, $boardId );
             Event::dispatch( new OrderSubstatusChanged( $refreshed, $from, $to, $boardId ) );
 
             return $refreshed;

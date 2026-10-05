@@ -42,7 +42,7 @@ class InventoryReservationFactory extends Factory
     {
         return [
             'inventory_item_id' => InventoryItem::factory(),
-            'reservable_type'   => Order::class,
+            'reservable_type'   => ( new Order() )->getMorphClass(),
             'reservable_id'     => 1,
             'quantity'          => 1,
             'expires_at'        => Carbon::now()->addMinutes( 15 ),

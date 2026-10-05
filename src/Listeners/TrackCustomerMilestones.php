@@ -30,8 +30,7 @@ namespace ArtisanPackUI\Ecommerce\Listeners;
 
 use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\Order;
-use ArtisanPackUI\Ecommerce\Reports\BaseAmounts;
-use ArtisanPackUI\Ecommerce\Services\CurrencyConverter;
+use ArtisanPackUI\Ecommerce\Services\CustomerStatsService;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
@@ -54,7 +53,7 @@ class TrackCustomerMilestones
      *
      * @var array<int, string>
      */
-    public const PAID_STATUSES = [ 'paid', 'partially_refunded' ];
+    public const PAID_STATUSES = CustomerStatsService::PAID_STATUSES;
 
     /**
      * `customers.meta` key holding the id of the customer's first paid order.
@@ -95,12 +94,12 @@ class TrackCustomerMilestones
     /**
      * @since 1.0.0
      *
-     * @param  Config             $config     Reads the VIP thresholds per order.
-     * @param  CurrencyConverter  $converter  Converts order totals into the base currency for lifetime spend.
+     * @param  Config                $config  Reads the VIP thresholds per order.
+     * @param  CustomerStatsService  $stats   Paid orders and lifetime spend.
      */
     public function __construct(
         protected Config $config,
-        protected CurrencyConverter $converter,
+        protected CustomerStatsService $stats,
     ) {
     }
 
@@ -235,8 +234,7 @@ class TrackCustomerMilestones
     }
 
     /**
-     * The customer's paid orders, net of refunds, in minor units of the
-     * store's base currency. Orders that can't be converted are left out.
+     * The customer's paid orders, net of refunds, in the base currency.
      *
      * @since 1.0.0
      *
@@ -246,27 +244,7 @@ class TrackCustomerMilestones
      */
     protected function lifetimeSpend( Customer $customer ): int
     {
-        $amounts = new BaseAmounts( $this->converter );
-        $total   = 0;
-
-        // One row per currency + rate snapshot rather than one per order.
-        $groups = $this->paidOrders( $customer )
-            ->toBase()
-            ->selectRaw( 'currency, base_currency, fx_rate_to_base_e8, SUM(total_amount - total_refunded_amount) AS net, MIN(id) AS sample_id' )
-            ->groupBy( 'currency', 'base_currency', 'fx_rate_to_base_e8' )
-            ->get();
-
-        foreach ( $groups as $group ) {
-            $total += (int) $amounts->toBase(
-                (int) $group->net,
-                (string) $group->currency,
-                (string) $group->base_currency,
-                (int) $group->fx_rate_to_base_e8,
-                (int) $group->sample_id,
-            );
-        }
-
-        return $total;
+        return $this->stats->lifetimeSpend( $customer );
     }
 
     /**
@@ -278,8 +256,6 @@ class TrackCustomerMilestones
      */
     protected function paidOrders( Customer $customer ): Builder
     {
-        return Order::query()
-            ->where( 'customer_id', $customer->id )
-            ->whereIn( 'payment_status', self::PAID_STATUSES );
+        return $this->stats->paidOrders( $customer );
     }
 }

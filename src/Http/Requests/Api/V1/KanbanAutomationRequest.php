@@ -22,6 +22,7 @@ namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
 
 use ArtisanPackUI\Ecommerce\Models\KanbanAutomation;
 use ArtisanPackUI\Ecommerce\Models\KanbanBoard;
+use ArtisanPackUI\Ecommerce\Models\KanbanColumn;
 use ArtisanPackUI\Ecommerce\Registries\KanbanAutomationRegistry;
 use Illuminate\Validation\Rule;
 
@@ -43,7 +44,7 @@ class KanbanAutomationRequest extends ApiFormRequest
         $automation = $this->route( 'automation' );
         $board      = $this->route( 'board' );
         $boardId    = $automation instanceof KanbanAutomation ? $automation->board_id : ( $board instanceof KanbanBoard ? $board->id : null );
-        $onBoard    = Rule::exists( 'kanban_columns', 'id' )->where( 'board_id', $boardId );
+        $onBoard    = Rule::exists( KanbanColumn::class, 'id' )->where( 'board_id', $boardId );
 
         $rules = $this->sometimes( [
             'from_column_id' => [ 'nullable', 'integer', $onBoard ],

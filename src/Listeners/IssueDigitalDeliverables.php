@@ -96,6 +96,6 @@ class IssueDigitalDeliverables
             'Order'     => $this->context->order( $order ),
             'Downloads' => $this->context->downloads( $downloads ),
             'Licenses'  => $this->context->licenses( $licenses ),
-        ], $order );
+        ], $order, locale: $order->locale );
     }
 }

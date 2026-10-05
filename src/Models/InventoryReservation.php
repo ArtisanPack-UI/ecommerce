@@ -54,7 +54,7 @@ class InventoryReservation extends Model
      *
      * @var string
      */
-    protected $table = 'inventory_reservations';
+    protected $table = 'ecommerce_inventory_reservations';
 
     /**
      * @since 1.0.0

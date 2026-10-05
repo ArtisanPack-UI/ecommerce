@@ -20,6 +20,8 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Models\Product;
+use ArtisanPackUI\Ecommerce\Models\ProductVariant;
 use Closure;
 use Illuminate\Validation\Rule;
 
@@ -39,8 +41,8 @@ class DigitalFileRequest extends ApiFormRequest
     public function rules(): array
     {
         $rules = $this->sometimes( [
-            'product_id'         => [ 'nullable', 'integer', Rule::exists( 'products', 'id' ) ],
-            'product_variant_id' => [ 'nullable', 'integer', Rule::exists( 'product_variants', 'id' ) ],
+            'product_id'         => [ 'nullable', 'integer', Rule::exists( Product::class, 'id' ) ],
+            'product_variant_id' => [ 'nullable', 'integer', Rule::exists( ProductVariant::class, 'id' ) ],
             'media_id'           => [ 'nullable', 'integer', 'min:1' ],
             'disk'               => [ 'nullable', 'string', Rule::in( (array) config( 'artisanpack.ecommerce.digital.allowed_disks', [ 'local' ] ) ) ],
             'path'               => [
@@ -57,6 +59,7 @@ class DigitalFileRequest extends ApiFormRequest
             'version'            => [ 'nullable', 'string', 'max:60' ],
             'is_streaming_only'  => [ 'boolean' ],
             'checksum_sha256'    => [ 'nullable', 'string', 'regex:/^[a-f0-9]{64}$/' ],
+            'is_archived'        => [ 'boolean' ],
         ], [ 'label' ] );
 
         if ( ! $this->isUpdate() ) {

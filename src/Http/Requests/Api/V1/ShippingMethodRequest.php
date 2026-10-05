@@ -20,6 +20,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
 
 use ArtisanPackUI\Ecommerce\Models\ShippingMethod;
+use ArtisanPackUI\Ecommerce\Models\TaxClass;
 use ArtisanPackUI\Ecommerce\Registries\ShippingMethodTypeRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ShippingRateProviderRegistry;
 use Closure;
@@ -48,7 +49,7 @@ class ShippingMethodRequest extends ApiFormRequest
             } ],
             'label'         => [ 'string', 'max:255' ],
             'config'        => [ 'array' ],
-            'tax_class_key' => [ 'nullable', 'string', Rule::exists( 'tax_classes', 'key' ) ],
+            'tax_class_key' => [ 'nullable', 'string', Rule::exists( TaxClass::class, 'key' ) ],
             'is_active'     => [ 'boolean' ],
             'position'      => [ 'integer', 'min:0' ],
         ], [ 'key', 'label' ] );

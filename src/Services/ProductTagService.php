@@ -134,7 +134,7 @@ class ProductTagService
         }
 
         return DB::transaction( function () use ( $source, $target ): ProductTag {
-            $target->products()->syncWithoutDetaching( $source->products()->pluck( 'products.id' )->all() );
+            $target->products()->syncWithoutDetaching( $source->products()->pluck( 'ecommerce_products.id' )->all() );
             $this->delete( $source );
 
             return $target;

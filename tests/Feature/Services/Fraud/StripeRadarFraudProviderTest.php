@@ -136,18 +136,31 @@ it( 'approves when Radar reports risk_level=normal', function (): void {
     expect( $decision->reasons )->toBe( [ 'stripe_radar', 'risk_level:normal' ] );
 } );
 
-it( 'approves with no_charge reason when the PaymentIntent has no latest_charge yet', function (): void {
+it( 'challenges (never approves) a PaymentIntent with no charge to score yet', function (): void {
     $provider = radarBuildProvider( radarIntent( null, null, null ) );
 
     [ $cart, $shipping, $session ] = radarFixtures();
 
     $decision = $provider->assess( $cart, $shipping, $session );
 
-    expect( $decision->isApprove() )->toBeTrue();
+    expect( $decision->isChallenge() )->toBeTrue();
     expect( $decision->reasons )->toBe( [ 'no_charge' ] );
 } );
 
-it( 'approves with provider_error reason when Stripe throws', function (): void {
+it( 'holds the payment for review when Stripe throws and fail_open is off', function (): void {
+    config()->set( 'artisanpack.ecommerce.fraud.fail_open', false );
+    $provider = radarBuildProvider( null, new ApiConnectionException( 'network down' ) );
+
+    [ $cart, $shipping, $session ] = radarFixtures();
+
+    $decision = $provider->assess( $cart, $shipping, $session );
+
+    expect( $decision->isChallenge() )->toBeTrue();
+    expect( $decision->reasons )->toBe( [ 'provider_error' ] );
+} );
+
+it( 'approves with provider_error reason when Stripe throws and fail_open is on', function (): void {
+    config()->set( 'artisanpack.ecommerce.fraud.fail_open', true );
     $provider = radarBuildProvider( null, new ApiConnectionException( 'network down' ) );
 
     [ $cart, $shipping, $session ] = radarFixtures();

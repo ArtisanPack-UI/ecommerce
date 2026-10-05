@@ -65,7 +65,7 @@ class ItemCountWidget extends AbstractKanbanCardWidget
      */
     public function render( Order $order, KanbanColumn $column ): array
     {
-        $count = (int) $order->items()->sum( 'quantity' );
+        $count = (int) ( $order->relationLoaded( 'items' ) ? $order->items->sum( 'quantity' ) : $order->items()->sum( 'quantity' ) );
 
         return $this->payload( trans_choice( ':count item|:count items', $count, [ 'count' => $count ] ) );
     }

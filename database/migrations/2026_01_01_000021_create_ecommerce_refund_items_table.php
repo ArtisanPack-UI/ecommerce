@@ -1,0 +1,65 @@
+<?php
+
+/**
+ * Creates the `ecommerce_refund_items` table (engine spec §3.21).
+ *
+ * @package    ArtisanPack_UI
+ * @subpackage Ecommerce
+ *
+ * @author     Jacob Martella <me@jacobmartella.com>
+ *
+ * @since      1.0.0
+ */
+
+declare( strict_types=1 );
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration {
+    /**
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function up(): void
+    {
+        Schema::create( 'ecommerce_refund_items', function ( Blueprint $table ): void {
+            $table->bigIncrements( 'id' );
+            $table->unsignedBigInteger( 'refund_id' );
+            $table->unsignedBigInteger( 'order_item_id' );
+            $table->unsignedInteger( 'quantity' );
+            $table->bigInteger( 'amount' );
+            // The tax and shipping parts of `amount`, apportioned from the
+            // order line, so reports can split a refund (audit C8).
+            $table->bigInteger( 'tax_amount' )->default( 0 );
+            $table->bigInteger( 'shipping_amount' )->default( 0 );
+            $table->char( 'currency', 3 );
+            $table->boolean( 'restock' )->default( false );
+
+            $table->index( 'refund_id', 'ecommerce_refund_items_refund_idx' );
+            $table->index( 'order_item_id', 'ecommerce_refund_items_order_item_idx' );
+
+            $table->foreign( 'refund_id', 'ecommerce_refund_items_refund_fk' )
+                ->references( 'id' )
+                ->on( 'ecommerce_refunds' )
+                ->cascadeOnDelete();
+
+            $table->foreign( 'order_item_id', 'ecommerce_refund_items_order_item_fk' )
+                ->references( 'id' )
+                ->on( 'ecommerce_order_items' )
+                ->restrictOnDelete();
+        } );
+    }
+
+    /**
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists( 'ecommerce_refund_items' );
+    }
+};

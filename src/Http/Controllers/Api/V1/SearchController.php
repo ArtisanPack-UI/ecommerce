@@ -3,11 +3,14 @@
 /**
  * SearchController.
  *
- * `GET search?q=` — storefront product search through Laravel Scout
- * (engine spec §9.1). Uses whichever engine `Product::searchableUsing()`
- * resolves (the `database` driver by default), limited to storefront-
- * visible products. Results are page-number paginated (`page`,
- * `per_page`) because Scout engines don't support cursors.
+ * `GET search?q=` — storefront product search (engine spec §9.1) through
+ * the active {@see \ArtisanPackUI\Ecommerce\Contracts\SearchProvider}
+ * (#176): the core one (Scout plus the catalog query) or a search
+ * satellite's. Takes the `GET products` filters (`filter[...]`,
+ * `attributes[...]`), sort, and currency, and answers storefront-visible
+ * products with `meta.facets` and `meta.suggestions`. Results are
+ * page-number paginated (`page`, `per_page`) because search engines don't
+ * support cursors.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -21,10 +24,15 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Catalog\CatalogQuery;
 use ArtisanPackUI\Ecommerce\Http\Resources\ProductResource;
+use ArtisanPackUI\Ecommerce\Http\Support\ListQuery;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
+use ArtisanPackUI\Ecommerce\OpenApi\CatalogParameters;
+use ArtisanPackUI\Ecommerce\Registries\SearchProviderRegistry;
+use ArtisanPackUI\Ecommerce\Search\SearchQuery;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -52,7 +60,12 @@ class SearchController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Search products', resource: ProductResource::class, collection: true, description: 'Full-text product search through Laravel Scout. Page-number paginated via `page` and `per_page`.' )]
+    #[ApiOperation(
+        summary: 'Search products',
+        resource: ProductResource::class,
+        includes: ProductController::OPENAPI_INCLUDES,
+        query: CatalogParameters::SEARCH,
+    )]
     public function index( Request $request ): JsonResponse
     {
         $raw  = $request->query( 'q' );
@@ -75,15 +88,30 @@ class SearchController extends ApiController
             ] );
         }
 
-        // `status` is filtered by the engine; `query()` then drops anything
-        // scheduled for later publication.
-        $paginator = Product::search( $term )
-            ->where( 'status', 'active' )
-            ->query( static fn ( $query ) => $query->storefrontVisible() )
-            ->paginate( $perPage, 'page', $page );
+        $filters = $request->query( 'filter', [] );
+        $filters = array_intersect_key( is_array( $filters ) ? $filters : [], array_flip( ProductController::CATALOG_FILTERS ) );
 
-        $payload         = ProductResource::collection( $paginator )->response( $request )->getData( true );
+        $filters['attributes'] = is_array( $request->query( 'attributes' ) ) ? $request->query( 'attributes' ) : [];
+
+        $sort     = $request->query( 'sort' );
+        $currency = $request->query( 'currency' );
+
+        $result = app( SearchProviderRegistry::class )->active()->search( new SearchQuery(
+            $term,
+            $filters,
+            is_string( $sort ) && in_array( $sort, CatalogQuery::SORTS, true ) ? $sort : null,
+            $page,
+            $perPage,
+            is_string( $currency ) && 1 === preg_match( '/^[A-Za-z]{3}$/', $currency ) ? strtoupper( $currency ) : null,
+            // Same includes as `GET products` (current prices only).
+            ListQuery::includes( $request, app( ProductController::class )->publicIncludes() ),
+        ) );
+
+        $payload         = ProductResource::collection( $result->paginator()->appends( $request->query() ) )->response( $request )->getData( true );
         $payload['data'] = (array) applyFilters( 'ap.ecommerce.api.list.' . ProductResource::NAME, $payload['data'], Product::query()->storefrontVisible(), $request );
+
+        $payload['meta']['facets']      = $result->facets;
+        $payload['meta']['suggestions'] = $result->suggestions;
 
         return new JsonResponse( $payload );
     }

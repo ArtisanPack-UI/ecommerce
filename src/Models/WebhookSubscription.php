@@ -64,7 +64,7 @@ class WebhookSubscription extends Model
      *
      * @var string
      */
-    protected $table = 'webhook_subscriptions';
+    protected $table = 'ecommerce_webhook_subscriptions';
 
     /**
      * @since 1.0.0

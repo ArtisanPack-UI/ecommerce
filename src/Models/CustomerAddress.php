@@ -57,7 +57,7 @@ class CustomerAddress extends Model
      *
      * @var string
      */
-    protected $table = 'customer_addresses';
+    protected $table = 'ecommerce_customer_addresses';
 
     /**
      * @since 1.0.0

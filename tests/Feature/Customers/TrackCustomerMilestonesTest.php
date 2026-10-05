@@ -5,7 +5,6 @@ declare( strict_types=1 );
 use ArtisanPackUI\Ecommerce\Listeners\TrackCustomerMilestones;
 use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\Order;
-use ArtisanPackUI\Ecommerce\Services\CurrencyConverter;
 use ArtisanPackUI\Ecommerce\ValueObjects\PaymentResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Money\Money;
@@ -126,7 +125,7 @@ it( 'counts other-currency orders in the base currency at their snapshot rate', 
 } );
 
 it( 'logs instead of throwing when recording the milestones fails, so a captured checkout still succeeds', function (): void {
-    $listener = new class ( app( 'config' ), app( CurrencyConverter::class ) ) extends TrackCustomerMilestones {
+    $listener = new class ( app( 'config' ), app( ArtisanPackUI\Ecommerce\Services\CustomerStatsService::class ) ) extends TrackCustomerMilestones {
         protected function recordMilestones( Order $order ): array
         {
             throw new RuntimeException( 'database went away' );

@@ -138,10 +138,18 @@ final class CoreSettings
             new SettingDefinition( 'notifications.store_name', 'general', 'string', __( 'Store name' ), [ 'nullable', 'max:120' ], __( 'Used in e-mails and on documents.' ), position: 10 ),
             new SettingDefinition( 'notifications.support_email', 'general', 'email', __( 'Support e-mail' ), [ 'nullable', 'max:255' ], __( 'Where customers are told to write for help.' ), position: 20 ),
             new SettingDefinition( 'base_currency', 'general', 'currency', __( 'Base currency' ), [ 'required' ], __( 'Reports are shown in this currency. Existing orders keep the base currency and exchange rate they were placed with.' ), position: 30 ),
+            new SettingDefinition( 'currency.enabled', 'general', 'list', __( 'Store currencies' ), [ 'nullable', 'max:50' ], __( 'Currencies shoppers can pay in besides the base currency. Prices without a row in a currency are converted from the base currency.' ), position: 35, itemRules: [ 'string', 'size:3', 'regex:/^[A-Za-z]{3}$/' ] ),
             new SettingDefinition( 'timezone', 'general', 'timezone', __( 'Store time zone' ), [ 'nullable' ], __( 'Report days, weeks, and months start at midnight in this time zone. Leave blank to use the application time zone.' ), position: 40 ),
 
             // Checkout.
             new SettingDefinition( 'checkout.reservation_ttl_minutes', 'checkout', 'integer', __( 'Stock reservation (minutes)' ), [ 'required', 'min:1', 'max:1440' ], __( 'How long stock stays held for a shopper at checkout.' ), position: 10 ),
+            new SettingDefinition( 'checkout.guest_checkout', 'checkout', 'select', __( 'Guest checkout' ), [ 'required' ], __( 'Whether shoppers can check out without an account.' ), [
+                'allowed'          => __( 'Allowed' ),
+                'required_account' => __( 'Create an account during checkout' ),
+                'disabled'         => __( 'Sign in required' ),
+            ], position: 20 ),
+            new SettingDefinition( 'cart.abandoned_after_minutes', 'checkout', 'integer', __( 'Abandoned after (minutes)' ), [ 'required', 'min:5', 'max:43200' ], __( 'How long a cart in checkout can sit untouched before it counts as abandoned.' ), position: 40 ),
+            new SettingDefinition( 'checkout.account_creation', 'checkout', 'boolean', __( 'Offer account creation' ), [], __( 'Storefronts offer to create an account at checkout.' ), position: 30 ),
 
             // Tax.
             new SettingDefinition( 'tax.provider', 'tax', 'select', __( 'Tax provider' ), [ 'required' ], __( 'Calculates tax at checkout. Tax satellites add providers here.' ), self::registryOptions( TaxProviderRegistry::class ), position: 10 ),

@@ -26,7 +26,7 @@ afterEach( function (): void {
 it( 'creates the activity log and customer notes tables', function (): void {
     expect( Schema::hasColumns( 'ecommerce_activity_log', [ 'id', 'subject_type', 'subject_id', 'actor_user_id', 'event_type', 'payload', 'created_at' ] ) )->toBeTrue()
         ->and( Schema::hasColumn( 'ecommerce_activity_log', 'updated_at' ) )->toBeFalse()
-        ->and( Schema::hasColumns( 'customer_notes', [ 'id', 'customer_id', 'author_user_id', 'body', 'created_at', 'updated_at' ] ) )->toBeTrue();
+        ->and( Schema::hasColumns( 'ecommerce_customer_notes', [ 'id', 'customer_id', 'author_user_id', 'body', 'created_at', 'updated_at' ] ) )->toBeTrue();
 } );
 
 it( 'records an entry against a subject with the signed-in user as actor', function (): void {

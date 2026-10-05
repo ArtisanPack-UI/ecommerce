@@ -20,6 +20,9 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Services\ProductService;
+use Illuminate\Validation\Rule;
+
 /**
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -52,11 +55,13 @@ class ProductRequest extends ApiFormRequest
                 'is_taxable'              => [ 'boolean' ],
                 'tax_class_key'           => [ 'nullable', 'string', 'max:60' ],
                 'weight'                  => [ 'nullable', 'numeric', 'min:0' ],
-                'weight_unit'             => [ 'nullable', 'string', 'in:g,kg,oz,lb' ],
+                'weight_unit'             => [ 'nullable', 'string', Rule::in( ProductService::WEIGHT_UNITS ) ],
                 'length'                  => [ 'nullable', 'numeric', 'min:0' ],
                 'width'                   => [ 'nullable', 'numeric', 'min:0' ],
                 'height'                  => [ 'nullable', 'numeric', 'min:0' ],
-                'dim_unit'                => [ 'nullable', 'string', 'in:mm,cm,in' ],
+                'dim_unit'                => [ 'nullable', 'string', Rule::in( ProductService::DIMENSION_UNITS ) ],
+                'is_featured'             => [ 'boolean' ],
+                'position'                => [ 'integer', 'min:0', 'max:4294967295' ],
                 'meta'                    => [ 'nullable', 'array', 'max:50' ],
                 'published_at'            => [ 'nullable', 'date' ],
                 'category_ids'            => [ 'array', 'max:200' ],
@@ -76,6 +81,9 @@ class ProductRequest extends ApiFormRequest
                 'children.*.product_id'   => [ 'required', 'integer' ],
                 'children.*.variant_id'   => [ 'nullable', 'integer' ],
                 'children.*.quantity'     => [ 'integer', 'min:1', 'max:1000' ],
+                'relations'               => [ 'array:upsell,cross_sell,related' ],
+                'relations.*'             => [ 'array', 'max:50' ],
+                'relations.*.*'           => [ 'integer', 'min:1' ],
             ],
             self::priceRules( 'prices' ),
             self::inventoryRules(),

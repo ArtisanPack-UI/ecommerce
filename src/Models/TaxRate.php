@@ -62,7 +62,7 @@ class TaxRate extends Model
      *
      * @var string
      */
-    protected $table = 'tax_rates';
+    protected $table = 'ecommerce_tax_rates';
 
     /**
      * @since 1.0.0
@@ -200,7 +200,12 @@ class TaxRate extends Model
     /**
      * Matches a postal code against a comma-separated list of patterns.
      * Each pattern is an exact code, a `*` glob (`606*`), or an inclusive
-     * numeric range (`60601...60699`). Comparison ignores case and spaces.
+     * numeric range (`60601...60699`). Comparison ignores case, spaces, and
+     * hyphens, so a ZIP+4 (`60614-1234`) matches `60614`, `606*`, and
+     * `60601...60699`. A range compares the code's leading digits — as many
+     * as the range bounds have — as digit strings, so leading zeros count
+     * (`00150` is not in `100...199`). Bounds of different lengths never
+     * match.
      *
      * @since 1.0.0
      *
@@ -215,7 +220,10 @@ class TaxRate extends Model
             return false;
         }
 
-        $code = strtoupper( str_replace( ' ', '', $postalCode ) );
+        $normalize = static fn ( string $value ): string => strtoupper( str_replace( [ ' ', '-' ], '', $value ) );
+        $code      = $normalize( $postalCode );
+        // The part before a hyphen: the base code of a ZIP+4.
+        $base      = $normalize( explode( '-', trim( $postalCode ), 2 )[0] );
 
         foreach ( explode( ',', $patterns ) as $pattern ) {
             $pattern = strtoupper( str_replace( ' ', '', $pattern ) );
@@ -226,26 +234,31 @@ class TaxRate extends Model
 
             if ( str_contains( $pattern, '...' ) ) {
                 [ $low, $high ] = explode( '...', $pattern, 2 );
+                $length         = strlen( $low );
+                $leading        = substr( $code, 0, $length );
 
-                if ( ctype_digit( $low ) && ctype_digit( $high ) && ctype_digit( $code )
-                    && (int) $code >= (int) $low && (int) $code <= (int) $high ) {
+                if ( ctype_digit( $low ) && ctype_digit( $high ) && strlen( $high ) === $length
+                    && strlen( $leading ) === $length && ctype_digit( $leading )
+                    && strcmp( $leading, $low ) >= 0 && strcmp( $leading, $high ) <= 0 ) {
                     return true;
                 }
 
                 continue;
             }
+
+            $pattern = str_replace( '-', '', $pattern );
 
             if ( str_contains( $pattern, '*' ) ) {
                 $regex = '/^' . str_replace( '\*', '.*', preg_quote( $pattern, '/' ) ) . '$/';
 
-                if ( 1 === preg_match( $regex, $code ) ) {
+                if ( 1 === preg_match( $regex, $code ) || 1 === preg_match( $regex, $base ) ) {
                     return true;
                 }
 
                 continue;
             }
 
-            if ( $pattern === $code ) {
+            if ( $pattern === $code || $pattern === $base ) {
                 return true;
             }
         }

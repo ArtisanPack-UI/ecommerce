@@ -28,9 +28,9 @@ namespace ArtisanPackUI\Ecommerce\Reports;
 
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
+use ArtisanPackUI\Ecommerce\Models\Refund;
 use ArtisanPackUI\Ecommerce\Models\RefundItem;
 use Closure;
-use Illuminate\Support\Facades\DB;
 
 /**
  * @package    ArtisanPack_UI
@@ -53,17 +53,33 @@ abstract class LineItemReport extends Report
      */
     protected function eachSoldLine( ReportRange $range, BaseAmounts $amounts, Closure $callback ): void
     {
-        $items   = ( new OrderItem() )->getTable();
-        $orders  = ( new Order() )->getTable();
-        $refunds = RefundItem::query()
-            ->toBase()
-            ->select( 'order_item_id', DB::raw( 'SUM(quantity) as refunded_quantity' ), DB::raw( 'SUM(amount) as refunded_amount' ) )
-            ->groupBy( 'order_item_id' );
+        $items       = ( new OrderItem() )->getTable();
+        $orders      = ( new Order() )->getTable();
+        $refundItems = ( new RefundItem() )->getTable();
+        $refundRows  = ( new Refund() )->getTable();
 
-        OrderItem::query()
+        $soldLines = static fn () => OrderItem::query()
             ->toBase()
             ->join( $orders, "{$orders}.id", '=', "{$items}.order_id" )
-            ->leftJoinSub( $refunds, 'refunded', 'refunded.order_item_id', '=', "{$items}.id" )
+            ->whereNotNull( "{$orders}.placed_at" )
+            ->whereBetween( "{$orders}.placed_at", $range->queryBounds() )
+            ->whereIn( "{$orders}.payment_status", self::SALE_PAYMENT_STATUSES );
+
+        // Refunded units and merchandise per line, for the lines in range
+        // only, read once (not once per chunk of lines).
+        $refunded = RefundItem::query()
+            ->toBase()
+            ->join( $refundRows, "{$refundRows}.id", '=', "{$refundItems}.refund_id" )
+            ->where( "{$refundRows}.status", Refund::STATUS_SUCCEEDED )
+            ->whereIn( "{$refundItems}.order_item_id", $soldLines()->select( "{$items}.id" ) )
+            ->select( "{$refundItems}.order_item_id" )
+            ->selectRaw( "SUM({$refundItems}.quantity) as refunded_quantity" )
+            ->selectRaw( "SUM({$refundItems}.amount - COALESCE({$refundItems}.tax_amount, 0) - COALESCE({$refundItems}.shipping_amount, 0)) as refunded_amount" )
+            ->groupBy( "{$refundItems}.order_item_id" )
+            ->get()
+            ->keyBy( 'order_item_id' );
+
+        $soldLines()
             ->select( [
                 "{$items}.id",
                 "{$items}.order_id",
@@ -76,18 +92,15 @@ abstract class LineItemReport extends Report
                 "{$items}.discount_amount",
                 "{$orders}.base_currency",
                 "{$orders}.fx_rate_to_base_e8",
-                'refunded.refunded_quantity',
-                'refunded.refunded_amount',
             ] )
-            ->whereNotNull( "{$orders}.placed_at" )
-            ->whereBetween( "{$orders}.placed_at", $range->queryBounds() )
-            ->whereIn( "{$orders}.payment_status", self::SALE_PAYMENT_STATUSES )
             ->lazyById( 1000, "{$items}.id", 'id' )
-            ->each( static function ( object $line ) use ( $amounts, $callback ): void {
-                // Refund lines can include the line's tax and shipping, so the
-                // refunded amount is capped at the line's pre-tax value.
+            ->each( static function ( object $line ) use ( $amounts, $callback, $refunded ): void {
+                $refund = $refunded->get( $line->id );
+
+                // The merchandise part of the line's refunds, capped at the
+                // line's pre-tax value.
                 $lineValue = (int) $line->unit_price_amount * (int) $line->quantity - (int) $line->discount_amount;
-                $gross     = $lineValue - min( max( 0, $lineValue ), (int) ( $line->refunded_amount ?? 0 ) );
+                $gross     = $lineValue - min( max( 0, $lineValue ), max( 0, (int) ( $refund->refunded_amount ?? 0 ) ) );
                 $net       = $amounts->toBase( $gross, (string) $line->unit_price_currency, (string) $line->base_currency, $line->fx_rate_to_base_e8, $line->order_id );
 
                 if ( null === $net ) {
@@ -101,7 +114,7 @@ abstract class LineItemReport extends Report
                     'product_id' => null === $line->product_id ? null : (int) $line->product_id,
                     'variant_id' => null === $line->product_variant_id ? null : (int) $line->product_variant_id,
                     'snapshot'   => is_array( $snapshot ) ? $snapshot : [],
-                    'units'      => max( 0, (int) $line->quantity - (int) ( $line->refunded_quantity ?? 0 ) ),
+                    'units'      => max( 0, (int) $line->quantity - (int) ( $refund->refunded_quantity ?? 0 ) ),
                     'net'        => $net,
                 ] );
             } );

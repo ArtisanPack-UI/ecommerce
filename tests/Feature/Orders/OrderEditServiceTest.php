@@ -386,3 +386,90 @@ it( 'refuses a preview the order state does not allow', function (): void {
 
     app( OrderEditService::class )->preview( $order, [ 'email' => 'new@example.test' ] );
 } )->throws( OrderNotEditableException::class );
+
+it( 'refuses to remove a line that has been refunded, leaving the refund intact', function (): void {
+    $order = makeOrderWithItems( [ [ 'qty' => 2, 'unit' => 1_500 ], [ 'qty' => 1, 'unit' => 500 ] ] );
+    $line  = $order->items->first();
+    ArtisanPackUI\Ecommerce\Models\RefundItem::factory()->create( [
+        'refund_id'     => ArtisanPackUI\Ecommerce\Models\Refund::factory()->create( [ 'order_id' => $order->id ] )->id,
+        'order_item_id' => $line->id,
+        'quantity'      => 1,
+    ] );
+
+    expect( fn () => $this->service->apply( $order, [ 'items' => [ 'remove' => [ $line->id ] ] ] ) )
+        ->toThrow( OrderNotEditableException::class, 'has refunds' );
+
+    expect( ArtisanPackUI\Ecommerce\Models\RefundItem::query()->count() )->toBe( 1 )
+        ->and( OrderItem::query()->whereKey( $line->id )->exists() )->toBeTrue();
+} );
+
+it( 'refuses to remove a line that issued a license key', function (): void {
+    $order = makeOrderWithItems();
+    $line  = $order->items->first();
+    ArtisanPackUI\Ecommerce\Models\LicenseKey::factory()->create( [ 'order_item_id' => $line->id ] );
+
+    expect( fn () => $this->service->apply( $order, [ 'items' => [ 'remove' => [ $line->id ] ] ] ) )
+        ->toThrow( OrderNotEditableException::class, 'has license keys' );
+
+    expect( ArtisanPackUI\Ecommerce\Models\LicenseKey::query()->count() )->toBe( 1 );
+} );
+
+it( 'refuses to drop a line below its refunded quantity', function (): void {
+    $order = makeOrderWithItems( [ [ 'qty' => 3, 'unit' => 1_000 ] ] );
+    $line  = $order->items->first();
+    ArtisanPackUI\Ecommerce\Models\RefundItem::factory()->create( [
+        'refund_id'     => ArtisanPackUI\Ecommerce\Models\Refund::factory()->create( [ 'order_id' => $order->id ] )->id,
+        'order_item_id' => $line->id,
+        'quantity'      => 2,
+    ] );
+
+    expect( fn () => $this->service->apply( $order, [ 'items' => [ 'change' => [ $line->id => [ 'quantity' => 1 ] ] ] ] ) )
+        ->toThrow( OrderNotEditableException::class, "can't go below 2" );
+
+    expect( $this->service->apply( $order, [ 'items' => [ 'change' => [ $line->id => [ 'quantity' => 2 ] ] ] ] )->order->items->first()->quantity )->toBe( 2 );
+} );
+
+it( 'refuses any edit to a cancelled, refunded, or failed order', function ( string $status ): void {
+    $order = makeOrderWithItems( orderOverrides: [ 'system_status' => $status ] );
+
+    $this->service->apply( $order, [ 'customer_note' => 'too late' ] );
+} )->with( [ 'cancelled', 'refunded', 'failed' ] )->throws( OrderNotEditableException::class, 'can no longer be edited' );
+
+it( 'refuses to roll back an edit on an order that has since been cancelled', function (): void {
+    $order  = makeOrderWithItems();
+    $result = $this->service->apply( $order, [ 'customer_note' => 'Gift wrap' ] );
+
+    Order::query()->whereKey( $order->id )->update( [ 'system_status' => 'cancelled' ] );
+
+    $this->service->rollback( $result->edit );
+} )->throws( OrderNotEditableException::class, 'can no longer be edited' );
+
+it( 'refuses a rollback that would delete a line refunded since the edit', function (): void {
+    $order  = makeOrderWithItems();
+    $result = $this->service->apply( $order, [ 'items' => [ 'add' => [ [
+        'product_id'          => $order->items->first()->product_id,
+        'quantity'            => 1,
+        'unit_price_amount'   => 700,
+        'unit_price_currency' => 'USD',
+        'product_snapshot'    => [ 'name' => 'Added', 'sku' => 'ADD-1', 'type' => 'simple' ],
+    ] ] ] ] );
+    $added = $result->order->items->sortByDesc( 'id' )->first();
+    ArtisanPackUI\Ecommerce\Models\RefundItem::factory()->create( [
+        'refund_id'     => ArtisanPackUI\Ecommerce\Models\Refund::factory()->create( [ 'order_id' => $order->id ] )->id,
+        'order_item_id' => $added->id,
+    ] );
+
+    expect( fn () => $this->service->rollback( $result->edit ) )->toThrow( OrderNotEditableException::class, 'has refunds' );
+    expect( OrderItem::query()->whereKey( $added->id )->exists() )->toBeTrue();
+} );
+
+it( 'keeps refund lines when something tries to delete their order line directly', function (): void {
+    $order = makeOrderWithItems();
+    $line  = $order->items->first();
+    ArtisanPackUI\Ecommerce\Models\RefundItem::factory()->create( [
+        'refund_id'     => ArtisanPackUI\Ecommerce\Models\Refund::factory()->create( [ 'order_id' => $order->id ] )->id,
+        'order_item_id' => $line->id,
+    ] );
+
+    expect( fn () => OrderItem::query()->whereKey( $line->id )->delete() )->toThrow( Illuminate\Database\QueryException::class );
+} );

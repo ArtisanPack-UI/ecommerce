@@ -25,6 +25,8 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\DeactivateLicenseRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\RevokeLicenseRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ValidateLicenseRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\LicenseKeyResource;
@@ -62,8 +64,31 @@ class LicenseKeyController extends ApiController
     #[ApiOperation( summary: 'Validate a license key', description: 'Returns { valid, expires_at, product, revoked, reason }. A fingerprint the key has not seen before is activated when a slot is free.' )]
     public function validateKey( ValidateLicenseRequest $request ): JsonResponse
     {
+        // A stored replay would keep what a key unlocks next to the
+        // idempotency key, so it is withheld. (Set on the base request: the
+        // form request carries its own copy of the attributes.)
+        request()->attributes->set( IdempotencyMiddleware::REDACT_ATTRIBUTE, [ IdempotencyMiddleware::REDACT_ALL ] );
+
         return new JsonResponse( [
             'data' => $this->licenses->validate( (string) $request->validated( 'key' ), (string) $request->validated( 'fingerprint' ), $request->ip() ),
+        ] );
+    }
+
+    /**
+     * Frees the activation slot a machine holds, so the key can be
+     * activated elsewhere.
+     *
+     * @since 1.0.0
+     *
+     * @param  DeactivateLicenseRequest  $request  Validated request.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Deactivate a license key on a machine', description: 'Returns { deactivated, activations_count, activations_limit, reason }; reason is not-found or not-activated when nothing was freed.' )]
+    public function deactivate( DeactivateLicenseRequest $request ): JsonResponse
+    {
+        return new JsonResponse( [
+            'data' => $this->licenses->deactivateByKey( (string) $request->validated( 'key' ), (string) $request->validated( 'fingerprint' ) ),
         ] );
     }
 
@@ -74,7 +99,7 @@ class LicenseKeyController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List license keys', resource: LicenseKeyResource::class, collection: true )]
+    #[ApiOperation( summary: 'List license keys', resource: LicenseKeyResource::class, collection: true, filters: [ 'key' => 'string', 'order_item_id' => 'int-list', 'is_revoked' => 'boolean' ], sorts: [ 'created_at' ], includes: [ 'activations' ] )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(
@@ -82,7 +107,7 @@ class LicenseKeyController extends ApiController
             $request,
             LicenseKeyResource::class,
             [
-                'key'           => static fn ( Builder $query, string $value ) => $query->where( 'key', LicenseKey::normalize( $value ) ),
+                'key'           => static fn ( Builder $query, string $value ) => $query->whereIn( 'key_hash', LicenseKey::hashCandidates( $value ) ),
                 'order_item_id' => [ 'order_item_id', 'int' ],
                 'is_revoked'    => [ 'is_revoked', 'bool' ],
             ],

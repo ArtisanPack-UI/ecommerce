@@ -16,8 +16,16 @@
  *   cost, where connections multiply by `first` and relation lists by an
  *   assumed size (see {@see \ArtisanPackUI\Ecommerce\GraphQL\EcommerceSchema}),
  *   which bounds nested-list and alias amplification.
+ * - **Introspection** — `__schema` / `__type` are refused when
+ *   `artisanpack.ecommerce.graphql.introspection` is false (null means
+ *   "everywhere but production").
  *
  * Applied per schema, so it never affects a host app's own GraphQL schemas.
+ * rebing applies its `graphql.security` limits to every schema through
+ * webonyx's global rules (rebing 10 defaults them to a complexity of 500,
+ * a depth of 13, and no introspection). While the ecommerce schema runs,
+ * those global rules are stood down, because the engine's own limits above
+ * already validated the document, and restored afterwards.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -38,6 +46,7 @@ use GraphQL\Language\AST\DocumentNode;
 use GraphQL\Language\AST\OperationDefinitionNode;
 use GraphQL\Type\Schema;
 use GraphQL\Validator\DocumentValidator;
+use GraphQL\Validator\Rules\DisableIntrospection;
 use GraphQL\Validator\Rules\QueryComplexity;
 use GraphQL\Validator\Rules\QueryDepth;
 use Rebing\GraphQL\Support\ExecutionMiddleware\AbstractExecutionMiddleware;
@@ -89,6 +98,10 @@ class GuardOperations extends AbstractExecutionMiddleware
             $rules[] = $complexityRule;
         }
 
+        if ( ! $this->introspectionAllowed() ) {
+            $rules[] = new DisableIntrospection( DisableIntrospection::ENABLED );
+        }
+
         if ( [] !== $rules ) {
             $errors = DocumentValidator::validate( $schema, $document, $rules );
 
@@ -97,7 +110,88 @@ class GuardOperations extends AbstractExecutionMiddleware
             }
         }
 
-        return $next( $schemaName, $schema, $params, $rootValue, $contextValue );
+        return $this->withGlobalRulesStoodDown(
+            fn (): ExecutionResult => $next( $schemaName, $schema, $params, $rootValue, $contextValue ),
+        );
+    }
+
+    /**
+     * Whether introspection queries may run on the ecommerce schema.
+     *
+     * @since 1.0.0
+     *
+     * @return bool
+     */
+    protected function introspectionAllowed(): bool
+    {
+        $configured = config( 'artisanpack.ecommerce.graphql.introspection' );
+
+        return null === $configured ? ! app()->isProduction() : (bool) $configured;
+    }
+
+    /**
+     * Runs `$callback` with webonyx's global complexity, depth, and
+     * introspection rules disabled, then restores their previous settings,
+     * even when the callback throws.
+     *
+     * @since 1.0.0
+     *
+     * @param  Closure(): ExecutionResult  $callback  The rest of the pipeline.
+     *
+     * @return ExecutionResult
+     */
+    protected function withGlobalRulesStoodDown( Closure $callback ): ExecutionResult
+    {
+        $complexity    = DocumentValidator::getRule( QueryComplexity::class );
+        $depth         = DocumentValidator::getRule( QueryDepth::class );
+        $introspection = DocumentValidator::getRule( DisableIntrospection::class );
+
+        $previousComplexity    = $complexity instanceof QueryComplexity ? $complexity->getMaxQueryComplexity() : null;
+        $previousDepth         = $depth instanceof QueryDepth ? $depth->getMaxQueryDepth() : null;
+        $previousIntrospection = $introspection instanceof DisableIntrospection ? $this->introspectionRuleState( $introspection ) : null;
+
+        try {
+            if ( null !== $previousComplexity ) {
+                $complexity->setMaxQueryComplexity( QueryComplexity::DISABLED );
+            }
+
+            if ( null !== $previousDepth ) {
+                $depth->setMaxQueryDepth( QueryDepth::DISABLED );
+            }
+
+            if ( null !== $previousIntrospection ) {
+                $introspection->setEnabled( DisableIntrospection::DISABLED );
+            }
+
+            return $callback();
+        } finally {
+            if ( null !== $previousComplexity ) {
+                $complexity->setMaxQueryComplexity( $previousComplexity );
+            }
+
+            if ( null !== $previousDepth ) {
+                $depth->setMaxQueryDepth( $previousDepth );
+            }
+
+            if ( null !== $previousIntrospection ) {
+                $introspection->setEnabled( $previousIntrospection );
+            }
+        }
+    }
+
+    /**
+     * Reads a {@see DisableIntrospection} rule's current setting, which
+     * webonyx keeps in a protected property with no getter.
+     *
+     * @since 1.0.0
+     *
+     * @param  DisableIntrospection  $rule  The global rule.
+     *
+     * @return int
+     */
+    protected function introspectionRuleState( DisableIntrospection $rule ): int
+    {
+        return ( fn (): int => $this->isEnabled )->call( $rule );
     }
 
     /**

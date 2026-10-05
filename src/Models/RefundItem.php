@@ -70,7 +70,7 @@ class RefundItem extends Model
      *
      * @var string
      */
-    protected $table = 'refund_items';
+    protected $table = 'ecommerce_refund_items';
 
     /**
      * @since 1.0.0
@@ -82,6 +82,8 @@ class RefundItem extends Model
         'order_item_id',
         'quantity',
         'amount',
+        'tax_amount',
+        'shipping_amount',
         'currency',
         'restock',
     ];
@@ -169,12 +171,14 @@ class RefundItem extends Model
     protected function casts(): array
     {
         return [
-            'refund_id'     => 'integer',
-            'order_item_id' => 'integer',
-            'quantity'      => 'integer',
-            'amount'        => 'integer',
-            'restock'       => 'boolean',
-            'money'         => MoneyCast::class . ':amount,currency',
+            'refund_id'       => 'integer',
+            'order_item_id'   => 'integer',
+            'quantity'        => 'integer',
+            'amount'          => 'integer',
+            'tax_amount'      => 'integer',
+            'shipping_amount' => 'integer',
+            'restock'         => 'boolean',
+            'money'           => MoneyCast::class . ':amount,currency',
         ];
     }
 

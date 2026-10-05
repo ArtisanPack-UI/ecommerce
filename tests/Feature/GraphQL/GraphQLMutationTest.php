@@ -67,7 +67,7 @@ it( 'returns expected cart failures as user errors', function (): void {
 
     gql( $this, ADD_TO_CART, [ 'input' => [ 'cart_token' => $cart->token, 'product_id' => 1, 'quantity' => 0 ] ] )
         ->assertJsonPath( 'data.addToCart.errors.0.field', 'quantity' )
-        ->assertJsonPath( 'data.addToCart.errors.0.code', 'invalid' );
+        ->assertJsonPath( 'data.addToCart.errors.0.code', 'min' );
 
     gql( $this, ADD_TO_CART, [ 'input' => [ 'cart_token' => 'missing', 'product_id' => 1, 'quantity' => 1 ] ] )
         ->assertJsonPath( 'errors.0.extensions.code', 'NOT_FOUND' );
@@ -123,14 +123,14 @@ it( 'issues refunds for admins only', function (): void {
     gql( $this, $mutation, $input )->assertJsonPath( 'errors.0.extensions.code', 'FORBIDDEN' );
 
     $this->actingAs( new Illuminate\Auth\GenericUser( [ 'id' => 1 ] ), 'sanctum' );
-    gql( $this, $mutation, $input )
+    gql( $this, $mutation, $input, [ 'Idempotency-Key' => (string) Str::uuid() ] )
         ->assertJsonMissingPath( 'errors' )
         ->assertJsonPath( 'data.issueRefund.refund.gateway_reference', 're_gql' )
         ->assertJsonPath( 'data.issueRefund.refund.items.0.quantity', 1 )
         ->assertJsonPath( 'data.issueRefund.order.total_refunded.amount', 1_000 );
 
     $input['input']['lines'][0]['amount'] = 50_000;
-    gql( $this, $mutation, $input )->assertJsonPath( 'data.issueRefund.errors.0.code', 'refund-not-allowed' );
+    gql( $this, $mutation, $input, [ 'Idempotency-Key' => (string) Str::uuid() ] )->assertJsonPath( 'data.issueRefund.errors.0.code', 'refund-not-allowed' );
 } );
 
 it( 'manages webhook subscriptions', function (): void {
@@ -215,11 +215,11 @@ it( 'cancels an order and adds a note through the order mutations', function ():
 
     $this->withMiddleware();
 
-    gql( $this, $cancel, [ 'input' => [ 'order_id' => $order->id, 'reason' => 'Customer asked' ] ] )
+    gql( $this, $cancel, [ 'input' => [ 'order_id' => $order->id, 'reason' => 'Customer asked' ] ], [ 'Idempotency-Key' => (string) Str::uuid() ] )
         ->assertJsonMissingPath( 'errors' )
         ->assertJsonPath( 'data.cancelOrder.order.system_status', 'cancelled' );
 
-    gql( $this, $cancel, [ 'input' => [ 'order_id' => $order->id, 'reason' => 'Again' ] ] )
+    gql( $this, $cancel, [ 'input' => [ 'order_id' => $order->id, 'reason' => 'Again' ] ], [ 'Idempotency-Key' => (string) Str::uuid() ] )
         ->assertJsonPath( 'data.cancelOrder.errors.0.code', 'order-not-cancellable' );
 } );
 
@@ -228,18 +228,41 @@ it( 'adjusts an inventory row through adjustInventory with the inventory ability
     $mutation = 'mutation ($input: AdjustInventoryInput!) { adjustInventory(input: $input) { inventory_item { id quantity_on_hand } errors { field code } } }';
 
     $this->actingAs( ecommerceShopperUser(), 'sanctum' );
-    gql( $this, $mutation, [ 'input' => [ 'inventory_item_id' => $item->id, 'delta' => 3, 'reason' => 'Count' ] ] )
+    gql( $this, $mutation, [ 'input' => [ 'inventory_item_id' => $item->id, 'delta' => 3, 'reason' => 'Count' ] ], [ 'Idempotency-Key' => (string) Str::uuid() ] )
         ->assertJsonPath( 'errors.0.extensions.code', 'FORBIDDEN' );
 
     Gate::define( 'ecommerce.inventory.adjust', fn (): bool => true );
 
-    gql( $this, $mutation, [ 'input' => [ 'inventory_item_id' => $item->id, 'delta' => 0, 'reason' => 'Count' ] ] )
+    gql( $this, $mutation, [ 'input' => [ 'inventory_item_id' => $item->id, 'delta' => 0, 'reason' => 'Count' ] ], [ 'Idempotency-Key' => (string) Str::uuid() ] )
         ->assertJsonPath( 'data.adjustInventory.inventory_item', null )
         ->assertJsonPath( 'data.adjustInventory.errors.0.field', 'delta' );
 
-    gql( $this, $mutation, [ 'input' => [ 'inventory_item_id' => $item->id, 'delta' => 3, 'reason' => 'Count' ] ] )
+    gql( $this, $mutation, [ 'input' => [ 'inventory_item_id' => $item->id, 'delta' => 3, 'reason' => 'Count' ] ], [ 'Idempotency-Key' => (string) Str::uuid() ] )
         ->assertJsonPath( 'data.adjustInventory.inventory_item.quantity_on_hand', 13 )
         ->assertJsonPath( 'data.adjustInventory.errors', [] );
 
     expect( $item->fresh()->quantity_on_hand )->toBe( 13 );
+} );
+
+it( 'requires an Idempotency-Key for money-moving mutations and replays a retry (F9)', function (): void {
+    Gate::define( 'ecommerce.admin', fn ( $user ): bool => true );
+    Laravel\Sanctum\Sanctum::actingAs( Tests\Fixtures\ApiUser::make( 1 ), [ ArtisanPackUI\Ecommerce\Auth\TokenAbilities::ADMIN ] );
+
+    $item     = InventoryItem::factory()->create( [ 'quantity_on_hand' => 5 ] );
+    $mutation = 'mutation ($input: AdjustInventoryInput!) { adjustInventory(input: $input) { inventory_item { quantity_on_hand } errors { code } } }';
+    $input    = [ 'input' => [ 'inventory_item_id' => $item->id, 'delta' => 2, 'reason' => 'Recount' ] ];
+
+    gql( $this, $mutation, $input )->assertJsonPath( 'data.adjustInventory.errors.0.code', 'idempotency-key-required' );
+    expect( $item->refresh()->quantity_on_hand )->toBe( 5 );
+
+    gql( $this, $mutation, $input, [ 'Idempotency-Key' => 'adjust-1' ] )->assertJsonPath( 'data.adjustInventory.inventory_item.quantity_on_hand', 7 );
+    gql( $this, $mutation, $input, [ 'Idempotency-Key' => 'adjust-1' ] )->assertJsonPath( 'data.adjustInventory.inventory_item.quantity_on_hand', 7 );
+
+    expect( $item->refresh()->quantity_on_hand )->toBe( 7 );
+
+    // The same key with other input is refused before the resolver runs.
+    gql( $this, $mutation, [ 'input' => [ ...$input['input'], 'delta' => 9 ] ], [ 'Idempotency-Key' => 'adjust-1' ] )
+        ->assertStatus( 409 );
+
+    expect( $item->refresh()->quantity_on_hand )->toBe( 7 );
 } );

@@ -55,7 +55,7 @@ class KanbanAutomation extends Model
      *
      * @var string
      */
-    protected $table = 'kanban_automations';
+    protected $table = 'ecommerce_kanban_automations';
 
     /**
      * @since 1.0.0
@@ -78,7 +78,6 @@ class KanbanAutomation extends Model
      * @var array<string, mixed>
      */
     protected $attributes = [
-        'trigger_config' => '{}',
         'conditions'     => '{}',
         'is_active'      => true,
     ];
@@ -128,10 +127,28 @@ class KanbanAutomation extends Model
             'board_id'       => 'integer',
             'from_column_id' => 'integer',
             'to_column_id'   => 'integer',
-            'trigger_config' => 'array',
+            // Encrypted at rest: it can hold webhook signing secrets.
+            'trigger_config' => 'encrypted:array',
             'conditions'     => 'array',
             'is_active'      => 'boolean',
         ];
+    }
+
+    /**
+     * Gives a new automation an empty config. (An `$attributes` default
+     * can't, because the column holds ciphertext.)
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected static function booted(): void
+    {
+        static::creating( static function ( KanbanAutomation $automation ): void {
+            if ( null === ( $automation->getAttributes()['trigger_config'] ?? null ) ) {
+                $automation->trigger_config = [];
+            }
+        } );
     }
 
     /**

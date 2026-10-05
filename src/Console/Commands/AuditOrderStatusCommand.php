@@ -105,17 +105,17 @@ class AuditOrderStatusCommand extends Command
     {
         $rows = Order::query()
             ->join(
-                'order_substatuses',
-                'orders.substatus_id',
+                'ecommerce_order_substatuses',
+                'ecommerce_orders.substatus_id',
                 '=',
-                'order_substatuses.id',
+                'ecommerce_order_substatuses.id',
             )
-            ->whereColumn( 'orders.system_status', '!=', 'order_substatuses.system_status' )
+            ->whereColumn( 'ecommerce_orders.system_status', '!=', 'ecommerce_order_substatuses.system_status' )
             ->select( [
-                'orders.id as order_id',
-                'orders.system_status as order_system_status',
-                'order_substatuses.id as substatus_id',
-                'order_substatuses.system_status as substatus_system_status',
+                'ecommerce_orders.id as order_id',
+                'ecommerce_orders.system_status as order_system_status',
+                'ecommerce_order_substatuses.id as substatus_id',
+                'ecommerce_order_substatuses.system_status as substatus_system_status',
             ] )
             ->get();
 
@@ -148,32 +148,32 @@ class AuditOrderStatusCommand extends Command
      */
     protected function findBoardAssignmentDrift(): array
     {
-        if ( ! Schema::hasTable( 'order_board_assignments' ) ) {
+        if ( ! Schema::hasTable( 'ecommerce_order_board_assignments' ) ) {
             return [];
         }
 
-        $rows = DB::table( 'order_board_assignments' )
-            ->join( 'orders', 'order_board_assignments.order_id', '=', 'orders.id' )
+        $rows = DB::table( 'ecommerce_order_board_assignments' )
+            ->join( 'ecommerce_orders', 'ecommerce_order_board_assignments.order_id', '=', 'ecommerce_orders.id' )
             ->join(
-                'order_substatuses',
-                'order_board_assignments.substatus_id',
+                'ecommerce_order_substatuses',
+                'ecommerce_order_board_assignments.substatus_id',
                 '=',
-                'order_substatuses.id',
+                'ecommerce_order_substatuses.id',
             )
-            ->whereNull( 'order_board_assignments.removed_at' )
-            ->whereColumn( 'orders.system_status', '!=', 'order_substatuses.system_status' )
+            ->whereNull( 'ecommerce_order_board_assignments.removed_at' )
+            ->whereColumn( 'ecommerce_orders.system_status', '!=', 'ecommerce_order_substatuses.system_status' )
             // Boards may lead or lag the order within the forward chain
             // (OrderStatusMachine::isBoardAssignmentCompatible()).
             ->where( function ( $query ): void {
-                $query->whereNotIn( 'orders.system_status', OrderStatusMachine::FORWARD_STATUSES )
-                    ->orWhereNotIn( 'order_substatuses.system_status', OrderStatusMachine::FORWARD_STATUSES );
+                $query->whereNotIn( 'ecommerce_orders.system_status', OrderStatusMachine::FORWARD_STATUSES )
+                    ->orWhereNotIn( 'ecommerce_order_substatuses.system_status', OrderStatusMachine::FORWARD_STATUSES );
             } )
             ->select( [
-                'orders.id as order_id',
-                'orders.system_status as order_system_status',
-                'order_board_assignments.board_id as board_id',
-                'order_substatuses.id as substatus_id',
-                'order_substatuses.system_status as substatus_system_status',
+                'ecommerce_orders.id as order_id',
+                'ecommerce_orders.system_status as order_system_status',
+                'ecommerce_order_board_assignments.board_id as board_id',
+                'ecommerce_order_substatuses.id as substatus_id',
+                'ecommerce_order_substatuses.system_status as substatus_system_status',
             ] )
             ->get();
 

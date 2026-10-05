@@ -65,10 +65,23 @@ return [
     |
     | `frankfurter` — Config for the Frankfurter-backed provider.
     |
+    | `enabled`    — Currencies the store sells in besides the base currency
+    |                (comma-separated in ECOMMERCE_CURRENCIES). Storefronts
+    |                offer these in a currency switcher; carts can only be
+    |                priced in an enabled currency.
+    | `cookie`     — Cookie the default CurrencyResolver reads a shopper's
+    |                choice from (storefronts without sessions set it).
+    | `session_key`— Session key the default CurrencyResolver reads and
+    |                remembers the choice under.
+    |
     */
 
     'currency' => [
         'provider' => env( 'ECOMMERCE_CURRENCY_PROVIDER', 'config' ),
+
+        'enabled'     => array_values( array_filter( array_map( 'trim', explode( ',', (string) env( 'ECOMMERCE_CURRENCIES', '' ) ) ) ) ),
+        'cookie'      => env( 'ECOMMERCE_CURRENCY_COOKIE', 'ecommerce_currency' ),
+        'session_key' => 'ecommerce.currency',
 
         'rates' => [],
 
@@ -101,6 +114,61 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Cart
+    |--------------------------------------------------------------------------
+    |
+    | `max_lines` — Most distinct lines one cart may hold (free items granted
+    |               by promotions don't count).
+    |
+    | `ttl_days`  — Days of inactivity before a cart expires. Every change
+    |               pushes the expiry back; an expired cart can't be changed.
+    |
+    | `cookie`    — Name of the cookie holding a guest's cart token, shared
+    |               by every storefront (GuestCartCookie). Encrypted by the
+    |               host's EncryptCookies middleware like any other cookie.
+    |
+    | `cookie_lifetime` — Lifetime of that cookie, in minutes (default 30 days).
+    |
+    | `merge_on_login`  — Merge the guest cart into the shopper's account cart
+    |               when they sign in (parent plan §7.1). A currency mismatch
+    |               is left pending for the storefront to resolve.
+    |
+    | `abandoned_after_minutes` — Minutes a cart in checkout (with an email)
+    |               may sit untouched before `ecommerce:flag-abandoned-carts`
+    |               flags it and fires CartAbandoned.
+    |
+    | Expired carts, and converted carts older than `ttl_days`, are deleted
+    | daily by `ecommerce:prune-carts`.
+    |
+    */
+
+    'cart' => [
+        'max_lines'               => (int) env( 'ECOMMERCE_CART_MAX_LINES', 100 ),
+        'ttl_days'                => (int) env( 'ECOMMERCE_CART_TTL_DAYS', 30 ),
+        'cookie'                  => env( 'ECOMMERCE_CART_COOKIE', 'ecommerce_cart' ),
+        'cookie_lifetime'         => (int) env( 'ECOMMERCE_CART_COOKIE_LIFETIME', 43_200 ),
+        'merge_on_login'          => (bool) env( 'ECOMMERCE_CART_MERGE_ON_LOGIN', true ),
+        'abandoned_after_minutes' => (int) env( 'ECOMMERCE_CART_ABANDONED_AFTER_MINUTES', 60 ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Promotions
+    |--------------------------------------------------------------------------
+    |
+    | `verbose_coupon_errors` — When `false` (the default), an inactive or
+    |                          used-up coupon is reported to shoppers as
+    |                          invalid, so the API doesn't reveal which codes
+    |                          exist. Turn on for more specific messages.
+    |
+    */
+
+    'promotions' => [
+        'verbose_coupon_errors' => (bool) env( 'ECOMMERCE_VERBOSE_COUPON_ERRORS', false ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Checkout
     |--------------------------------------------------------------------------
     |
@@ -109,10 +177,42 @@ return [
     | `ecommerce:release-expired-reservations` scheduled command sweeps rows
     | past this TTL every minute.
     |
+    | `guest_checkout` — `allowed` (default), `required_account` (a guest can
+    |                    fill in checkout but needs an account before
+    |                    paying), or `disabled` (sign in first).
+    |
+    | `account_creation` — Whether storefronts offer to create an account at
+    |                    checkout.
+    |
+    | `reconcile_after_minutes` — How long a payment session may go quiet
+    |                    before `ecommerce:reconcile-payments` asks the
+    |                    provider how it ended.
+    |
+    | `order_view_url`  — Storefront page showing a guest their order, with a
+    |                    `{token}` placeholder (`https://shop.test/order/{token}`).
+    |                    Guest confirmation emails link to it. Unset: the
+    |                    REST `order-views/{token}` endpoint.
+    |
+    | `order_view_ttl_days` — How long those links work.
+    |
+    | `guest_lookup`    — Failed email + order number lookups allowed per order
+    |                    number and per IP before both are locked out for
+    |                    `lockout_minutes`.
+    |
     */
 
     'checkout' => [
         'reservation_ttl_minutes' => (int) env( 'ECOMMERCE_RESERVATION_TTL_MINUTES', 15 ),
+        'guest_checkout'          => env( 'ECOMMERCE_GUEST_CHECKOUT', 'allowed' ),
+        'account_creation'        => (bool) env( 'ECOMMERCE_CHECKOUT_ACCOUNT_CREATION', true ),
+        'reconcile_after_minutes' => (int) env( 'ECOMMERCE_RECONCILE_AFTER_MINUTES', 15 ),
+        'order_view_url'          => env( 'ECOMMERCE_ORDER_VIEW_URL' ),
+        'order_view_ttl_days'     => (int) env( 'ECOMMERCE_ORDER_VIEW_TTL_DAYS', 90 ),
+        'guest_lookup'            => [
+            'max_failures_per_order' => (int) env( 'ECOMMERCE_GUEST_LOOKUP_MAX_FAILURES_PER_ORDER', 5 ),
+            'max_failures_per_ip'    => (int) env( 'ECOMMERCE_GUEST_LOOKUP_MAX_FAILURES_PER_IP', 20 ),
+            'lockout_minutes'        => (int) env( 'ECOMMERCE_GUEST_LOOKUP_LOCKOUT_MINUTES', 15 ),
+        ],
     ],
 
     /*
@@ -131,6 +231,10 @@ return [
     |                          Retries reuse the claim key, so carriers that
     |                          honour idempotency keys never double-charge.
     |
+    | `allow_unpaid_shipments` — Allow shipments on orders that are still
+    |                          `pending` (unpaid). Off by default: only
+    |                          `processing` and `complete` orders ship.
+    |
     */
 
     'fulfillment' => [
@@ -139,6 +243,7 @@ return [
             'proportional-by-line-total',
         ),
         'label_claim_ttl_minutes' => (int) env( 'ECOMMERCE_LABEL_CLAIM_TTL_MINUTES', 10 ),
+        'allow_unpaid_shipments'  => (bool) env( 'ECOMMERCE_ALLOW_UNPAID_SHIPMENTS', false ),
     ],
 
     /*
@@ -283,8 +388,20 @@ return [
             'per_ip'      => (int) env( 'ECOMMERCE_RATE_LICENSE_VALIDATE_PER_IP', 600 ),
         ],
 
+        // `per_ip` counts every inbound webhook request; `per_provider`
+        // counts only signature-verified ones, so junk can't starve a
+        // provider's real deliveries.
         'webhook.inbound' => [
+            'per_ip'       => (int) env( 'ECOMMERCE_RATE_WEBHOOK_INBOUND_PER_IP', 120 ),
             'per_provider' => (int) env( 'ECOMMERCE_RATE_WEBHOOK_INBOUND_PER_PROVIDER', 1_000 ),
+        ],
+
+        'lookup.attempt' => [
+            'per_ip' => (int) env( 'ECOMMERCE_RATE_LOOKUP_ATTEMPT_PER_IP', 30 ),
+        ],
+
+        'notifications.unsubscribe' => [
+            'per_ip' => (int) env( 'ECOMMERCE_RATE_UNSUBSCRIBE_PER_IP', 30 ),
         ],
 
         'admin.mutate' => [
@@ -345,12 +462,19 @@ return [
     |   - `publishable_key` — Publishable key surfaced to the storefront so
     |                         Stripe Elements can initialize.
     |   - `webhook_secret`  — Endpoint secret (`whsec_…`) used to verify
-    |                         inbound webhook signatures.
+    |                         inbound webhook signatures. Several secrets,
+    |                         comma-separated, are all accepted, so a secret
+    |                         can be rotated without dropping deliveries.
     |   - `api_version`     — Optional pinned Stripe API version.
     |   - `capture_method`  — `automatic` (default), `manual`, or
     |                         `automatic_async`. `manual` uses the classic
-    |                         auth/capture split for orders that need a
-    |                         review step before capture.
+    |                         auth/capture split: the money is only held
+    |                         when the shopper confirms, so the fraud check
+    |                         at finalize runs before anything is captured.
+    |                         With `automatic` the shopper's confirmation
+    |                         captures, and a blocked payment is refunded.
+    |   - `appearance`      — Stripe Elements appearance options passed to
+    |                         storefronts through the client config.
     |   - `webhook_route`   — Path (relative to app root) where the
     |                         `POST` webhook endpoint is registered.
     |
@@ -365,6 +489,7 @@ return [
             'api_version'     => env( 'ECOMMERCE_STRIPE_API_VERSION' ),
             'capture_method'  => env( 'ECOMMERCE_STRIPE_CAPTURE_METHOD', 'automatic' ),
             'webhook_route'   => env( 'ECOMMERCE_STRIPE_WEBHOOK_ROUTE', 'ecommerce/webhooks/stripe' ),
+            'appearance'      => [],
         ],
     ],
 
@@ -383,10 +508,32 @@ return [
     | because silently skipping fraud assessment is exactly the failure
     | mode this contract exists to prevent.
     |
+    | `fail_open` — When a provider can't reach its service (or, for
+    | Stripe Radar, the payment has no charge to read yet), approve anyway
+    | (`true`) or hold the payment for review (`false`, the default). Held
+    | payments stay authorized on a pending order until an admin approves
+    | or cancels them.
+    |
     */
 
     'fraud' => [
-        'provider' => env( 'ECOMMERCE_FRAUD_PROVIDER', 'always-approve' ),
+        'provider'  => env( 'ECOMMERCE_FRAUD_PROVIDER', 'always-approve' ),
+        'fail_open' => (bool) env( 'ECOMMERCE_FRAUD_FAIL_OPEN', false ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Store
+    |--------------------------------------------------------------------------
+    |
+    | `country` — ISO 3166-1 alpha-2 country the store trades from. Used
+    | where an order or cart has no address of its own (an all-digital
+    | order's fraud assessment, for example).
+    |
+    */
+
+    'store' => [
+        'country' => strtoupper( (string) env( 'ECOMMERCE_STORE_COUNTRY', 'US' ) ),
     ],
 
     /*
@@ -462,20 +609,29 @@ return [
     | `signature_tolerance_seconds` — Maximum clock skew accepted on a
     |                      signed request's `Date` header (default 300s).
     |
+    | `catalog_max_age` — Seconds clients and CDNs may cache public catalog
+    |                      reads (they also get an ETag; carts never cache).
+    |
+    | `signature_cache_store` — Cache store that remembers used signatures
+    |                      (replay protection). Must be shared across servers
+    |                      (Redis, database, Memcached); defaults to the
+    |                      default store.
+    |
     */
 
     'api' => [
         'version'          => env( 'ECOMMERCE_API_VERSION', 'v1' ),
         'default_per_page' => (int) env( 'ECOMMERCE_API_DEFAULT_PER_PAGE', 25 ),
         'max_per_page'     => (int) env( 'ECOMMERCE_API_MAX_PER_PAGE', 100 ),
-        'middleware'       => [ 'api', 'ecommerce.request-id' ],
+        'middleware'       => [ 'api', 'ecommerce.request-id', 'ecommerce.locale' ],
         'auth_middleware'  => [ 'ecommerce.service-signature', 'auth:sanctum' ],
 
         'services' => [],
 
         'signature_tolerance_seconds' => (int) env( 'ECOMMERCE_SERVICE_SIGNATURE_TOLERANCE', 300 ),
+        'signature_cache_store'       => env( 'ECOMMERCE_SERVICE_SIGNATURE_CACHE_STORE' ),
+        'catalog_max_age'             => (int) env( 'ECOMMERCE_API_CATALOG_MAX_AGE', 60 ),
     ],
-
 
     /*
     |--------------------------------------------------------------------------
@@ -509,20 +665,35 @@ return [
     |                            references, IP / user agent, product meta,
     |                            cost prices) in payloads. Off by default.
     | `connection` / `queue`   — Where `DeliverWebhookJob` is queued.
+    | `inbound_max_bytes`      — Largest inbound provider webhook body
+    |                            accepted (`POST ecommerce/webhooks/{provider}`);
+    |                            bigger bodies are a 413 and aren't stored.
     |
     */
 
     'webhooks' => [
         'events' => [
-            \ArtisanPackUI\Ecommerce\Events\OrderStatusChanged::class,
-            \ArtisanPackUI\Ecommerce\Events\OrderSubstatusChanged::class,
-            \ArtisanPackUI\Ecommerce\Events\OrderCancelled::class,
-            \ArtisanPackUI\Ecommerce\Events\OrderEdited::class,
-            \ArtisanPackUI\Ecommerce\Events\OrderRefunded::class,
-            \ArtisanPackUI\Ecommerce\Events\PaymentSucceeded::class,
-            \ArtisanPackUI\Ecommerce\Events\PaymentFailed::class,
-            \ArtisanPackUI\Ecommerce\Events\PaymentRefunded::class,
-            \ArtisanPackUI\Ecommerce\Events\FraudBlocked::class,
+            ArtisanPackUI\Ecommerce\Events\CartAbandoned::class,
+            ArtisanPackUI\Ecommerce\Events\OrderPlaced::class,
+            ArtisanPackUI\Ecommerce\Events\CartCompleted::class,
+            ArtisanPackUI\Ecommerce\Events\CouponRedeemed::class,
+            ArtisanPackUI\Ecommerce\Events\PromotionApplied::class,
+            ArtisanPackUI\Ecommerce\Events\OrderStatusChanged::class,
+            ArtisanPackUI\Ecommerce\Events\OrderSubstatusChanged::class,
+            ArtisanPackUI\Ecommerce\Events\OrderCancelled::class,
+            ArtisanPackUI\Ecommerce\Events\OrderEdited::class,
+            ArtisanPackUI\Ecommerce\Events\OrderRefunded::class,
+            ArtisanPackUI\Ecommerce\Events\PaymentSucceeded::class,
+            ArtisanPackUI\Ecommerce\Events\PaymentFailed::class,
+            ArtisanPackUI\Ecommerce\Events\PaymentRefunded::class,
+            ArtisanPackUI\Ecommerce\Events\FraudBlocked::class,
+            ArtisanPackUI\Ecommerce\Events\ShipmentCreated::class,
+            ArtisanPackUI\Ecommerce\Events\ShipmentDelivered::class,
+            ArtisanPackUI\Ecommerce\Events\OrderFulfilled::class,
+            ArtisanPackUI\Ecommerce\Events\CustomerRegistered::class,
+            ArtisanPackUI\Ecommerce\Events\CustomerUpdated::class,
+            ArtisanPackUI\Ecommerce\Events\ProductStockLow::class,
+            ArtisanPackUI\Ecommerce\Events\ProductOutOfStock::class,
         ],
         'backoff_seconds'        => [ 60, 300, 900, 1_800, 3_600, 7_200, 14_400, 28_800, 43_200, 86_400 ],
         'max_attempts'           => (int) env( 'ECOMMERCE_WEBHOOK_MAX_ATTEMPTS', 10 ),
@@ -534,6 +705,7 @@ return [
         'include_admin_fields'   => (bool) env( 'ECOMMERCE_WEBHOOK_INCLUDE_ADMIN_FIELDS', false ),
         'connection'             => env( 'ECOMMERCE_WEBHOOK_QUEUE_CONNECTION' ),
         'queue'                  => env( 'ECOMMERCE_WEBHOOK_QUEUE' ),
+        'inbound_max_bytes'      => (int) env( 'ECOMMERCE_WEBHOOK_INBOUND_MAX_BYTES', 524_288 ),
     ],
 
     /*
@@ -549,14 +721,18 @@ return [
     |            client) — or to an empty value to follow `scout.driver`.
     | `index`  — Index name for dedicated engines (`scout.prefix` is
     |            prepended).
+    | `provider` — Key of the SearchProvider storefront search uses
+    |            (`GET search`): `default` (Scout + the catalog query's
+    |            filters and facets) unless a search satellite registers
+    |            another.
     |
     */
 
     'search' => [
-        'driver' => env( 'ECOMMERCE_SEARCH_DRIVER', 'database' ),
-        'index'  => env( 'ECOMMERCE_SEARCH_INDEX', 'ecommerce_products' ),
+        'provider' => env( 'ECOMMERCE_SEARCH_PROVIDER', 'default' ),
+        'driver'   => env( 'ECOMMERCE_SEARCH_DRIVER', 'database' ),
+        'index'    => env( 'ECOMMERCE_SEARCH_INDEX', 'ecommerce_products' ),
     ],
-
 
     /*
     |--------------------------------------------------------------------------
@@ -581,19 +757,26 @@ return [
     |                   aliases add up quickly.
     | `list_complexity_factor` — Assumed size of a relation list (default 5).
     | `max_batch`     — Maximum operations in one batched request.
+    | `introspection` — Allow `__schema` / `__type` queries on this schema.
+    |                   Null (the default) allows them everywhere except in
+    |                   production. These four limits govern the ecommerce
+    |                   schema only: rebing's global `graphql.security` values
+    |                   don't apply to it, and the engine never changes them
+    |                   for a host app's own schemas.
     | `subscriptions` — Broadcast subscription events over Laravel
     |                   broadcasting (requires a configured broadcaster).
     |
     */
 
     'graphql' => [
-        'middleware'     => [ 'api', 'ecommerce.request-id', 'ecommerce.graphql-batch', 'ecommerce.service-signature', 'ecommerce.optional-auth', 'ecommerce.idempotency:optional' ],
+        'middleware'     => [ 'api', 'ecommerce.request-id', 'ecommerce.locale', 'ecommerce.graphql-batch', 'ecommerce.service-signature', 'ecommerce.optional-auth', 'ecommerce.idempotency:optional' ],
         'max_depth'      => (int) env( 'ECOMMERCE_GRAPHQL_MAX_DEPTH', 10 ),
         'max_complexity' => (int) env( 'ECOMMERCE_GRAPHQL_MAX_COMPLEXITY', 5_000 ),
 
         'list_complexity_factor' => (int) env( 'ECOMMERCE_GRAPHQL_LIST_COMPLEXITY_FACTOR', 5 ),
-        'max_batch'      => (int) env( 'ECOMMERCE_GRAPHQL_MAX_BATCH', 10 ),
-        'subscriptions' => (bool) env( 'ECOMMERCE_GRAPHQL_SUBSCRIPTIONS', false ),
+        'max_batch'              => (int) env( 'ECOMMERCE_GRAPHQL_MAX_BATCH', 10 ),
+        'introspection'          => null === env( 'ECOMMERCE_GRAPHQL_INTROSPECTION' ) ? null : (bool) env( 'ECOMMERCE_GRAPHQL_INTROSPECTION' ),
+        'subscriptions'          => (bool) env( 'ECOMMERCE_GRAPHQL_SUBSCRIPTIONS', false ),
     ],
 
     /*
@@ -611,12 +794,22 @@ return [
     | `honeypot_field` — Name of a hidden form field real shoppers leave
     |                    empty. Submissions that fill it in are answered as
     |                    usual but filed straight to spam.
+    | `require_purchase` — Only customers with a paid order for the product
+    |                    may review it.
+    | `allow_multiple` — Let a customer review the same product again (by
+    |                    default one live review each; a rejected or spam
+    |                    one doesn't count).
+    | `max_media`      — Photos a review may carry (uploads need
+    |                    artisanpack-ui/media-library).
     |
     */
 
     'reviews' => [
-        'allow_guests'   => (bool) env( 'ECOMMERCE_REVIEWS_ALLOW_GUESTS', true ),
-        'honeypot_field' => env( 'ECOMMERCE_REVIEWS_HONEYPOT_FIELD', 'website' ),
+        'allow_guests'     => (bool) env( 'ECOMMERCE_REVIEWS_ALLOW_GUESTS', true ),
+        'honeypot_field'   => env( 'ECOMMERCE_REVIEWS_HONEYPOT_FIELD', 'website' ),
+        'require_purchase' => (bool) env( 'ECOMMERCE_REVIEWS_REQUIRE_PURCHASE', false ),
+        'allow_multiple'   => (bool) env( 'ECOMMERCE_REVIEWS_ALLOW_MULTIPLE', false ),
+        'max_media'        => (int) env( 'ECOMMERCE_REVIEWS_MAX_MEDIA', 5 ),
     ],
 
     /*
@@ -649,10 +842,10 @@ return [
     */
 
     'digital' => [
-        'auto_issue'           => (bool) env( 'ECOMMERCE_DIGITAL_AUTO_ISSUE', true ),
-        'download_limit'       => (int) env( 'ECOMMERCE_DIGITAL_DOWNLOAD_LIMIT', 5 ),
-        'download_expiry_days' => (int) env( 'ECOMMERCE_DIGITAL_DOWNLOAD_EXPIRY_DAYS', 30 ),
-        'disk'                 => env( 'ECOMMERCE_DIGITAL_DISK', 'local' ),
+        'auto_issue'            => (bool) env( 'ECOMMERCE_DIGITAL_AUTO_ISSUE', true ),
+        'download_limit'        => (int) env( 'ECOMMERCE_DIGITAL_DOWNLOAD_LIMIT', 5 ),
+        'download_expiry_days'  => (int) env( 'ECOMMERCE_DIGITAL_DOWNLOAD_EXPIRY_DAYS', 30 ),
+        'disk'                  => env( 'ECOMMERCE_DIGITAL_DISK', 'local' ),
         'stream_window_minutes' => (int) env( 'ECOMMERCE_DIGITAL_STREAM_WINDOW_MINUTES', 240 ),
         'stream_byte_allowance' => (int) env( 'ECOMMERCE_DIGITAL_STREAM_BYTE_ALLOWANCE', 3 ),
         'allowed_disks'         => [ env( 'ECOMMERCE_DIGITAL_DISK', 'local' ) ],
@@ -701,6 +894,12 @@ return [
     | `review_request_delay_days` — Days after delivery to ask for a review
     |                               (0 = immediately; needs a queue worker
     |                               for any delay).
+    | `preferences_url`           — The storefront's notification settings
+    |                               page, offered as `Store.preferences_url`.
+    |                               Mail in a category the recipient can turn
+    |                               off links to a signed one-click
+    |                               unsubscribe instead, and carries
+    |                               `List-Unsubscribe` headers.
     |
     */
 
@@ -712,6 +911,7 @@ return [
         'default_locale'            => env( 'ECOMMERCE_NOTIFICATIONS_DEFAULT_LOCALE' ),
         'preference_channels'       => [ 'mail' ],
         'review_request_delay_days' => (int) env( 'ECOMMERCE_REVIEW_REQUEST_DELAY_DAYS', 7 ),
+        'preferences_url'           => env( 'ECOMMERCE_NOTIFICATIONS_PREFERENCES_URL' ),
     ],
 
     /*
@@ -766,11 +966,17 @@ return [
     |                not do this for JSON keys on its own; the engine wraps
     |                the translation loader to add it. Applies app-wide.
     |
+    | `supported_locales` — Locales the REST and GraphQL APIs negotiate from
+    |                `Accept-Language` (`ecommerce.locale` middleware), and
+    |                that notifications use the catalog copy for. Requests
+    |                without the header keep the app locale.
+    |
     */
 
     'localization' => [
         'tax_labels'        => [],
         'regional_fallback' => (bool) env( 'ECOMMERCE_REGIONAL_LOCALE_FALLBACK', true ),
+        'supported_locales' => [ 'en', 'es', 'fr', 'de' ],
     ],
 
     /*
@@ -829,6 +1035,82 @@ return [
             'signing_key' => env( 'ECOMMERCE_VERIFY_SIGNING_KEY' ),
             'public_key'  => env( 'ECOMMERCE_VERIFY_PUBLIC_KEY' ),
         ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Inventory
+    |--------------------------------------------------------------------------
+    |
+    | `show_quantity` — Report how many units are left in storefront stock
+    |                   status (`purchase-options`, `StockStatus`). Off by
+    |                   default: shoppers see in stock / low / backorder /
+    |                   out of stock only.
+    |
+    */
+
+    'inventory' => [
+        'show_quantity' => (bool) env( 'ECOMMERCE_INVENTORY_SHOW_QUANTITY', false ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Schedule
+    |--------------------------------------------------------------------------
+    |
+    | The engine schedules its maintenance commands on the host's scheduler
+    | (run `php artisan schedule:run` every minute). Every task runs on one
+    | server (needs a cache store that supports locks) and never overlaps
+    | itself.
+    |
+    | `enabled` — false schedules nothing; run the commands yourself.
+    | `tasks`   — Cron expression per command, merged over the shipped
+    |             defaults. Set a command to null to stop scheduling it.
+    |
+    */
+
+    'schedule' => [
+        'enabled' => (bool) env( 'ECOMMERCE_SCHEDULE_ENABLED', true ),
+        'tasks'   => [
+            'ecommerce:release-expired-reservations' => '* * * * *',
+            'ecommerce:retry-webhook-deliveries'     => '* * * * *',
+            'ecommerce:flag-abandoned-carts'         => '*/5 * * * *',
+            'ecommerce:reconcile-payments'           => '*/15 * * * *',
+            'ecommerce:prune-idempotency-records'    => '0 * * * *',
+            'ecommerce:audit-order-status'           => '15 2 * * *',
+            'ecommerce:prune-carts'                  => '30 3 * * *',
+            'ecommerce:prune-ledgers'                => '45 3 * * *',
+            'ecommerce:refresh-fx-rates'             => '30 5 * * *',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Retention
+    |--------------------------------------------------------------------------
+    |
+    | Days ledger rows are kept before `ecommerce:prune-ledgers` (daily)
+    | deletes them. 0 keeps them forever.
+    |
+    | `inbound_webhooks_days`   — Provider webhooks received (raw payloads may
+    |                             hold customer data).
+    | `webhook_deliveries_days` — Outbound deliveries that were delivered or
+    |                             ran out of attempts. Pending, retrying, and
+    |                             parked deliveries are never pruned.
+    | `activity_log_days`       — Admin activity entries.
+    | `download_events_days`    — Digital download events (IP, user agent).
+    |
+    | Expired idempotency records are pruned by
+    | `ecommerce:prune-idempotency-records`, and old carts by
+    | `ecommerce:prune-carts`.
+    |
+    */
+
+    'retention' => [
+        'inbound_webhooks_days'   => (int) env( 'ECOMMERCE_RETENTION_INBOUND_WEBHOOKS_DAYS', 90 ),
+        'webhook_deliveries_days' => (int) env( 'ECOMMERCE_RETENTION_WEBHOOK_DELIVERIES_DAYS', 90 ),
+        'activity_log_days'       => (int) env( 'ECOMMERCE_RETENTION_ACTIVITY_LOG_DAYS', 365 ),
+        'download_events_days'    => (int) env( 'ECOMMERCE_RETENTION_DOWNLOAD_EVENTS_DAYS', 365 ),
     ],
 
 ];

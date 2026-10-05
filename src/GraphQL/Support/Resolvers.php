@@ -117,7 +117,7 @@ class Resolvers
     {
         $user = $this->requireUser();
 
-        if ( ! $this->authorizer->allows( $user, $resource, $action, $subject ?? request(), request() ) ) {
+        if ( ! $this->authorizer->allows( $user, $resource, $action, $subject, request() ) ) {
             throw GraphQLError::forbidden( sprintf( 'ecommerce.%s.%s', $resource, $action ) );
         }
 
@@ -138,7 +138,7 @@ class Resolvers
     {
         $user = $this->user();
 
-        return null !== $user && $this->authorizer->allows( $user, $resource, $action, request(), request() );
+        return null !== $user && $this->authorizer->allows( $user, $resource, $action, null, request() );
     }
 
     /**

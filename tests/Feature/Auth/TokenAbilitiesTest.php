@@ -24,7 +24,10 @@ it( 'derives per-resource scopes from resource and action', function ( string $r
 } )->with( [
     'order read'          => [ 'order', 'viewAny', 'ecommerce:orders.read' ],
     'order view'          => [ 'order', 'view', 'ecommerce:orders.read' ],
-    'order refund'        => [ 'order', 'refund', 'ecommerce:orders.write' ],
+    'order refund'        => [ 'order', 'refund', 'ecommerce:orders.refund' ],
+    'order cancel'        => [ 'order', 'cancel', 'ecommerce:orders.cancel' ],
+    'customer delete'     => [ 'customer', 'delete', 'ecommerce:customers.delete' ],
+    'customer update'     => [ 'customer', 'update', 'ecommerce:customers.write' ],
     'tax rate update'     => [ 'taxRate', 'update', 'ecommerce:tax-rates.write' ],
     'shipping zone read'  => [ 'shippingZone', 'viewAny', 'ecommerce:shipping-zones.read' ],
     'webhook sub create'  => [ 'webhookSubscription', 'create', 'ecommerce:webhook-subscriptions.write' ],
@@ -70,6 +73,18 @@ it( 'lets a write scope perform the write', function (): void {
         ->assertJsonPath( 'data.customer_note', 'Leave at door' );
 } );
 
+it( 'needs the dedicated scope, not the generic write, to refund or cancel (F8)', function (): void {
+    $order = Order::factory()->create( [ 'system_status' => 'pending' ] );
+    Sanctum::actingAs( ApiUser::make( 1 ), [ 'ecommerce:orders.write' ] );
+
+    $this->postJson( "/api/ecommerce/v1/orders/{$order->id}/refunds", [ 'lines' => [] ], idem() )->assertForbidden();
+    $this->postJson( "/api/ecommerce/v1/orders/{$order->id}/cancel", [ 'reason' => 'x' ], idem() )->assertForbidden();
+
+    Sanctum::actingAs( ApiUser::make( 1 ), [ 'ecommerce:orders.write', 'ecommerce:orders.cancel' ] );
+
+    $this->postJson( "/api/ecommerce/v1/orders/{$order->id}/cancel", [ 'reason' => 'Customer asked' ], idem() )->assertOk();
+} );
+
 it( 'never lets a token scope grant what the Gate denies', function (): void {
     Sanctum::actingAs( ApiUser::make( 2 ), [ TokenAbilities::ADMIN ] );
 
@@ -101,4 +116,14 @@ it( 'allows storefront access only to storefront or admin tokens', function (): 
 
     Sanctum::actingAs( $shopper = ApiUser::make( 7 ), [ 'ecommerce:products.read' ] );
     expect( Gate::forUser( $shopper )->allows( 'view', $order ) )->toBeFalse();
+} );
+
+it( 'hands a gate the bound model, never the request (F12)', function (): void {
+    $first  = Order::factory()->create();
+    $second = Order::factory()->create();
+    Gate::define( 'ecommerce.order.view', fn ( $user, Order $order ): bool => $order->id === $first->id );
+    Sanctum::actingAs( ApiUser::make( 1 ), [ TokenAbilities::ADMIN ] );
+
+    $this->getJson( "/api/ecommerce/v1/orders/{$first->id}" )->assertOk();
+    $this->getJson( "/api/ecommerce/v1/orders/{$second->id}" )->assertForbidden();
 } );

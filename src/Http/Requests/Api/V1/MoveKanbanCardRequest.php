@@ -18,6 +18,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Models\KanbanColumn;
 use Illuminate\Validation\Rule;
 
 /**
@@ -36,7 +37,7 @@ class MoveKanbanCardRequest extends ApiFormRequest
     public function rules(): array
     {
         return [
-            'to_column_id' => [ 'required', 'integer', Rule::exists( 'kanban_columns', 'id' ) ],
+            'to_column_id' => [ 'required', 'integer', Rule::exists( KanbanColumn::class, 'id' ) ],
             'reason'       => [ 'nullable', 'string', 'max:255' ],
         ];
     }

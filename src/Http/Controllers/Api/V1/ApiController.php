@@ -108,7 +108,7 @@ abstract class ApiController extends Controller
      */
     protected function forbiddenUnless( Request $request, string $resource, string $action ): ?JsonResponse
     {
-        if ( app( EcommerceAuthorizer::class )->allows( $request->user(), $resource, $action, $request, $request ) ) {
+        if ( app( EcommerceAuthorizer::class )->allows( $request->user(), $resource, $action, EcommerceAuthorizer::routeSubject( $request ), $request ) ) {
             return null;
         }
 

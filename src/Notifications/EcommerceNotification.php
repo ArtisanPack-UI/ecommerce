@@ -90,8 +90,17 @@ class EcommerceNotification extends Notification implements ShouldBeEncrypted, S
             return false;
         }
 
-        return ! $notifiable instanceof Customer
-            || app( NotificationPreferenceService::class )->allows( $notifiable, $channel, $registry->get( $this->templateKey )->category() );
+        $preferences = app( NotificationPreferenceService::class );
+        $category    = $registry->get( $this->templateKey )->category();
+
+        if ( $notifiable instanceof Customer ) {
+            return $preferences->allows( $notifiable, $channel, $category );
+        }
+
+        // A guest's address may belong to someone who unsubscribed.
+        $email = self::mailAddress( $notifiable, $this );
+
+        return null === $email || $preferences->allowsEmail( $email, $channel, $category );
     }
 
     /**
@@ -103,11 +112,33 @@ class EcommerceNotification extends Notification implements ShouldBeEncrypted, S
      */
     public function toMail( mixed $notifiable ): NotificationTemplateMail
     {
-        $rendered = $this->render();
+        $unsubscribe = $this->unsubscribeUrl( $notifiable );
+        $rendered    = $this->render( $unsubscribe );
 
-        $mail = new NotificationTemplateMail( $this->templateKey, (string) $rendered['subject'], $rendered['body'] );
+        $mail = new NotificationTemplateMail( $this->templateKey, (string) $rendered['subject'], $rendered['body'], $this->locale ?? app()->getLocale(), $unsubscribe );
 
         return $mail->to( $notifiable->routeNotificationFor( 'mail', $this ) );
+    }
+
+    /**
+     * The signed unsubscribe link for `$notifiable`, when this template's
+     * category can be turned off and the recipient is one address.
+     *
+     * @since 1.0.0
+     *
+     * @param  mixed  $notifiable  Recipient.
+     *
+     * @return string|null
+     */
+    public function unsubscribeUrl( mixed $notifiable ): ?string
+    {
+        $email = self::mailAddress( $notifiable, $this );
+
+        return null === $email ? null : app( NotificationPreferenceService::class )->unsubscribeUrl(
+            $email,
+            $this->channel,
+            app( NotificationTemplateRegistry::class )->get( $this->templateKey )->category(),
+        );
     }
 
     /**
@@ -126,13 +157,47 @@ class EcommerceNotification extends Notification implements ShouldBeEncrypted, S
 
     /**
      * Renders the current copy for this notification's locale.
+     * `Store.preferences_url` is the recipient's unsubscribe link when
+     * there is one, else `notifications.preferences_url`.
      *
      * @since 1.0.0
      *
+     * @param  string|null  $preferencesUrl  The recipient's unsubscribe link.
+     *
      * @return array{subject: string|null, body: string}
      */
-    public function render(): array
+    public function render( ?string $preferencesUrl = null ): array
     {
-        return app( NotificationTemplateService::class )->render( $this->templateKey, $this->channel, $this->variables, $this->locale );
+        $variables                             = $this->variables;
+        $variables['Store']                    = (array) ( $variables['Store'] ?? [] );
+        $variables['Store']['preferences_url'] = $preferencesUrl ?? config( 'artisanpack.ecommerce.notifications.preferences_url' );
+
+        return app( NotificationTemplateService::class )->render( $this->templateKey, $this->channel, $variables, $this->locale );
+    }
+
+    /**
+     * The single mail address `$notifiable` routes to, or null (none, or a
+     * list such as the staff addresses).
+     *
+     * @since 1.0.0
+     *
+     * @param  mixed         $notifiable    Recipient.
+     * @param  Notification  $notification  Notification.
+     *
+     * @return string|null
+     */
+    protected static function mailAddress( mixed $notifiable, Notification $notification ): ?string
+    {
+        if ( ! is_object( $notifiable ) || ! method_exists( $notifiable, 'routeNotificationFor' ) ) {
+            return null;
+        }
+
+        $route = $notifiable->routeNotificationFor( 'mail', $notification );
+
+        if ( is_array( $route ) ) {
+            $route = 1 === count( $route ) ? ( is_string( array_key_first( $route ) ) ? array_key_first( $route ) : reset( $route ) ) : null;
+        }
+
+        return is_string( $route ) && '' !== $route ? $route : null;
     }
 }

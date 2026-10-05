@@ -37,6 +37,7 @@ use ArtisanPackUI\Ecommerce\Models\CustomerNotificationPreference;
 use ArtisanPackUI\Ecommerce\Models\DigitalDownload;
 use ArtisanPackUI\Ecommerce\Models\DigitalDownloadEvent;
 use ArtisanPackUI\Ecommerce\Models\IdempotencyRecord;
+use ArtisanPackUI\Ecommerce\Models\InboundWebhookDelivery;
 use ArtisanPackUI\Ecommerce\Models\LicenseActivation;
 use ArtisanPackUI\Ecommerce\Models\LicenseKey;
 use ArtisanPackUI\Ecommerce\Models\Order;
@@ -48,10 +49,13 @@ use ArtisanPackUI\Ecommerce\Models\ProductReview;
 use ArtisanPackUI\Ecommerce\Models\PromotionUsage;
 use ArtisanPackUI\Ecommerce\Models\Refund;
 use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
+use ArtisanPackUI\Ecommerce\Support\AfterCommit;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder as QueryBuilder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -196,23 +200,22 @@ class CustomerService
     {
         $normalized = $this->normalizeEmail( $email );
 
-        return DB::transaction( function () use ( $normalized, $attributes ): Customer {
-            $existing = Customer::query()
-                ->whereRaw( 'LOWER(email) = ?', [ $normalized ] )
-                ->lockForUpdate()
-                ->first();
+        // Emails are stored lowercased, so this uses the unique index.
+        $existing = Customer::query()->where( 'email', $normalized )->first();
 
-            if ( null !== $existing ) {
-                return $existing;
-            }
+        if ( null !== $existing ) {
+            return $existing;
+        }
 
-            $customer = new Customer( array_merge( $attributes, [ 'email' => $normalized ] ) );
-            $customer->save();
+        // Two first-time callers race on the unique index: one creates the
+        // row, the other gets it back.
+        $customer = Customer::query()->createOrFirst( [ 'email' => $normalized ], $attributes );
 
+        if ( $customer->wasRecentlyCreated ) {
             doAction( 'ap.ecommerce.customer.registered', $customer );
+        }
 
-            return $customer;
-        } );
+        return $customer;
     }
 
     /**
@@ -240,7 +243,16 @@ class CustomerService
             return null;
         }
 
-        $userId   = (int) $user->getAuthIdentifier();
+        $userId = (int) $user->getAuthIdentifier();
+
+        // A user has at most one customer row. One linked under an earlier
+        // email stays the user's customer.
+        $linked = Customer::query()->where( 'user_id', $userId )->first();
+
+        if ( null !== $linked ) {
+            return $linked;
+        }
+
         $customer = $this->findOrCreateForEmail( $email );
 
         return DB::transaction( function () use ( $customer, $userId, $user ): ?Customer {
@@ -257,6 +269,108 @@ class CustomerService
 
             return $locked;
         } );
+    }
+
+    /**
+     * Updates the profile fields a shopper manages themselves: `first_name`,
+     * `last_name`, `phone`, `locale` (the language notifications are sent
+     * in), and `accepts_marketing`. Turning marketing on
+     * records when consent was given (`accepts_marketing_at`); turning it
+     * off clears it. Other keys are ignored. Fires
+     * `ap.ecommerce.customer.updated` with the changed fields.
+     *
+     * @since 1.0.0
+     *
+     * @param  Customer              $customer  Customer.
+     * @param  array<string, mixed>  $profile   Profile fields.
+     *
+     * @return Customer
+     */
+    public function updateProfile( Customer $customer, array $profile ): Customer
+    {
+        $fields = array_intersect_key( $profile, array_flip( [ 'first_name', 'last_name', 'phone', 'locale', 'accepts_marketing' ] ) );
+
+        return DB::transaction( function () use ( $customer, $fields ): Customer {
+            $locked = Customer::query()->lockForUpdate()->findOrFail( $customer->id );
+
+            foreach ( [ 'first_name', 'last_name', 'phone', 'locale' ] as $field ) {
+                if ( array_key_exists( $field, $fields ) ) {
+                    $value            = null === $fields[ $field ] ? null : trim( (string) $fields[ $field ] );
+                    $locked->{$field} = '' === $value ? null : $value;
+                }
+            }
+
+            if ( array_key_exists( 'accepts_marketing', $fields ) ) {
+                $accepts = (bool) $fields['accepts_marketing'];
+
+                if ( $accepts !== (bool) $locked->accepts_marketing ) {
+                    $locked->accepts_marketing    = $accepts;
+                    $locked->accepts_marketing_at = $accepts ? Carbon::now() : null;
+                }
+            }
+
+            $changes = array_keys( $locked->getDirty() );
+            $locked->save();
+
+            if ( [] !== $changes ) {
+                AfterCommit::action( 'ap.ecommerce.customer.updated', $locked, $changes );
+            }
+
+            return $locked;
+        } );
+    }
+
+    /**
+     * The customer record for a signed-in user.
+     *
+     * Returns the customer linked to the user. With `$create`, a user that
+     * has none gets one:
+     *
+     * - a user whose email is verified ({@see MustVerifyEmail}) is linked
+     *   through {@see self::linkUser()}, which claims an existing guest
+     *   customer under that email;
+     * - otherwise a new customer is created for the user only when no
+     *   customer uses that email yet — an unverified address never claims
+     *   someone else's guest orders. Null when it is taken.
+     *
+     * @since 1.0.0
+     *
+     * @param  Authenticatable  $user    Signed-in user.
+     * @param  bool             $create  Create or link a customer when none is linked.
+     *
+     * @return Customer|null
+     */
+    public function customerForUser( Authenticatable $user, bool $create = false ): ?Customer
+    {
+        $customer = Customer::forUser( $user );
+
+        if ( null !== $customer || ! $create || ! is_numeric( $user->getAuthIdentifier() ) ) {
+            return $customer;
+        }
+
+        if ( $user instanceof MustVerifyEmail && $user->hasVerifiedEmail() ) {
+            return $this->linkUser( $user );
+        }
+
+        $email = $this->extractEmail( $user );
+
+        if ( null === $email ) {
+            return null;
+        }
+
+        $userId   = (int) $user->getAuthIdentifier();
+        $customer = Customer::query()->createOrFirst( [ 'email' => $this->normalizeEmail( $email ) ], [ 'user_id' => $userId ] );
+
+        if ( (int) $customer->user_id !== $userId ) {
+            return null;
+        }
+
+        if ( $customer->wasRecentlyCreated ) {
+            doAction( 'ap.ecommerce.customer.registered', $customer );
+            doAction( 'ap.ecommerce.customer.userLinked', $customer, $user );
+        }
+
+        return $customer;
     }
 
     /**
@@ -282,6 +396,8 @@ class CustomerService
      * - Outbound webhook deliveries that reference those orders or the
      *   customer have the personal values in their payload redacted and their
      *   stored receiver response dropped.
+     * - Inbound provider webhooks about those orders' payments, or carrying
+     *   the customer's email, lose their stored payload and parsed body.
      * - Stored idempotent responses from the customer's own admin routes
      *   (customer update, address and note writes) are deleted.
      * - Addresses, notification preferences, and claim attempts are deleted.
@@ -367,6 +483,7 @@ class CustomerService
         ];
 
         $this->scrubWebhookDeliveries( $orders, (int) $customer->id );
+        $this->scrubInboundWebhooks( $orders, $email );
         $this->forgetIdempotentResponses( (int) $customer->id );
 
         $customer->delete();
@@ -621,6 +738,48 @@ class CustomerService
     }
 
     /**
+     * Drops the stored body of inbound provider webhooks (raw Stripe events
+     * carry billing names, emails, and addresses) about the anonymized
+     * orders' payments — matched on `session_reference` — or containing the
+     * customer's email. The rows, hashes, and sizes stay for the audit
+     * trail.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<int, int>  $orderIds  Anonymized order ids.
+     * @param  string           $email     The customer's normalized email.
+     *
+     * @return void
+     */
+    protected function scrubInboundWebhooks( array $orderIds, string $email ): void
+    {
+        $references = [] === $orderIds ? [] : Order::query()
+            ->whereKey( $orderIds )
+            ->whereNotNull( 'payment_reference' )
+            ->pluck( 'payment_reference' )
+            ->map( static fn ( $reference ): string => (string) $reference )
+            ->all();
+
+        if ( [] === $references && '' === $email ) {
+            return;
+        }
+
+        $escaped = str_replace( [ '!', '%', '_' ], [ '!!', '!%', '!_' ], mb_strtolower( $email ) );
+
+        InboundWebhookDelivery::query()
+            ->where( function ( Builder $query ) use ( $references, $email, $escaped ): void {
+                if ( [] !== $references ) {
+                    $query->whereIn( 'session_reference', $references );
+                }
+
+                if ( '' !== $email ) {
+                    $query->orWhereRaw( "LOWER(payload) LIKE ? ESCAPE '!'", [ '%' . $escaped . '%' ] );
+                }
+            } )
+            ->update( [ 'payload' => '', 'payload_truncated' => true, 'parsed' => null ] );
+    }
+
+    /**
      * Deletes the stored idempotent responses of the customer's own admin
      * routes (customer update, address and note writes), which echo the
      * customer's personal data. They are identified by route name and by
@@ -713,7 +872,7 @@ class CustomerService
      */
     protected function normalizeEmail( string $email ): string
     {
-        return strtolower( trim( $email ) );
+        return mb_strtolower( trim( $email ) );
     }
 
     /**

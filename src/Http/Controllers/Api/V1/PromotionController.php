@@ -50,7 +50,7 @@ class PromotionController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'List promotions', resource: PromotionResource::class, collection: true )]
+    #[ApiOperation( summary: 'List promotions', resource: PromotionResource::class, collection: true, filters: [ 'source_type' => 'string', 'is_active' => 'boolean', 'key' => 'string' ], sorts: [ 'priority', 'created_at', 'name' ], includes: self::INCLUDES )]
     public function index( Request $request ): JsonResponse
     {
         return $this->listResponse(
@@ -71,7 +71,7 @@ class PromotionController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Create a promotion', resource: PromotionResource::class, status: 201 )]
+    #[ApiOperation( summary: 'Create a promotion', resource: PromotionResource::class, status: 201, includes: self::INCLUDES )]
     public function store( PromotionRequest $request ): JsonResponse
     {
         $promotion = DB::transaction( fn (): Promotion => $this->persist( new Promotion(), $request->validated() ) );
@@ -90,7 +90,7 @@ class PromotionController extends ApiController
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Update a promotion', resource: PromotionResource::class )]
+    #[ApiOperation( summary: 'Update a promotion', resource: PromotionResource::class, includes: self::INCLUDES )]
     public function update( PromotionRequest $request, Promotion $promotion ): JsonResponse
     {
         DB::transaction( fn (): Promotion => $this->persist( $promotion, $request->validated() ) );
