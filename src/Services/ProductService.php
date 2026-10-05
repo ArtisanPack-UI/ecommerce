@@ -299,7 +299,8 @@ class ProductService
 
     /**
      * Deletes a product with its variants, prices, stock rows, gallery,
-     * attributes, links, and children.
+     * attributes, links, and children. Refused while the product sits in an
+     * open cart; lines in expired carts are removed with it.
      *
      * Order lines keep their snapshot; digital files are detached by their
      * foreign key.
@@ -312,11 +313,14 @@ class ProductService
      */
     public function delete( Product $product ): void
     {
-        if ( CartItem::query()->where( 'product_id', $product->id )->exists() ) {
+        if ( CartItem::query()->where( 'product_id', $product->id )->whereHas( 'cart', static fn ( $cart ) => $cart->open() )->exists() ) {
             throw ProductWriteException::field( 'id', 'in-carts', __( 'This product is in shoppers\' carts. Archive it instead, or wait for those carts to expire.' ) );
         }
 
         DB::transaction( function () use ( $product ): void {
+            // Lines left in expired carts no longer hold anything up.
+            CartItem::query()->where( 'product_id', $product->id )->delete();
+
             $variantIds = $product->variants()->pluck( 'id' )->all();
 
             $this->deletePolymorphicRows( ProductVariant::class, $variantIds );

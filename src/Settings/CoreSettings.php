@@ -148,6 +148,7 @@ final class CoreSettings
                 'required_account' => __( 'Create an account during checkout' ),
                 'disabled'         => __( 'Sign in required' ),
             ], position: 20 ),
+            new SettingDefinition( 'cart.abandoned_after_minutes', 'checkout', 'integer', __( 'Abandoned after (minutes)' ), [ 'required', 'min:5', 'max:43200' ], __( 'How long a cart in checkout can sit untouched before it counts as abandoned.' ), position: 40 ),
             new SettingDefinition( 'checkout.account_creation', 'checkout', 'boolean', __( 'Offer account creation' ), [], __( 'Storefronts offer to create an account at checkout.' ), position: 30 ),
 
             // Tax.

@@ -20,9 +20,11 @@ namespace ArtisanPackUI\Ecommerce\Providers;
 use ArtisanPackUI\Ecommerce\Auth\CmsFrameworkPermissions;
 use ArtisanPackUI\Ecommerce\Auth\EcommerceAuthorizer;
 use ArtisanPackUI\Ecommerce\Console\Commands\AuditOrderStatusCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\FlagAbandonedCartsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\GenerateOpenApiCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\LintPciColumnsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\LintTranslationsCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\PruneCartsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\PruneIdempotencyRecordsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\ReconcilePaymentsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\RefreshFxRatesCommand;
@@ -385,6 +387,8 @@ class EcommerceServiceProvider extends ServiceProvider
                 GenerateOpenApiCommand::class,
                 LintPciColumnsCommand::class,
                 LintTranslationsCommand::class,
+                FlagAbandonedCartsCommand::class,
+                PruneCartsCommand::class,
                 PruneIdempotencyRecordsCommand::class,
                 ReconcilePaymentsCommand::class,
                 RefreshFxRatesCommand::class,
@@ -423,6 +427,14 @@ class EcommerceServiceProvider extends ServiceProvider
                     ->runInBackground();
                 $schedule->command( 'ecommerce:reconcile-payments' )
                     ->everyFifteenMinutes()
+                    ->withoutOverlapping()
+                    ->runInBackground();
+                $schedule->command( 'ecommerce:flag-abandoned-carts' )
+                    ->everyFiveMinutes()
+                    ->withoutOverlapping()
+                    ->runInBackground();
+                $schedule->command( 'ecommerce:prune-carts' )
+                    ->dailyAt( '03:30' )
                     ->withoutOverlapping()
                     ->runInBackground();
             } );

@@ -24,6 +24,7 @@ namespace ArtisanPackUI\Ecommerce\Models;
 
 use ArtisanPackUI\Ecommerce\Database\Factories\CartFactory;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -147,6 +148,21 @@ class Cart extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo( Customer::class );
+    }
+
+    /**
+     * Scope: carts that can still be shopped with (not converted, not expired).
+     *
+     * @since 1.0.0
+     *
+     * @param  Builder<Cart>  $query  Query.
+     *
+     * @return Builder<Cart>
+     */
+    public function scopeOpen( Builder $query ): Builder
+    {
+        return $query->whereNull( 'completed_order_id' )
+            ->where( static fn ( Builder $open ) => $open->whereNull( 'expires_at' )->orWhere( 'expires_at', '>', Carbon::now() ) );
     }
 
     /**

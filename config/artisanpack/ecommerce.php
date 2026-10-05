@@ -133,14 +133,22 @@ return [
     |               when they sign in (parent plan §7.1). A currency mismatch
     |               is left pending for the storefront to resolve.
     |
+    | `abandoned_after_minutes` — Minutes a cart in checkout (with an email)
+    |               may sit untouched before `ecommerce:flag-abandoned-carts`
+    |               flags it and fires CartAbandoned.
+    |
+    | Expired carts, and converted carts older than `ttl_days`, are deleted
+    | daily by `ecommerce:prune-carts`.
+    |
     */
 
     'cart' => [
-        'max_lines'       => (int) env( 'ECOMMERCE_CART_MAX_LINES', 100 ),
-        'ttl_days'        => (int) env( 'ECOMMERCE_CART_TTL_DAYS', 30 ),
-        'cookie'          => env( 'ECOMMERCE_CART_COOKIE', 'ecommerce_cart' ),
-        'cookie_lifetime' => (int) env( 'ECOMMERCE_CART_COOKIE_LIFETIME', 43_200 ),
-        'merge_on_login'  => (bool) env( 'ECOMMERCE_CART_MERGE_ON_LOGIN', true ),
+        'max_lines'               => (int) env( 'ECOMMERCE_CART_MAX_LINES', 100 ),
+        'ttl_days'                => (int) env( 'ECOMMERCE_CART_TTL_DAYS', 30 ),
+        'cookie'                  => env( 'ECOMMERCE_CART_COOKIE', 'ecommerce_cart' ),
+        'cookie_lifetime'         => (int) env( 'ECOMMERCE_CART_COOKIE_LIFETIME', 43_200 ),
+        'merge_on_login'          => (bool) env( 'ECOMMERCE_CART_MERGE_ON_LOGIN', true ),
+        'abandoned_after_minutes' => (int) env( 'ECOMMERCE_CART_ABANDONED_AFTER_MINUTES', 60 ),
     ],
 
     /*
@@ -617,6 +625,7 @@ return [
 
     'webhooks' => [
         'events' => [
+            ArtisanPackUI\Ecommerce\Events\CartAbandoned::class,
             ArtisanPackUI\Ecommerce\Events\OrderPlaced::class,
             ArtisanPackUI\Ecommerce\Events\CartCompleted::class,
             ArtisanPackUI\Ecommerce\Events\CouponRedeemed::class,
