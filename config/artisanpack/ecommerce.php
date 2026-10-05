@@ -978,6 +978,37 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Schedule
+    |--------------------------------------------------------------------------
+    |
+    | The engine schedules its maintenance commands on the host's scheduler
+    | (run `php artisan schedule:run` every minute). Every task runs on one
+    | server (needs a cache store that supports locks) and never overlaps
+    | itself.
+    |
+    | `enabled` — false schedules nothing; run the commands yourself.
+    | `tasks`   — Cron expression per command, merged over the shipped
+    |             defaults. Set a command to null to stop scheduling it.
+    |
+    */
+
+    'schedule' => [
+        'enabled' => (bool) env( 'ECOMMERCE_SCHEDULE_ENABLED', true ),
+        'tasks'   => [
+            'ecommerce:release-expired-reservations' => '* * * * *',
+            'ecommerce:retry-webhook-deliveries'     => '* * * * *',
+            'ecommerce:flag-abandoned-carts'         => '*/5 * * * *',
+            'ecommerce:reconcile-payments'           => '*/15 * * * *',
+            'ecommerce:prune-idempotency-records'    => '0 * * * *',
+            'ecommerce:audit-order-status'           => '15 2 * * *',
+            'ecommerce:prune-carts'                  => '30 3 * * *',
+            'ecommerce:prune-ledgers'                => '45 3 * * *',
+            'ecommerce:refresh-fx-rates'             => '30 5 * * *',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Retention
     |--------------------------------------------------------------------------
     |

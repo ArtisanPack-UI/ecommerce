@@ -200,6 +200,7 @@ use ArtisanPackUI\Ecommerce\Shipping\Methods\FreeShippingMethod;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\LocalPickupMethod;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\PriceBasedMethod;
 use ArtisanPackUI\Ecommerce\Shipping\Methods\WeightBasedMethod;
+use ArtisanPackUI\Ecommerce\Support\EngineSchedule;
 use ArtisanPackUI\Ecommerce\Support\MorphType;
 use ArtisanPackUI\Ecommerce\Support\RateLimitPolicyRegistrar;
 use ArtisanPackUI\Ecommerce\Support\RegionalJsonFallbackLoader;
@@ -415,44 +416,7 @@ class EcommerceServiceProvider extends ServiceProvider
             ] );
 
             $this->app->booted( function (): void {
-                /** @var Schedule $schedule */
-                $schedule = $this->app->make( Schedule::class );
-                $schedule->command( 'ecommerce:release-expired-reservations' )
-                    ->everyMinute()
-                    ->withoutOverlapping()
-                    ->runInBackground();
-                $schedule->command( 'ecommerce:audit-order-status' )
-                    ->dailyAt( '02:15' )
-                    ->withoutOverlapping()
-                    ->runInBackground();
-                $schedule->command( 'ecommerce:prune-idempotency-records' )
-                    ->hourly()
-                    ->withoutOverlapping()
-                    ->runInBackground();
-                $schedule->command( 'ecommerce:retry-webhook-deliveries' )
-                    ->everyMinute()
-                    ->withoutOverlapping()
-                    ->runInBackground();
-                $schedule->command( 'ecommerce:refresh-fx-rates' )
-                    ->dailyAt( '05:30' )
-                    ->withoutOverlapping()
-                    ->runInBackground();
-                $schedule->command( 'ecommerce:reconcile-payments' )
-                    ->everyFifteenMinutes()
-                    ->withoutOverlapping()
-                    ->runInBackground();
-                $schedule->command( 'ecommerce:flag-abandoned-carts' )
-                    ->everyFiveMinutes()
-                    ->withoutOverlapping()
-                    ->runInBackground();
-                $schedule->command( 'ecommerce:prune-carts' )
-                    ->dailyAt( '03:30' )
-                    ->withoutOverlapping()
-                    ->runInBackground();
-                $schedule->command( 'ecommerce:prune-ledgers' )
-                    ->dailyAt( '03:45' )
-                    ->withoutOverlapping()
-                    ->runInBackground();
+                EngineSchedule::register( $this->app->make( Schedule::class ) );
             } );
         }
     }
