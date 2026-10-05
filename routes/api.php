@@ -39,6 +39,7 @@ use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CustomerController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CustomerNoteController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\DigitalDownloadController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\DigitalFileController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\GuestOrderController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\InventoryController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanAssignmentController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\KanbanAutomationController;
@@ -119,6 +120,12 @@ Route::where( [ 'token' => '[A-Za-z0-9]{64}' ] )
         Route::get( 'downloads/{token}', [ DigitalDownloadController::class, 'show' ] )->name( 'downloads.show' );
         Route::get( 'downloads/{token}/stream', [ DigitalDownloadController::class, 'stream' ] )->name( 'downloads.stream' );
     } );
+
+// Guest order access (#175): email + order number, or a signed link.
+Route::middleware( [ 'ecommerce.rate-limit:ecommerce.lookup.attempt', 'ecommerce.cache:private' ] )->group( function (): void {
+    Route::get( 'orders/guest-lookup', [ GuestOrderController::class, 'lookup' ] )->name( 'orders.guest-lookup' );
+    Route::get( 'orders/view/{token}', [ GuestOrderController::class, 'view' ] )->where( 'token', '[0-9a-f-]+' )->name( 'orders.view' );
+} );
 
 Route::post( 'license/validate', [ LicenseKeyController::class, 'validateKey' ] )
     ->middleware( [ 'ecommerce.rate-limit:ecommerce.license.validate', 'ecommerce.idempotency' ] )

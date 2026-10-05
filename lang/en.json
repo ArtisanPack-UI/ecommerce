@@ -309,6 +309,7 @@
     "No composer.json found at :path.": "No composer.json found at :path.",
     "No customer record is linked to this account.": "No customer record is linked to this account.",
     "No migrations to roll back for \":package\".": "No migrations to roll back for \":package\".",
+    "No order matches that email and order number.": "No order matches that email and order number.",
     "No order matches that order number and postal code.": "No order matches that order number and postal code.",
     "No orphaned satellite tables or columns found.": "No orphaned satellite tables or columns found.",
     "No public key given. Pass --public-key or set ECOMMERCE_VERIFY_PUBLIC_KEY.": "No public key given. Pass --public-key or set ECOMMERCE_VERIFY_PUBLIC_KEY.",
@@ -581,6 +582,7 @@
     "This idempotency key was already used for a different request.": "This idempotency key was already used for a different request.",
     "This mutation needs an Idempotency-Key header.": "This mutation needs an Idempotency-Key header.",
     "This order can no longer be paid.": "This order can no longer be paid.",
+    "This order link is invalid or has expired.": "This order link is invalid or has expired.",
     "This order needs no payment. Place it directly.": "This order needs no payment. Place it directly.",
     "This product already has an attribute with that key.": "This product already has an attribute with that key.",
     "This product is in shoppers' carts. Archive it instead, or wait for those carts to expire.": "This product is in shoppers' carts. Archive it instead, or wait for those carts to expire.",
@@ -599,6 +601,7 @@
     "Too many attempts": "Too many attempts",
     "Too many attempts. Please try again in :seconds seconds.": "Too many attempts. Please try again in :seconds seconds.",
     "Too many claim attempts. Try again later.": "Too many claim attempts. Try again later.",
+    "Too many order lookups. Try again later.": "Too many order lookups. Try again later.",
     "Too many requests": "Too many requests",
     "Too many requests.": "Too many requests.",
     "Too many requests. Try again later.": "Too many requests. Try again later.",
@@ -677,5 +680,6 @@
     "refunds": "refunds",
     "shipments": "shipments",
     "unknown error": "unknown error",
-    "yes": "yes"
+    "yes": "yes",
+    "{% if Order.view_url %}<p><a href=\"{{ Order.view_url }}\">View your order</a></p>{% endif %}": "{% if Order.view_url %}<p><a href=\"{{ Order.view_url }}\">View your order</a></p>{% endif %}"
 }

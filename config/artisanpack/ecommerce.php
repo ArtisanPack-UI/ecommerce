@@ -188,6 +188,17 @@ return [
     |                    before `ecommerce:reconcile-payments` asks the
     |                    provider how it ended.
     |
+    | `order_view_url`  — Storefront page showing a guest their order, with a
+    |                    `{token}` placeholder (`https://shop.test/order/{token}`).
+    |                    Guest confirmation emails link to it. Unset: the
+    |                    REST `orders/view/{token}` endpoint.
+    |
+    | `order_view_ttl_days` — How long those links work.
+    |
+    | `guest_lookup`    — Failed email + order number lookups allowed per order
+    |                    number and per IP before both are locked out for
+    |                    `lockout_minutes`.
+    |
     */
 
     'checkout' => [
@@ -195,6 +206,13 @@ return [
         'guest_checkout'          => env( 'ECOMMERCE_GUEST_CHECKOUT', 'allowed' ),
         'account_creation'        => (bool) env( 'ECOMMERCE_CHECKOUT_ACCOUNT_CREATION', true ),
         'reconcile_after_minutes' => (int) env( 'ECOMMERCE_RECONCILE_AFTER_MINUTES', 15 ),
+        'order_view_url'          => env( 'ECOMMERCE_ORDER_VIEW_URL' ),
+        'order_view_ttl_days'     => (int) env( 'ECOMMERCE_ORDER_VIEW_TTL_DAYS', 90 ),
+        'guest_lookup'            => [
+            'max_failures_per_order' => (int) env( 'ECOMMERCE_GUEST_LOOKUP_MAX_FAILURES_PER_ORDER', 5 ),
+            'max_failures_per_ip'    => (int) env( 'ECOMMERCE_GUEST_LOOKUP_MAX_FAILURES_PER_IP', 20 ),
+            'lockout_minutes'        => (int) env( 'ECOMMERCE_GUEST_LOOKUP_LOCKOUT_MINUTES', 15 ),
+        ],
     ],
 
     /*
@@ -376,6 +394,10 @@ return [
         'webhook.inbound' => [
             'per_ip'       => (int) env( 'ECOMMERCE_RATE_WEBHOOK_INBOUND_PER_IP', 120 ),
             'per_provider' => (int) env( 'ECOMMERCE_RATE_WEBHOOK_INBOUND_PER_PROVIDER', 1_000 ),
+        ],
+
+        'lookup.attempt' => [
+            'per_ip' => (int) env( 'ECOMMERCE_RATE_LOOKUP_ATTEMPT_PER_IP', 30 ),
         ],
 
         'notifications.unsubscribe' => [

@@ -153,6 +153,7 @@ final class NotificationCatalog
             'Order.customer.name',
             'Order.customer.first_name',
             'Order.customer.email',
+            'Order.view_url',
             'Order.items.*.name',
             'Order.items.*.sku',
             'Order.items.*.quantity',
@@ -177,7 +178,8 @@ final class NotificationCatalog
                 static fn ( ?string $locale ): string => __( 'Your :store order :number', [ 'store' => '{{ Store.name }}', 'number' => '{{ Order.number }}' ], $locale ),
                 static fn ( ?string $locale ): string => __( '<p>Hi {{ Order.customer.first_name|default(Order.customer.name) }},</p><p>Thanks for your order! Here is your summary.</p>', [], $locale )
                     . '<table role="presentation">' . $orderTable . '</table>'
-                    . __( '<p>Subtotal: {{ Order.subtotal }}<br>Shipping: {{ Order.shipping }}<br>{{ Order.tax_label }}: {{ Order.tax }}<br>Total: <strong>{{ Order.total }}</strong></p><p>We will let you know when it ships.</p>', [], $locale ),
+                    . __( '<p>Subtotal: {{ Order.subtotal }}<br>Shipping: {{ Order.shipping }}<br>{{ Order.tax_label }}: {{ Order.tax }}<br>Total: <strong>{{ Order.total }}</strong></p><p>We will let you know when it ships.</p>', [], $locale )
+                    . __( '{% if Order.view_url %}<p><a href="{{ Order.view_url }}">View your order</a></p>{% endif %}', [], $locale ),
             ),
             new CatalogNotificationTemplate(
                 self::ORDER_PAID_ADMIN,
@@ -337,6 +339,7 @@ final class NotificationCatalog
                 'total'            => MoneyFormatter::format( 5036, 'USD' ),
                 'shipping_address' => 'Ada Lovelace, 12 Analytical Way, London, NW1 6XE, GB',
                 'customer'         => [ 'name' => 'Ada Lovelace', 'first_name' => 'Ada', 'email' => 'ada@example.com' ],
+                'view_url'         => 'https://shop.example.com/orders/view/sample-token',
                 'items'            => [
                     [ 'name' => 'Difference Engine Poster', 'sku' => 'POSTER-01', 'quantity' => 2, 'unit_price' => MoneyFormatter::format( 1200, 'USD' ), 'total' => MoneyFormatter::format( 2400, 'USD' ) ],
                     [ 'name' => 'Notes on the Engine (PDF)', 'sku' => 'EBOOK-01', 'quantity' => 1, 'unit_price' => MoneyFormatter::format( 1800, 'USD' ), 'total' => MoneyFormatter::format( 1800, 'USD' ) ],

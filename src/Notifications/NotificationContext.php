@@ -36,6 +36,7 @@ use ArtisanPackUI\Ecommerce\Models\ProductVariant;
 use ArtisanPackUI\Ecommerce\Models\Refund;
 use ArtisanPackUI\Ecommerce\Models\Shipment;
 use ArtisanPackUI\Ecommerce\Support\MoneyFormatter;
+use ArtisanPackUI\Ecommerce\Support\OrderViewToken;
 use ArtisanPackUI\Ecommerce\Support\TaxLabel;
 use DateTimeInterface;
 use Illuminate\Support\Facades\Route;
@@ -104,6 +105,8 @@ class NotificationContext
                 $address['country_code'] ?? null,
             ], static fn ( mixed $part ): bool => is_string( $part ) && '' !== $part ) ),
             'customer'         => $this->customer( $order->customer, $order->email, $address ),
+            // A signed link for guests, who can't sign in to see it (#175).
+            'view_url'         => null === $order->customer_id ? $this->viewUrl( $order ) : null,
             'items'            => $order->items->map( fn ( $item ): array => [
                 'name'       => (string) ( $item->product_snapshot['name'] ?? '' ),
                 'sku'        => $item->product_snapshot['sku'] ?? null,
@@ -374,6 +377,27 @@ class NotificationContext
     public function money( int $amount, string $currency ): string
     {
         return MoneyFormatter::format( $amount, $currency );
+    }
+
+    /**
+     * A signed link showing `$order`, or null when none can be built (no
+     * storefront page configured and the REST API off).
+     *
+     * @since 1.0.0
+     *
+     * @param  Order  $order  Order.
+     *
+     * @return string|null
+     */
+    protected function viewUrl( Order $order ): ?string
+    {
+        $template = config( 'artisanpack.ecommerce.checkout.order_view_url' );
+
+        if ( ( ! is_string( $template ) || ! str_contains( $template, '{token}' ) ) && ! Route::has( 'ecommerce.api.orders.view' ) ) {
+            return null;
+        }
+
+        return OrderViewToken::url( $order );
     }
 
     /**

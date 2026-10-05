@@ -30,6 +30,7 @@ namespace ArtisanPackUI\Ecommerce\GraphQL\Fields;
 use ArtisanPackUI\Ecommerce\Auth\TokenAbilities;
 use ArtisanPackUI\Ecommerce\Catalog\CatalogQuery;
 use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
+use ArtisanPackUI\Ecommerce\Exceptions\GuestLookupLockedException;
 use ArtisanPackUI\Ecommerce\GraphQL\GraphQLError;
 use ArtisanPackUI\Ecommerce\GraphQL\Support\Resolvers;
 use ArtisanPackUI\Ecommerce\Models\Cart;
@@ -46,8 +47,10 @@ use ArtisanPackUI\Ecommerce\Models\TaxRate;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
 use ArtisanPackUI\Ecommerce\Registries\SubStatusRegistry;
 use ArtisanPackUI\Ecommerce\Services\CheckoutService;
+use ArtisanPackUI\Ecommerce\Services\GuestOrderLookupService;
 use ArtisanPackUI\Ecommerce\Services\NotificationTemplateService;
 use ArtisanPackUI\Ecommerce\Services\StorefrontCartService;
+use ArtisanPackUI\Ecommerce\Support\OrderViewToken;
 use ArtisanPackUI\Ecommerce\ValueObjects\Address;
 use ArtisanPackUI\Ecommerce\ValueObjects\ShippingRate;
 use GraphQL\Type\Definition\ResolveInfo;
@@ -295,6 +298,37 @@ class Queries
                     $query    = Order::query()->where( 'customer_id', $customer?->id ?? 0 );
 
                     return $this->r->connection( $query, 'Order', $args, $info );
+                },
+            ],
+            // Guests (#175): null for no match, an error once locked out.
+            'guestOrderLookup' => [
+                'type'    => 'Order',
+                'args'    => [ 'email' => 'String!', 'order_number' => 'String!' ],
+                'resolve' => function ( $root, array $args, $context, ResolveInfo $info ): ?array {
+                    $this->r->throttle( 'ecommerce.lookup.attempt' );
+
+                    if ( mb_strlen( (string) $args['email'] ) > 255 || mb_strlen( (string) $args['order_number'] ) > 50 ) {
+                        return null;
+                    }
+
+                    try {
+                        $order = app( GuestOrderLookupService::class )->find( (string) $args['email'], (string) $args['order_number'], request()->ip() );
+                    } catch ( GuestLookupLockedException $e ) {
+                        throw GraphQLError::rateLimited( $e->retryAfter );
+                    }
+
+                    return null === $order ? null : $this->r->present( $order, 'Order', $this->r->selection( $info ) );
+                },
+            ],
+            'orderByViewToken' => [
+                'type'    => 'Order',
+                'args'    => [ 'token' => 'String!' ],
+                'resolve' => function ( $root, array $args, $context, ResolveInfo $info ): ?array {
+                    $this->r->throttle( 'ecommerce.lookup.attempt' );
+
+                    $order = OrderViewToken::verify( (string) $args['token'] );
+
+                    return null === $order ? null : $this->r->present( $order, 'Order', $this->r->selection( $info ) );
                 },
             ],
             'order' => [

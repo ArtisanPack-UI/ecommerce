@@ -309,6 +309,7 @@
     "No composer.json found at :path.": "Aucun composer.json trouvé dans :path.",
     "No customer record is linked to this account.": "Aucune fiche client n’est liée à ce compte.",
     "No migrations to roll back for \":package\".": "Aucune migration à annuler pour « :package ».",
+    "No order matches that email and order number.": "Aucune commande ne correspond à cet e-mail et à ce numéro de commande.",
     "No order matches that order number and postal code.": "Aucune commande ne correspond à ce numéro de commande et à ce code postal.",
     "No orphaned satellite tables or columns found.": "Aucune table ni colonne de satellite orpheline trouvée.",
     "No public key given. Pass --public-key or set ECOMMERCE_VERIFY_PUBLIC_KEY.": "Aucune clé publique fournie. Utilisez --public-key ou définissez ECOMMERCE_VERIFY_PUBLIC_KEY.",
@@ -581,6 +582,7 @@
     "This idempotency key was already used for a different request.": "Cette clé d'idempotence a déjà été utilisée pour une autre requête.",
     "This mutation needs an Idempotency-Key header.": "Cette mutation nécessite un en-tête Idempotency-Key.",
     "This order can no longer be paid.": "Cette commande ne peut plus être payée.",
+    "This order link is invalid or has expired.": "Ce lien de commande est invalide ou a expiré.",
     "This order needs no payment. Place it directly.": "Cette commande ne nécessite aucun paiement. Passez-la directement.",
     "This product already has an attribute with that key.": "Ce produit a déjà un attribut avec cette clé.",
     "This product is in shoppers' carts. Archive it instead, or wait for those carts to expire.": "Ce produit se trouve dans des paniers de clients. Archivez-le plutôt, ou attendez que ces paniers expirent.",
@@ -599,6 +601,7 @@
     "Too many attempts": "Trop de tentatives",
     "Too many attempts. Please try again in :seconds seconds.": "Trop de tentatives. Veuillez réessayer dans :seconds secondes.",
     "Too many claim attempts. Try again later.": "Trop de tentatives de réclamation. Réessayez plus tard.",
+    "Too many order lookups. Try again later.": "Trop de recherches de commande. Réessayez plus tard.",
     "Too many requests": "Trop de requêtes",
     "Too many requests.": "Trop de requêtes.",
     "Too many requests. Try again later.": "Trop de requêtes. Réessayez plus tard.",
@@ -677,5 +680,6 @@
     "refunds": "remboursements",
     "shipments": "expéditions",
     "unknown error": "erreur inconnue",
-    "yes": "oui"
+    "yes": "oui",
+    "{% if Order.view_url %}<p><a href=\"{{ Order.view_url }}\">View your order</a></p>{% endif %}": "{% if Order.view_url %}<p><a href=\"{{ Order.view_url }}\">Voir votre commande</a></p>{% endif %}"
 }

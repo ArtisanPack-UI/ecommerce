@@ -60,19 +60,21 @@ function openApiDocumentedLists(): array
     return $lists;
 }
 
+// A documented parameter is never refused as unknown (400) or invalid
+// (422), and never errors; lookups may find nothing (404) for samples.
 it( 'accepts every documented filter, sort, and include', function (): void {
     $lists = openApiDocumentedLists();
 
     expect( array_keys( $lists ) )->toContain( '/products', '/orders', '/customers' );
 
     foreach ( $lists as $path => $parameters ) {
-        $required = collect( $parameters )->filter( fn ( array $parameter ): bool => true === ( $parameter['required'] ?? false ) )->map( fn (): string => 'sample' )->all();
+        $required = collect( $parameters )->filter( fn ( array $parameter ): bool => true === ( $parameter['required'] ?? false ) )->map( fn ( array $parameter, string $name ): string => 'email' === $name ? 'sample@example.test' : 'sample' )->all();
         $url      = '/api/ecommerce/v1' . $path . '?' . http_build_query( $required ) . '&';
 
         foreach ( $parameters['filter']['schema']['properties'] ?? [] as $name => $schema ) {
             $query = $url . http_build_query( [ 'filter' => [ $name => openApiSampleFilterValue( $schema ) ] ] );
 
-            expect( $this->getJson( $query )->status() )->toBe( 200, $query );
+            expect( $this->getJson( $query )->status() )->toBeIn( [ 200, 404 ], $query );
         }
 
         if ( isset( $parameters['sort'] ) ) {
@@ -81,7 +83,7 @@ it( 'accepts every documented filter, sort, and include', function (): void {
             foreach ( explode( ', ', $match[1] ) as $sort ) {
                 $query = $url . 'sort=' . urlencode( $sort );
 
-                expect( $this->getJson( $query )->status() )->toBe( 200, $query );
+                expect( $this->getJson( $query )->status() )->toBeIn( [ 200, 404 ], $query );
             }
         }
 
@@ -90,7 +92,7 @@ it( 'accepts every documented filter, sort, and include', function (): void {
 
             $query = $url . 'include=' . urlencode( str_replace( ', ', ',', $match[1] ) );
 
-            expect( $this->getJson( $query )->status() )->toBe( 200, $query );
+            expect( $this->getJson( $query )->status() )->toBeIn( [ 200, 404 ], $query );
         }
     }
 } );

@@ -56,6 +56,7 @@ class RateLimitPolicyRegistrar
         'ecommerce.login',
         'ecommerce.review.submit',
         'ecommerce.claim.attempt',
+        'ecommerce.lookup.attempt',
         'ecommerce.license.validate',
         'ecommerce.webhook.inbound',
         'ecommerce.webhook.verified',
@@ -153,6 +154,16 @@ class RateLimitPolicyRegistrar
                     ->by( 'ecommerce:claim:customer:' . ( null !== $user ? (string) $user->getAuthIdentifier() : 'guest:' . sha1( (string) $request->ip() ) ) ),
                 Limit::perHour( self::limit( 'claim.attempt.per_ip', 30 ) )
                     ->by( 'ecommerce:claim:ip:' . sha1( (string) $request->ip() ) ),
+            ];
+        } );
+
+        // Guest order lookups and signed order links (#175): every request
+        // counts per IP; failed lookups also lock out per order number in
+        // GuestOrderLookupService.
+        RateLimiter::for( 'ecommerce.lookup.attempt', function ( Request $request ): array {
+            return [
+                Limit::perMinute( self::limit( 'lookup.attempt.per_ip', 30 ) )
+                    ->by( 'ecommerce:lookup-request:ip:' . sha1( (string) $request->ip() ) ),
             ];
         } );
 
