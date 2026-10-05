@@ -204,6 +204,7 @@ use ArtisanPackUI\Ecommerce\Support\MorphType;
 use ArtisanPackUI\Ecommerce\Support\RateLimitPolicyRegistrar;
 use ArtisanPackUI\Ecommerce\Support\RegionalJsonFallbackLoader;
 use ArtisanPackUI\Ecommerce\Support\RegistryHookRegistrar;
+use ArtisanPackUI\Ecommerce\Support\RequestContext;
 use ArtisanPackUI\Ecommerce\Tax\ManualTaxProvider;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Auth\Events\Login;
@@ -216,6 +217,8 @@ use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Contracts\Translation\Loader;
 use Illuminate\Database\Events\MigrationsEnded;
 use Illuminate\Http\Exceptions\HttpResponseException;
+use Illuminate\Queue\Events\JobFailed;
+use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Broadcast;
@@ -612,6 +615,11 @@ class EcommerceServiceProvider extends ServiceProvider
      * threads a correlation ID through log context + outbound webhook
      * headers + gateway idempotency keys. Engine plan §16.3.
      *
+     * Also clears {@see RequestContext} around every queued job and at the
+     * start of every Octane request (audit G4): the id is static, so in a
+     * long-lived worker one job's id would otherwise be reused by every
+     * job after it.
+     *
      * @since 1.0.0
      *
      * @return void
@@ -622,6 +630,14 @@ class EcommerceServiceProvider extends ServiceProvider
         $router = $this->app->make( Router::class );
 
         $router->aliasMiddleware( 'ecommerce.request-id', RequestIdMiddleware::class );
+
+        $reset  = static fn (): null => RequestContext::reset();
+        $events = $this->app->make( Dispatcher::class );
+
+        $events->listen( JobProcessing::class, $reset );
+        $events->listen( JobProcessed::class, $reset );
+        $events->listen( JobFailed::class, $reset );
+        $events->listen( 'Laravel\\Octane\\Events\\RequestReceived', $reset );
     }
 
     /**

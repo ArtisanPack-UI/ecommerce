@@ -13,6 +13,7 @@ use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
 use ArtisanPackUI\Ecommerce\Services\WebhookDeliveryService;
 use ArtisanPackUI\Ecommerce\Services\WebhookDispatcher;
+use ArtisanPackUI\Ecommerce\Support\RequestContext;
 use ArtisanPackUI\Ecommerce\Webhooks\WebhookSigner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
@@ -243,4 +244,20 @@ it( 'hides and encrypts the subscription secret', function (): void {
     expect( $subscription->toArray() )->not->toHaveKey( 'secret' )
         ->and( WebhookSubscription::query()->toBase()->value( 'secret' ) )->not->toBe( 'plain-text-secret-value' )
         ->and( $subscription->fresh()->secret )->toBe( 'plain-text-secret-value' );
+} );
+
+it( 'gives each queued delivery its own request id in a long-lived worker', function (): void {
+    Http::fake( [ 'hooks.example.test/*' => Http::response( 'ok', 200 ) ] );
+    RequestContext::reset();
+
+    WebhookSubscription::factory()->create();
+
+    app( WebhookDispatcher::class )->dispatch( 'order.refunded', [ 'x' => 1 ] );
+    app( WebhookDispatcher::class )->dispatch( 'order.refunded', [ 'x' => 2 ] );
+
+    $ids = Http::recorded()->map( fn ( array $pair ): string => $pair[0]->header( 'X-Request-Id' )[0] )->all();
+
+    expect( $ids )->toHaveCount( 2 )
+        ->and( $ids[0] )->not->toBe( $ids[1] )
+        ->and( RequestContext::requestId() )->toBeNull();
 } );
