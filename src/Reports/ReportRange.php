@@ -20,10 +20,10 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Reports;
 
+use ArtisanPackUI\Ecommerce\Exceptions\ReportRangeException;
 use ArtisanPackUI\Ecommerce\Support\StoreTimezone;
 use Carbon\CarbonImmutable;
 use DateTimeInterface;
-use InvalidArgumentException;
 use Throwable;
 
 /**
@@ -69,7 +69,7 @@ final class ReportRange
      * @param  string           $interval  One of {@see self::INTERVALS}.
      * @param  bool             $compare   Whether to also run the previous period.
      *
-     * @throws InvalidArgumentException When the range is reversed, too long, or the interval is unknown.
+     * @throws ReportRangeException When the range is reversed, too long, or the interval is unknown.
      */
     public function __construct(
         public readonly CarbonImmutable $from,
@@ -78,15 +78,15 @@ final class ReportRange
         public readonly bool $compare = false,
     ) {
         if ( ! in_array( $interval, self::INTERVALS, true ) ) {
-            throw new InvalidArgumentException( sprintf( 'Unknown report interval "%s".', $interval ) );
+            throw new ReportRangeException( 'interval', __( 'Unknown report interval ":interval".', [ 'interval' => $interval ] ) );
         }
 
         if ( $from->greaterThan( $to ) ) {
-            throw new InvalidArgumentException( 'The report range starts after it ends.' );
+            throw new ReportRangeException( 'to', __( 'The report range starts after it ends.' ) );
         }
 
         if ( $this->days() > self::MAX_DAYS ) {
-            throw new InvalidArgumentException( sprintf( 'Report ranges are limited to %d days.', self::MAX_DAYS ) );
+            throw new ReportRangeException( 'from', __( 'Report ranges are limited to :days days.', [ 'days' => self::MAX_DAYS ] ) );
         }
     }
 
@@ -102,15 +102,15 @@ final class ReportRange
      * @param  string       $interval  Bucket size.
      * @param  bool         $compare   Compare with the previous period.
      *
-     * @throws InvalidArgumentException When a date cannot be parsed or the range is invalid.
+     * @throws ReportRangeException When a date cannot be parsed or the range is invalid.
      *
      * @return self
      */
     public static function make( ?string $from = null, ?string $to = null, string $interval = 'day', bool $compare = false ): self
     {
         $timezone = self::timezone();
-        $end      = null === $to || '' === $to ? CarbonImmutable::now( $timezone ) : self::parseDay( $to, $timezone );
-        $start    = null === $from || '' === $from ? $end->subDays( self::DEFAULT_DAYS - 1 ) : self::parseDay( $from, $timezone );
+        $end      = null === $to || '' === $to ? CarbonImmutable::now( $timezone ) : self::parseDay( $to, $timezone, 'to' );
+        $start    = null === $from || '' === $from ? $end->subDays( self::DEFAULT_DAYS - 1 ) : self::parseDay( $from, $timezone, 'from' );
 
         return new self( $start->startOfDay(), $end->endOfDay(), $interval, $compare );
     }
@@ -308,12 +308,13 @@ final class ReportRange
      *
      * @param  string  $day       Day.
      * @param  string  $timezone  Time zone.
+     * @param  string  $field     Parameter it came from.
      *
-     * @throws InvalidArgumentException When the day is not a valid date.
+     * @throws ReportRangeException When the day is not a valid date.
      *
      * @return CarbonImmutable
      */
-    protected static function parseDay( string $day, string $timezone ): CarbonImmutable
+    protected static function parseDay( string $day, string $timezone, string $field ): CarbonImmutable
     {
         try {
             $parsed = CarbonImmutable::createFromFormat( '!Y-m-d', $day, $timezone );
@@ -322,7 +323,7 @@ final class ReportRange
         }
 
         if ( false === $parsed || null === $parsed || $parsed->format( 'Y-m-d' ) !== $day ) {
-            throw new InvalidArgumentException( sprintf( 'Report dates must be Y-m-d; got "%s".', $day ) );
+            throw new ReportRangeException( $field, __( 'Report dates must be in the format YYYY-MM-DD; got ":day".', [ 'day' => $day ] ) );
         }
 
         return $parsed;

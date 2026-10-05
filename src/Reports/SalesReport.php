@@ -101,7 +101,7 @@ class SalesReport extends Report
     public function run( ?ReportRange $range, array $options = [] ): array
     {
         if ( null === $range ) {
-            throw new InvalidArgumentException( 'The sales report needs a date range.' );
+            throw new InvalidArgumentException( __( 'The sales report needs a date range.' ) );
         }
 
         $amounts = $this->amounts();

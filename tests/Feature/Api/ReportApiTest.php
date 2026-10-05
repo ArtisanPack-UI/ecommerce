@@ -2,6 +2,8 @@
 
 declare( strict_types=1 );
 
+use ArtisanPackUI\Ecommerce\Exceptions\ReportRangeException;
+use ArtisanPackUI\Ecommerce\Reports\ReportRange;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Gate;
 
@@ -72,3 +74,28 @@ it( 'needs report.view', function (): void {
 
     $this->getJson( '/api/ecommerce/v1/admin/reports/sales' )->assertOk();
 } );
+
+it( 'explains a bad range in the caller\'s language and points at the field', function (): void {
+    $this->actingAs( ecommerceAdmin(), 'sanctum' )
+        ->getJson( '/api/ecommerce/v1/admin/reports/sales?from=2020-01-01&to=2026-01-01', [ 'Accept-Language' => 'de' ] )
+        ->assertStatus( 422 )
+        ->assertJsonPath( 'detail', __( 'Report ranges are limited to :days days.', [ 'days' => ReportRange::MAX_DAYS ], 'de' ) )
+        ->assertJsonPath( 'errors.0.field', 'from' );
+} );
+
+it( 'names the field behind each range error', function ( array $arguments, string $field ): void {
+    app()->setLocale( 'fr' );
+
+    expect( fn () => ReportRange::make( ...$arguments ) )->toThrow( function ( ReportRangeException $exception ) use ( $field ): void {
+        expect( $exception->field )->toBe( $field )
+            ->and( $exception->getMessage() )->not->toBe( '' )
+            ->and( $exception )->toBeInstanceOf( InvalidArgumentException::class );
+    } );
+
+    expect( fn () => ReportRange::make( '2026-02-01', '2026-01-01' ) )->toThrow( ReportRangeException::class, __( 'The report range starts after it ends.', [], 'fr' ) );
+} )->with( [
+    'reversed'      => [ [ '2026-02-01', '2026-01-01' ], 'to' ],
+    'bad from'      => [ [ '01/02/2026', null ], 'from' ],
+    'bad to'        => [ [ null, '2026-13-01' ], 'to' ],
+    'interval'      => [ [ '2026-01-01', '2026-01-02', 'hour' ], 'interval' ],
+] );

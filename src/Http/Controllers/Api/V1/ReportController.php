@@ -19,6 +19,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Exceptions\ReportRangeException;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ReportRequest;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
@@ -26,7 +27,6 @@ use ArtisanPackUI\Ecommerce\Registries\ReportRegistry;
 use ArtisanPackUI\Ecommerce\Reports\ReportRange;
 use ArtisanPackUI\Ecommerce\Reports\ReportRunner;
 use Illuminate\Http\JsonResponse;
-use InvalidArgumentException;
 
 /**
  * @package    ArtisanPack_UI
@@ -83,9 +83,9 @@ class ReportController extends ApiController
                 (string) ( $request->validated( 'interval' ) ?? 'day' ),
                 $request->boolean( 'compare' ),
             );
-        } catch ( InvalidArgumentException $exception ) {
+        } catch ( ReportRangeException $exception ) {
             return Problem::make( 422, 'validation-failed', __( 'Validation failed' ), $exception->getMessage(), $request, [
-                [ 'field' => 'from', 'code' => 'invalid', 'message' => $exception->getMessage() ],
+                [ 'field' => $exception->field, 'code' => 'invalid', 'message' => $exception->getMessage() ],
             ] );
         }
 

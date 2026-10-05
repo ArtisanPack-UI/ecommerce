@@ -530,7 +530,7 @@ it( 'refuses to restock an amount-only line', function (): void {
     $this->service->issue( $order, [
         [ 'order_item_id' => $item->id, 'quantity' => 0, 'amount' => 100, 'restock' => true ],
     ] );
-} )->throws( InvalidArgumentException::class, 'cannot restock' );
+} )->throws( InvalidArgumentException::class, 'can\'t restock' );
 
 it( 'restocks under a host that enforces a morph map', function (): void {
     // A host with `Relation::enforceMorphMap([...])` of its own.

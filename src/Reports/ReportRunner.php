@@ -60,7 +60,7 @@ class ReportRunner
     public function run( string $key, ?ReportRange $range = null, array $options = [] ): array
     {
         if ( ! $this->reports->has( $key ) ) {
-            throw new InvalidArgumentException( sprintf( 'Report "%s" is not registered.', $key ) );
+            throw new InvalidArgumentException( __( 'Report ":report" is not registered.', [ 'report' => $key ] ) );
         }
 
         $report = $this->reports->get( $key );

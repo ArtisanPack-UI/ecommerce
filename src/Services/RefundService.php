@@ -124,9 +124,7 @@ class RefundService
         ?string $reason = null,
     ): Refund {
         if ( [] === $lines ) {
-            throw new InvalidArgumentException(
-                'RefundService::issue() requires at least one refund line.',
-            );
+            throw new InvalidArgumentException( __( 'A refund needs at least one line.' ) );
         }
 
         [ $refund, $gateway, $amount, $normalized ] = $this->openRefund( $order, $lines, $actorUserId, $reason );
@@ -427,10 +425,7 @@ class RefundService
         foreach ( $lines as $line ) {
             foreach ( [ 'order_item_id', 'quantity', 'amount' ] as $required ) {
                 if ( ! array_key_exists( $required, $line ) ) {
-                    throw new InvalidArgumentException( sprintf(
-                        'RefundService refund line is missing required key "%s".',
-                        $required,
-                    ) );
+                    throw new InvalidArgumentException( __( 'Each refund line needs ":key".', [ 'key' => $required ] ) );
                 }
             }
 
@@ -439,21 +434,15 @@ class RefundService
             $amount      = (int) $line['amount'];
 
             if ( $quantity < 0 ) {
-                throw new InvalidArgumentException(
-                    'RefundService refund line quantity must be zero or a positive integer.',
-                );
+                throw new InvalidArgumentException( __( 'A refund line\'s quantity must be zero or more.' ) );
             }
 
             if ( 0 === $quantity && (bool) ( $line['restock'] ?? false ) ) {
-                throw new InvalidArgumentException(
-                    'RefundService amount-only refund lines (quantity 0) cannot restock.',
-                );
+                throw new InvalidArgumentException( __( 'A refund line with quantity 0 refunds an amount only and can\'t restock.' ) );
             }
 
             if ( $amount < 1 ) {
-                throw new InvalidArgumentException(
-                    'RefundService refund line amount must be a positive integer of minor units.',
-                );
+                throw new InvalidArgumentException( __( 'A refund line\'s amount must be a positive number of minor units.' ) );
             }
 
             if ( ! in_array( $orderItemId, $orderItemIds, true ) ) {
