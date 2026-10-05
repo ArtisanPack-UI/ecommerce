@@ -373,6 +373,29 @@ CREATE TABLE product_children (
 
 `ProductService::syncChildren()` enforces the rules the schema can't: only `grouped` / `bundled` types (or a satellite type registered with `has_children => true`) have children, a product can't contain itself, a (product, variant) pair appears once, and a product can't contain anything that already contains it (no cycles at any depth).
 
+### 3.10b `product_relations`
+
+Hand-picked links between products (engine issue #182): `upsell` (offered on the product page instead of the product), `cross_sell` (suggested in the cart), and `related` ("you may also like"), each list ordered by `position`.
+
+```sql
+CREATE TABLE product_relations (
+    id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    product_id          BIGINT UNSIGNED NOT NULL,
+    related_product_id  BIGINT UNSIGNED NOT NULL,
+    type                VARCHAR(20) NOT NULL,                              -- upsell | cross_sell | related
+    position            INT UNSIGNED NOT NULL DEFAULT 0,
+    created_at          TIMESTAMP NULL,
+    updated_at          TIMESTAMP NULL,
+    UNIQUE KEY product_relations_uk (product_id, type, related_product_id),
+    KEY product_relations_product_type_idx (product_id, type, position),
+    KEY product_relations_related_idx (related_product_id),
+    CONSTRAINT product_relations_product_fk FOREIGN KEY (product_id)         REFERENCES products(id) ON DELETE CASCADE,
+    CONSTRAINT product_relations_related_fk FOREIGN KEY (related_product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+```
+
+Written through `ProductService::syncProductRelations()` (and the `relations` key of product writes, and `POST admin/products/{product}/relations`), which refuses self-links and duplicates. `Catalog\RelatedProducts::for()` returns the visible hand-picked products and, for `related`, fills the list from products sharing a category, then a tag (filter `ap.ecommerce.product.related`); `crossSellsForCart()` returns the cart products' cross-sells that aren't already in the cart (filter `ap.ecommerce.cart.crossSells`). Read over REST at `GET products/{product}/related?type=` and `GET carts/{cart}/cross-sells`.
+
 ### 3.11 `inventory_items`
 
 ```sql

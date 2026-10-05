@@ -40,6 +40,7 @@
     "A note can be at most :max characters.": "Una nota puede tener como máximo :max caracteres.",
     "A note cannot be empty.": "Una nota no puede estar vacía.",
     "A payment.refunding filter changed the refund for order :order to :returned :returned_currency; refunds must equal the sum of their lines (:requested :currency).": "Un filtro payment.refunding cambió el reembolso del pedido :order a :returned :returned_currency; los reembolsos deben coincidir con la suma de sus líneas (:requested :currency).",
+    "A product can't be related to itself.": "Un producto no puede relacionarse consigo mismo.",
     "A product can't contain itself.": "Un producto no puede contenerse a sí mismo.",
     "A product needs a name.": "Un producto necesita un nombre.",
     "A promotion with this key already exists.": "Ya existe una promoción con esta clave.",
@@ -630,6 +631,7 @@
     "Unknown promotion action type.": "Tipo de acción de promoción desconocido.",
     "Unknown promotion condition type.": "Tipo de condición de promoción desconocido.",
     "Unknown promotion source.": "Origen de promoción desconocido.",
+    "Unknown relation type \":type\".": "Tipo de relación desconocido \":type\".",
     "Unknown report interval \":interval\".": "Intervalo de informe desconocido \":interval\".",
     "Unknown satellite \":package\". Run ecommerce:satellite:audit to list known satellites.": "Satélite desconocido \":package\". Ejecuta ecommerce:satellite:audit para ver los satélites conocidos.",
     "Unknown shipment status \":status\".": "Estado de envío desconocido \":status\".",
@@ -690,6 +692,7 @@
     "no": "no",
     "refunds": "reembolsos",
     "shipments": "envíos",
+    "type must be one of: :types.": "type debe ser uno de: :types.",
     "unknown error": "error desconocido",
     "yes": "sí",
     "{% if Order.view_url %}<p><a href=\"{{ Order.view_url }}\">View your order</a></p>{% endif %}": "{% if Order.view_url %}<p><a href=\"{{ Order.view_url }}\">Ver tu pedido</a></p>{% endif %}"

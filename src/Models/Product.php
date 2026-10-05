@@ -343,6 +343,19 @@ class Product extends Model
     }
 
     /**
+     * Hand-picked upsells, cross-sells, and related products (#182), in
+     * order.
+     *
+     * @since 1.0.0
+     *
+     * @return HasMany<ProductRelation, $this>
+     */
+    public function productRelations(): HasMany
+    {
+        return $this->hasMany( ProductRelation::class, 'product_id' )->orderBy( 'type' )->orderBy( 'position' )->orderBy( 'id' );
+    }
+
+    /**
      * Stock rows for the product itself (variant stock lives on
      * {@see ProductVariant::inventoryItems()}).
      *

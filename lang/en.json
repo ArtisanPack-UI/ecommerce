@@ -40,6 +40,7 @@
     "A note can be at most :max characters.": "A note can be at most :max characters.",
     "A note cannot be empty.": "A note cannot be empty.",
     "A payment.refunding filter changed the refund for order :order to :returned :returned_currency; refunds must equal the sum of their lines (:requested :currency).": "A payment.refunding filter changed the refund for order :order to :returned :returned_currency; refunds must equal the sum of their lines (:requested :currency).",
+    "A product can't be related to itself.": "A product can't be related to itself.",
     "A product can't contain itself.": "A product can't contain itself.",
     "A product needs a name.": "A product needs a name.",
     "A promotion with this key already exists.": "A promotion with this key already exists.",
@@ -630,6 +631,7 @@
     "Unknown promotion action type.": "Unknown promotion action type.",
     "Unknown promotion condition type.": "Unknown promotion condition type.",
     "Unknown promotion source.": "Unknown promotion source.",
+    "Unknown relation type \":type\".": "Unknown relation type \":type\".",
     "Unknown report interval \":interval\".": "Unknown report interval \":interval\".",
     "Unknown satellite \":package\". Run ecommerce:satellite:audit to list known satellites.": "Unknown satellite \":package\". Run ecommerce:satellite:audit to list known satellites.",
     "Unknown shipment status \":status\".": "Unknown shipment status \":status\".",
@@ -690,6 +692,7 @@
     "no": "no",
     "refunds": "refunds",
     "shipments": "shipments",
+    "type must be one of: :types.": "type must be one of: :types.",
     "unknown error": "unknown error",
     "yes": "yes",
     "{% if Order.view_url %}<p><a href=\"{{ Order.view_url }}\">View your order</a></p>{% endif %}": "{% if Order.view_url %}<p><a href=\"{{ Order.view_url }}\">View your order</a></p>{% endif %}"

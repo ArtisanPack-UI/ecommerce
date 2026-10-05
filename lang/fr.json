@@ -40,6 +40,7 @@
     "A note can be at most :max characters.": "Une note peut contenir au plus :max caractères.",
     "A note cannot be empty.": "Une note ne peut pas être vide.",
     "A payment.refunding filter changed the refund for order :order to :returned :returned_currency; refunds must equal the sum of their lines (:requested :currency).": "Un filtre payment.refunding a modifié le remboursement de la commande :order en :returned :returned_currency ; un remboursement doit être égal à la somme de ses lignes (:requested :currency).",
+    "A product can't be related to itself.": "Un produit ne peut pas être lié à lui-même.",
     "A product can't contain itself.": "Un produit ne peut pas se contenir lui-même.",
     "A product needs a name.": "Un produit doit avoir un nom.",
     "A promotion with this key already exists.": "Une promotion avec cette clé existe déjà.",
@@ -630,6 +631,7 @@
     "Unknown promotion action type.": "Type d’action de promotion inconnu.",
     "Unknown promotion condition type.": "Type de condition de promotion inconnu.",
     "Unknown promotion source.": "Source de promotion inconnue.",
+    "Unknown relation type \":type\".": "Type de relation inconnu « :type ».",
     "Unknown report interval \":interval\".": "Intervalle de rapport inconnu « :interval ».",
     "Unknown satellite \":package\". Run ecommerce:satellite:audit to list known satellites.": "Satellite inconnu « :package ». Exécutez ecommerce:satellite:audit pour lister les satellites connus.",
     "Unknown shipment status \":status\".": "Statut d’expédition inconnu « :status ».",
@@ -690,6 +692,7 @@
     "no": "non",
     "refunds": "remboursements",
     "shipments": "expéditions",
+    "type must be one of: :types.": "type doit être l'une des valeurs suivantes : :types.",
     "unknown error": "erreur inconnue",
     "yes": "oui",
     "{% if Order.view_url %}<p><a href=\"{{ Order.view_url }}\">View your order</a></p>{% endif %}": "{% if Order.view_url %}<p><a href=\"{{ Order.view_url }}\">Voir votre commande</a></p>{% endif %}"

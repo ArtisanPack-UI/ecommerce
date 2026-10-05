@@ -21,6 +21,7 @@ namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
 use ArtisanPackUI\Ecommerce\Catalog\CatalogQuery;
 use ArtisanPackUI\Ecommerce\Catalog\ProductViews;
+use ArtisanPackUI\Ecommerce\Catalog\RelatedProducts;
 use ArtisanPackUI\Ecommerce\Catalog\VariantResolver;
 use ArtisanPackUI\Ecommerce\Contracts\ProvidesStorefrontOptions;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\PurchaseOptionsRequest;
@@ -30,6 +31,7 @@ use ArtisanPackUI\Ecommerce\Http\Support\ListQuery;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
 use ArtisanPackUI\Ecommerce\Inventory\StockStatus;
 use ArtisanPackUI\Ecommerce\Models\Product;
+use ArtisanPackUI\Ecommerce\Models\ProductRelation;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use ArtisanPackUI\Ecommerce\OpenApi\CatalogParameters;
 use ArtisanPackUI\Ecommerce\Pricing\PriceDisplayResolver;
@@ -263,6 +265,42 @@ class ProductController extends ApiController
             'variants'   => app( VariantResolver::class )->matrix( $model, $currency ),
             'options'    => ! $model->typeIsMissing() && $model->productType() instanceof ProvidesStorefrontOptions ? $model->productType()->storefrontOptions( $model ) : [],
         ] ] );
+    }
+
+    /**
+     * Upsells, cross-sells, or related products for `$product` (#182):
+     * hand-picked first, `related` filled up from shared categories and
+     * tags. `type` defaults to `related`; `limit` to 8 (at most 50).
+     *
+     * @since 1.0.0
+     *
+     * @param  Request  $request  Request.
+     * @param  int      $product  Product id.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation(
+        summary: 'List related products, upsells, or cross-sells',
+        resource: ProductResource::class,
+        collection: true,
+        includes: self::OPENAPI_INCLUDES,
+        query: [
+            'type'  => [ 'schema' => [ 'type' => 'string', 'enum' => [ 'related', 'upsell', 'cross_sell' ] ] ],
+            'limit' => [ 'schema' => [ 'type' => 'integer', 'minimum' => 1, 'maximum' => 50 ] ],
+        ],
+    )]
+    public function related( Request $request, int $product ): JsonResponse
+    {
+        $model = $this->visible()->findOrFail( $product );
+        $type  = (string) $request->query( 'type', ProductRelation::RELATED );
+
+        if ( ! in_array( $type, ProductRelation::TYPES, true ) ) {
+            return Problem::make( 400, 'invalid-parameter', __( 'Invalid parameter' ), __( 'type must be one of: :types.', [ 'types' => implode( ', ', ProductRelation::TYPES ) ] ), $request );
+        }
+
+        $products = app( RelatedProducts::class )->for( $model, $type, (int) $request->query( 'limit', '8' ), ListQuery::includes( $request, $this->includes() ) );
+
+        return ProductResource::collection( $products )->response( $request );
     }
 
     /**

@@ -42,6 +42,7 @@ use ArtisanPackUI\Ecommerce\Models\ProductCategory;
 use ArtisanPackUI\Ecommerce\Models\ProductChild;
 use ArtisanPackUI\Ecommerce\Models\ProductImage;
 use ArtisanPackUI\Ecommerce\Models\ProductPrice;
+use ArtisanPackUI\Ecommerce\Models\ProductRelation;
 use ArtisanPackUI\Ecommerce\Models\ProductTag;
 use ArtisanPackUI\Ecommerce\Models\ProductVariant;
 use ArtisanPackUI\Ecommerce\Models\ProductVariantOptionValue;
@@ -205,7 +206,9 @@ class ProductService
      * `starts_at`, `ends_at`), `category_ids`, `tag_ids`, `images` (rows of
      * `media_id` or `image_url`, plus `alt_text`), `featured_image_url`,
      * `attributes` (see {@see self::syncAttributes()}), `children` (rows of
-     * `product_id`, `variant_id`, `quantity`), `inventory` (the
+     * `product_id`, `variant_id`, `quantity`), `relations` (`upsell`,
+     * `cross_sell`, `related` → product ids, see {@see self::syncProductRelations()}),
+     * `inventory` (the
      * {@see self::INVENTORY_SETTINGS} plus an opening `quantity_on_hand`).
      *
      * @since 1.0.0
@@ -989,6 +992,61 @@ class ProductService
     }
 
     /**
+     * Replaces `$product`'s hand-picked `$type` links (#182) with
+     * `$ids`, in that order. A product can't link to itself or to the same
+     * product twice.
+     *
+     * @since 1.0.0
+     *
+     * @param  Product          $product  Product.
+     * @param  string           $type     {@see ProductRelation::TYPES}.
+     * @param  array<int, int>  $ids      Related product ids, in order.
+     *
+     * @throws ProductWriteException When the type or an id is invalid.
+     *
+     * @return Collection<int, ProductRelation>
+     */
+    public function syncProductRelations( Product $product, string $type, array $ids ): Collection
+    {
+        $this->assertEditable( $product );
+
+        if ( ! in_array( $type, ProductRelation::TYPES, true ) ) {
+            throw ProductWriteException::field( 'relations', 'invalid-relation-type', __( 'Unknown relation type ":type".', [ 'type' => $type ] ) );
+        }
+
+        $clean = [];
+
+        foreach ( array_values( $ids ) as $index => $id ) {
+            $id    = (int) $id;
+            $field = "relations.{$type}.{$index}";
+
+            if ( $id === (int) $product->id ) {
+                throw ProductWriteException::field( $field, 'relation-self', __( 'A product can\'t be related to itself.' ) );
+            }
+
+            if ( in_array( $id, $clean, true ) ) {
+                throw ProductWriteException::field( $field, 'duplicate-relation', __( 'That product is already in the list.' ) );
+            }
+
+            if ( ! Product::query()->whereKey( $id )->exists() ) {
+                throw ProductWriteException::field( $field, 'relation-missing', __( 'That product no longer exists.' ) );
+            }
+
+            $clean[] = $id;
+        }
+
+        return DB::transaction( function () use ( $product, $type, $clean ): Collection {
+            ProductRelation::query()->where( 'product_id', $product->id )->where( 'type', $type )->delete();
+
+            foreach ( $clean as $position => $id ) {
+                ProductRelation::query()->create( [ 'product_id' => $product->id, 'related_product_id' => $id, 'type' => $type, 'position' => $position ] );
+            }
+
+            return ProductRelation::query()->where( 'product_id', $product->id )->where( 'type', $type )->orderBy( 'position' )->get();
+        } );
+    }
+
+    /**
      * Replaces the members of a grouped or bundled product.
      *
      * Each row is `product_id`, optional `variant_id` (a variant of that
@@ -1399,6 +1457,10 @@ class ProductService
 
         if ( array_key_exists( 'children', $data ) ) {
             $this->syncChildren( $product, (array) $data['children'] );
+        }
+
+        foreach ( (array) ( $data['relations'] ?? [] ) as $type => $ids ) {
+            $this->syncProductRelations( $product, (string) $type, (array) $ids );
         }
     }
 

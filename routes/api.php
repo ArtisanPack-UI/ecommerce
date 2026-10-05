@@ -98,6 +98,7 @@ Route::middleware( [ 'ecommerce.rate-limit:ecommerce.catalog.read', 'ecommerce.c
     Route::get( 'products', [ ProductController::class, 'index' ] )->name( 'products.index' );
     Route::get( 'products/{product}', [ ProductController::class, 'show' ] )->whereNumber( 'product' )->name( 'products.show' );
     Route::get( 'products/{product}/variants', [ ProductController::class, 'variants' ] )->whereNumber( 'product' )->name( 'products.variants' );
+    Route::get( 'products/{product}/related', [ ProductController::class, 'related' ] )->whereNumber( 'product' )->name( 'products.related' );
     Route::get( 'products/{product}/purchase-options', [ ProductController::class, 'purchaseOptions' ] )->whereNumber( 'product' )->name( 'products.purchase-options' );
     Route::get( 'products/{product}/reviews', [ ProductReviewController::class, 'index' ] )->whereNumber( 'product' )->name( 'products.reviews.index' );
     Route::get( 'search', [ SearchController::class, 'index' ] )->name( 'search' );
@@ -158,6 +159,9 @@ Route::where( [ 'cart' => '[A-Za-z0-9]{40}', 'item' => '[0-9]+' ] )->middleware(
     Route::get( 'carts/{cart}/shipping-rates', [ CartController::class, 'shippingRates' ] )
         ->middleware( 'ecommerce.rate-limit:ecommerce.cart.mutate' )
         ->name( 'carts.shipping-rates.index' );
+    Route::get( 'carts/{cart}/cross-sells', [ CartController::class, 'crossSells' ] )
+        ->middleware( 'ecommerce.rate-limit:ecommerce.cart.mutate' )
+        ->name( 'carts.cross-sells.index' );
 
     Route::middleware( [ 'ecommerce.rate-limit:ecommerce.cart.mutate', 'ecommerce.idempotency' ] )->group( function (): void {
         Route::post( 'carts/{cart}/items', [ CartController::class, 'addItem' ] )->name( 'carts.items.store' );
@@ -334,6 +338,7 @@ Route::prefix( 'admin' )->name( 'admin.' )->group( function () use ( $admin, $au
         Route::post( 'products/{product}/categories', [ ProductLinkController::class, 'categories' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.categories' );
         Route::post( 'products/{product}/tags', [ ProductLinkController::class, 'tags' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.tags' );
         Route::post( 'products/{product}/children', [ ProductLinkController::class, 'children' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.children' );
+        Route::post( 'products/{product}/relations', [ ProductLinkController::class, 'relations' ] )->middleware( $admin( 'product', 'update', true ) )->name( 'products.relations' );
         // Stock adjustments use the inventory ability (engine issue #148), so
         // warehouse staff can count stock without editing products.
         Route::post( 'products/{product}/stock', [ ProductLinkController::class, 'stock' ] )->middleware( $admin( 'inventory', 'adjust', true ) )->name( 'products.stock' );

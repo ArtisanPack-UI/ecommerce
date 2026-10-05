@@ -20,6 +20,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Catalog\RelatedProducts;
 use ArtisanPackUI\Ecommerce\Exceptions\CartCurrencyMismatchException;
 use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\AddCartItemRequest;
@@ -31,6 +32,8 @@ use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ShippingDestinationRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateCartItemRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateCartRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\CartResource;
+use ArtisanPackUI\Ecommerce\Http\Resources\ProductResource;
+use ArtisanPackUI\Ecommerce\Http\Support\ListQuery;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
@@ -278,6 +281,34 @@ class CartController extends ApiController
         $rates = $this->storefront->quoteShipping( $this->find( $cart ), self::destination( $request->validated() ) );
 
         return new JsonResponse( [ 'data' => $rates->map( static fn ( ShippingRate $rate ): array => $rate->toArray() )->values()->all() ] );
+    }
+
+    /**
+     * Cross-sells for the cart's products (#182).
+     *
+     * @since 1.0.0
+     *
+     * @param  Request  $request  Request.
+     * @param  string   $cart     Cart token.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation(
+        summary: 'List cross-sells for a cart',
+        resource: ProductResource::class,
+        collection: true,
+        includes: ProductController::OPENAPI_INCLUDES,
+        query: [ 'limit' => [ 'schema' => [ 'type' => 'integer', 'minimum' => 1, 'maximum' => 50 ] ] ],
+    )]
+    public function crossSells( Request $request, string $cart ): JsonResponse
+    {
+        $products = app( RelatedProducts::class )->crossSellsForCart(
+            $this->find( $cart ),
+            (int) $request->query( 'limit', '8' ),
+            ListQuery::includes( $request, app( ProductController::class )->publicIncludes() ),
+        );
+
+        return ProductResource::collection( $products )->response( $request );
     }
 
     /**

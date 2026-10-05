@@ -40,6 +40,7 @@
     "A note can be at most :max characters.": "Eine Notiz darf höchstens :max Zeichen lang sein.",
     "A note cannot be empty.": "Eine Notiz darf nicht leer sein.",
     "A payment.refunding filter changed the refund for order :order to :returned :returned_currency; refunds must equal the sum of their lines (:requested :currency).": "Ein payment.refunding-Filter hat die Erstattung für Bestellung :order auf :returned :returned_currency geändert; Erstattungen müssen der Summe ihrer Positionen entsprechen (:requested :currency).",
+    "A product can't be related to itself.": "Ein Produkt kann nicht mit sich selbst verknüpft werden.",
     "A product can't contain itself.": "Ein Produkt kann sich nicht selbst enthalten.",
     "A product needs a name.": "Ein Produkt braucht einen Namen.",
     "A promotion with this key already exists.": "Eine Aktion mit diesem Schlüssel existiert bereits.",
@@ -630,6 +631,7 @@
     "Unknown promotion action type.": "Unbekannter Aktionstyp für Aktionen.",
     "Unknown promotion condition type.": "Unbekannter Bedingungstyp für Aktionen.",
     "Unknown promotion source.": "Unbekannte Aktionsquelle.",
+    "Unknown relation type \":type\".": "Unbekannte Beziehungsart „:type“.",
     "Unknown report interval \":interval\".": "Unbekanntes Berichtsintervall „:interval“.",
     "Unknown satellite \":package\". Run ecommerce:satellite:audit to list known satellites.": "Unbekannter Satellit „:package“. Führen Sie ecommerce:satellite:audit aus, um bekannte Satelliten aufzulisten.",
     "Unknown shipment status \":status\".": "Unbekannter Sendungsstatus „:status“.",
@@ -690,6 +692,7 @@
     "no": "nein",
     "refunds": "Erstattungen",
     "shipments": "Sendungen",
+    "type must be one of: :types.": "type muss einer der folgenden Werte sein: :types.",
     "unknown error": "unbekannter Fehler",
     "yes": "ja",
     "{% if Order.view_url %}<p><a href=\"{{ Order.view_url }}\">View your order</a></p>{% endif %}": "{% if Order.view_url %}<p><a href=\"{{ Order.view_url }}\">Bestellung ansehen</a></p>{% endif %}"
