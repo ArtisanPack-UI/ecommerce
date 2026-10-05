@@ -122,6 +122,9 @@ Route::where( [ 'token' => '[A-Za-z0-9]{64}' ] )
 Route::post( 'license/validate', [ LicenseKeyController::class, 'validateKey' ] )
     ->middleware( [ 'ecommerce.rate-limit:ecommerce.license.validate', 'ecommerce.idempotency' ] )
     ->name( 'license.validate' );
+Route::post( 'license/deactivate', [ LicenseKeyController::class, 'deactivate' ] )
+    ->middleware( [ 'ecommerce.rate-limit:ecommerce.license.validate', 'ecommerce.idempotency' ] )
+    ->name( 'license.deactivate' );
 
 // Cart (token is the credential).
 Route::post( 'carts', [ CartController::class, 'store' ] )

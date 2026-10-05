@@ -80,6 +80,12 @@ final class ResponseSchemas
                 'revoked'    => [ 'type' => 'boolean' ],
                 'reason'     => [ 'type' => [ 'string', 'null' ] ],
             ], [ 'valid', 'revoked' ] ),
+            'licenseDeactivate'                 => self::object( [
+                'deactivated'       => [ 'type' => 'boolean' ],
+                'activations_count' => [ 'type' => [ 'integer', 'null' ] ],
+                'activations_limit' => [ 'type' => [ 'integer', 'null' ] ],
+                'reason'            => [ 'type' => [ 'string', 'null' ], 'enum' => [ 'not-found', 'not-activated', null ] ],
+            ], [ 'deactivated' ] ),
             'meNotificationPreferencesShow',
             'meNotificationPreferencesUpdate'   => self::listOf( self::object( [
                 'channel'    => self::string(),

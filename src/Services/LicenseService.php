@@ -32,6 +32,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Services;
 
 use ArtisanPackUI\Ecommerce\Events\LicenseActivated;
+use ArtisanPackUI\Ecommerce\Events\LicenseDeactivated;
 use ArtisanPackUI\Ecommerce\Events\LicenseIssued;
 use ArtisanPackUI\Ecommerce\Events\LicenseRevoked;
 use ArtisanPackUI\Ecommerce\Models\DigitalFile;
@@ -40,6 +41,7 @@ use ArtisanPackUI\Ecommerce\Models\LicenseKey;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
 use ArtisanPackUI\Ecommerce\Support\AfterCommit;
+use ArtisanPackUI\Ecommerce\Support\Timestamp;
 use DateTimeInterface;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -198,6 +200,76 @@ class LicenseService
     }
 
     /**
+     * Frees the activation slot `$fingerprint` holds on `$license` (the
+     * customer moved to a new machine). Works on revoked and expired keys
+     * too, so their records can be tidied. Fires
+     * `ap.ecommerce.license.deactivated` and {@see LicenseDeactivated}.
+     *
+     * @since 1.0.0
+     *
+     * @param  LicenseKey  $license      Key.
+     * @param  string      $fingerprint  Machine fingerprint.
+     *
+     * @return bool Whether the machine was activated (and now isn't).
+     */
+    public function deactivate( LicenseKey $license, string $fingerprint ): bool
+    {
+        $fingerprint = self::normalizeFingerprint( $fingerprint );
+
+        $removed = DB::transaction( function () use ( $license, $fingerprint ): bool {
+            /** @var LicenseKey $locked */
+            $locked  = LicenseKey::query()->lockForUpdate()->findOrFail( $license->id );
+            $deleted = $locked->activations()->where( 'machine_fingerprint', $fingerprint )->delete();
+
+            if ( 0 === $deleted ) {
+                return false;
+            }
+
+            $locked->forceFill( [ 'activations_count' => max( 0, (int) $locked->activations_count - $deleted ) ] )->save();
+
+            return true;
+        } );
+
+        if ( $removed ) {
+            $license->refresh();
+
+            AfterCommit::action( 'ap.ecommerce.license.deactivated', $license, $fingerprint );
+            Event::dispatch( new LicenseDeactivated( $license, $fingerprint ) );
+        }
+
+        return $removed;
+    }
+
+    /**
+     * Deactivates `$fingerprint` on the license with `$key`, for the public
+     * endpoint.
+     *
+     * @since 1.0.0
+     *
+     * @param  string  $key          Key as sent by the customer's app.
+     * @param  string  $fingerprint  Machine fingerprint.
+     *
+     * @return array{deactivated: bool, activations_count: int|null, activations_limit: int|null, reason: string|null}
+     */
+    public function deactivateByKey( string $key, string $fingerprint ): array
+    {
+        $license = $this->findByKey( $key );
+
+        if ( null === $license ) {
+            return [ 'deactivated' => false, 'activations_count' => null, 'activations_limit' => null, 'reason' => 'not-found' ];
+        }
+
+        $deactivated = $this->deactivate( $license, $fingerprint );
+
+        return [
+            'deactivated'       => $deactivated,
+            'activations_count' => (int) $license->activations_count,
+            'activations_limit' => null === $license->activations_limit ? null : (int) $license->activations_limit,
+            'reason'            => $deactivated ? null : 'not-activated',
+        ];
+    }
+
+    /**
      * Finds a license by its key, through `key_hash` (keys are stored
      * encrypted). A key hashed under a previous app key is found too and
      * re-hashed under the current one.
@@ -337,7 +409,7 @@ class LicenseService
 
         return (array) applyFilters( 'ap.ecommerce.license.validating', [
             'valid'      => $valid,
-            'expires_at' => $license?->expires_at?->toIso8601String(),
+            'expires_at' => Timestamp::format( $license?->expires_at ),
             'product'    => null === $item ? null : [
                 'id'   => $item->product_id,
                 'name' => $item->product_snapshot['name'] ?? null,

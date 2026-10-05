@@ -3,6 +3,7 @@
 declare( strict_types=1 );
 
 use ArtisanPackUI\Ecommerce\Events\LicenseActivated;
+use ArtisanPackUI\Ecommerce\Events\LicenseDeactivated;
 use ArtisanPackUI\Ecommerce\Events\LicenseIssued;
 use ArtisanPackUI\Ecommerce\Events\LicenseRevoked;
 use ArtisanPackUI\Ecommerce\Models\Customer;
@@ -228,4 +229,44 @@ it( 'filters admin listings by the plain key', function (): void {
         ->assertOk()
         ->assertJsonCount( 1, 'data' )
         ->assertJsonPath( 'data.0.key', $license->key );
+} );
+
+it( 'frees an activation slot when a machine is deactivated', function (): void {
+    Event::fake( [ LicenseDeactivated::class ] );
+    $key = LicenseKey::factory()->create( [ 'activations_limit' => 2 ] );
+
+    licenses()->validate( $key->key, 'machine-a' );
+    licenses()->validate( $key->key, 'machine-b' );
+
+    expect( licenses()->validate( $key->key, 'machine-c' )['reason'] )->toBe( 'activation-limit-reached' );
+
+    expect( licenses()->deactivate( $key->fresh(), ' MACHINE-A ' ) )->toBeTrue()
+        ->and( $key->fresh()->activations_count )->toBe( 1 )
+        ->and( licenses()->validate( $key->key, 'machine-c' )['valid'] )->toBeTrue()
+        ->and( licenses()->deactivate( $key->fresh(), 'machine-a' ) )->toBeFalse();
+
+    Event::assertDispatchedTimes( LicenseDeactivated::class, 1 );
+} );
+
+it( 'deactivates through the public endpoint', function (): void {
+    $key = LicenseKey::factory()->create( [ 'activations_limit' => 1 ] );
+    licenses()->validate( $key->key, 'machine-a' );
+
+    $this->postJson( LICENSE_API . '/license/deactivate', [ 'key' => $key->key, 'fingerprint' => 'machine-a' ], idem() )
+        ->assertOk()
+        ->assertJsonPath( 'data.deactivated', true )
+        ->assertJsonPath( 'data.activations_count', 0 )
+        ->assertJsonPath( 'data.activations_limit', 1 );
+
+    $this->postJson( LICENSE_API . '/license/deactivate', [ 'key' => $key->key, 'fingerprint' => 'machine-a' ], idem() )
+        ->assertOk()
+        ->assertJsonPath( 'data.deactivated', false )
+        ->assertJsonPath( 'data.reason', 'not-activated' );
+
+    $this->postJson( LICENSE_API . '/license/deactivate', [ 'key' => 'AAAAA-BBBBB-CCCCC-DDDDD-EEEEE', 'fingerprint' => 'machine-a' ], idem() )
+        ->assertOk()
+        ->assertJsonPath( 'data.reason', 'not-found' );
+
+    $this->postJson( LICENSE_API . '/license/deactivate', [ 'key' => $key->key ], idem() )->assertStatus( 422 );
+    $this->postJson( LICENSE_API . '/license/deactivate', [ 'key' => $key->key, 'fingerprint' => 'machine-a' ] )->assertStatus( 400 );
 } );

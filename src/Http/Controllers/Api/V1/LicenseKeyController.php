@@ -26,6 +26,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
 use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\DeactivateLicenseRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\RevokeLicenseRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ValidateLicenseRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\LicenseKeyResource;
@@ -70,6 +71,24 @@ class LicenseKeyController extends ApiController
 
         return new JsonResponse( [
             'data' => $this->licenses->validate( (string) $request->validated( 'key' ), (string) $request->validated( 'fingerprint' ), $request->ip() ),
+        ] );
+    }
+
+    /**
+     * Frees the activation slot a machine holds, so the key can be
+     * activated elsewhere.
+     *
+     * @since 1.0.0
+     *
+     * @param  DeactivateLicenseRequest  $request  Validated request.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Deactivate a license key on a machine', description: 'Returns { deactivated, activations_count, activations_limit, reason }; reason is not-found or not-activated when nothing was freed.' )]
+    public function deactivate( DeactivateLicenseRequest $request ): JsonResponse
+    {
+        return new JsonResponse( [
+            'data' => $this->licenses->deactivateByKey( (string) $request->validated( 'key' ), (string) $request->validated( 'fingerprint' ) ),
         ] );
     }
 
