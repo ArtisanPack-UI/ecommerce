@@ -32,6 +32,7 @@ namespace ArtisanPackUI\Ecommerce\Testing\Contracts;
 
 use ArtisanPackUI\Ecommerce\Contracts\KanbanCardWidget;
 use ArtisanPackUI\Ecommerce\Models\Order;
+use ArtisanPackUI\Ecommerce\Testing\Contracts\Concerns\AssertsConfigSchema;
 use ArtisanPackUI\Ecommerce\Testing\Contracts\Concerns\InteractsWithKanban;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Orchestra\Testbench\TestCase;
@@ -49,6 +50,7 @@ use Orchestra\Testbench\TestCase;
  */
 abstract class KanbanCardWidgetContractTest extends TestCase
 {
+    use AssertsConfigSchema;
     use InteractsWithKanban;
     use RefreshDatabase;
 
@@ -68,6 +70,18 @@ abstract class KanbanCardWidgetContractTest extends TestCase
     {
         $this->assertMatchesRegularExpression( $this->registryKeyPattern, $this->widget()->key() );
         $this->assertNotSame( '', trim( $this->widget()->label() ) );
+    }
+
+    /**
+     * A declared config schema is well-formed (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function test_declared_config_schema_is_well_formed(): void
+    {
+        $this->assertDeclaredConfigSchemaIsWellFormed( $this->widget() );
     }
 
     /**

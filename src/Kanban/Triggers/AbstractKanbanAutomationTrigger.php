@@ -20,6 +20,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Kanban\Triggers;
 
+use ArtisanPackUI\Ecommerce\Contracts\DescribesConfig;
 use ArtisanPackUI\Ecommerce\Contracts\KanbanAutomationTrigger;
 use ArtisanPackUI\Ecommerce\Models\KanbanAutomation;
 use ArtisanPackUI\Ecommerce\Models\Order;
@@ -31,8 +32,17 @@ use InvalidArgumentException;
  *
  * @since      1.0.0
  */
-abstract class AbstractKanbanAutomationTrigger implements KanbanAutomationTrigger
+abstract class AbstractKanbanAutomationTrigger implements KanbanAutomationTrigger, DescribesConfig
 {
+    /**
+     * Placeholders {@see self::interpolate()} expands in template fields.
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    public const TOKENS = [ '{order_number}', '{order_id}', '{email}', '{status}', '{board}', '{column}' ];
+
     /**
      * A required, non-empty string config value.
      *

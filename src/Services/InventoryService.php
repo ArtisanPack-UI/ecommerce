@@ -45,6 +45,19 @@ use Throwable;
 class InventoryService
 {
     /**
+     * Stock settings {@see self::updateSettings()} may change.
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    public const SETTINGS = [
+        'track_inventory',
+        'allow_backorder',
+        'low_stock_threshold',
+    ];
+
+    /**
      * @since 1.0.0
      *
      * @param  ConfigRepository  $config  Injected so callers can override the
@@ -100,6 +113,48 @@ class InventoryService
             doAction( 'ap.ecommerce.inventory.adjusted', $fresh, $delta, $newOnHand );
 
             $this->fireStockThresholdHooks( $fresh, $previousOnHand, $newOnHand );
+
+            return $fresh;
+        } );
+    }
+
+    /**
+     * Updates a row's stock settings (`track_inventory`, `allow_backorder`,
+     * `low_stock_threshold`). Quantities never change here — they go through
+     * {@see self::adjust()} so every change is audited. Keys other than the
+     * three settings are ignored; a `null` threshold turns low-stock alerts
+     * off.
+     *
+     * @since 1.0.0
+     *
+     * @param  InventoryItem         $item      Row to update.
+     * @param  array<string, mixed>  $settings  Settings to change.
+     *
+     * @throws InvalidArgumentException When the threshold is negative or not a whole number.
+     *
+     * @return InventoryItem The refreshed row.
+     */
+    public function updateSettings( InventoryItem $item, array $settings ): InventoryItem
+    {
+        $values = array_intersect_key( $settings, array_flip( self::SETTINGS ) );
+
+        if ( array_key_exists( 'low_stock_threshold', $values ) && null !== $values['low_stock_threshold'] ) {
+            if ( false === filter_var( $values['low_stock_threshold'], FILTER_VALIDATE_INT, [ 'options' => [ 'min_range' => 0 ] ] ) ) {
+                throw new InvalidArgumentException( __( 'The low-stock threshold can\'t be negative.' ) );
+            }
+
+            $values['low_stock_threshold'] = (int) $values['low_stock_threshold'];
+        }
+
+        foreach ( [ 'track_inventory', 'allow_backorder' ] as $flag ) {
+            if ( array_key_exists( $flag, $values ) ) {
+                $values[ $flag ] = (bool) $values[ $flag ];
+            }
+        }
+
+        return DB::transaction( function () use ( $item, $values ): InventoryItem {
+            $fresh = InventoryItem::query()->lockForUpdate()->findOrFail( $item->id );
+            $fresh->fill( $values )->save();
 
             return $fresh;
         } );

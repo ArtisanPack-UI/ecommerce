@@ -18,9 +18,11 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Promotions\Conditions;
 
+use ArtisanPackUI\Ecommerce\Contracts\DescribesConfig;
 use ArtisanPackUI\Ecommerce\Contracts\PromotionCondition;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Services\CurrencyConverter;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
 use Money\Currency;
 use Money\Money;
 
@@ -30,7 +32,7 @@ use Money\Money;
  *
  * @since      1.0.0
  */
-class MinSubtotalCondition implements PromotionCondition
+class MinSubtotalCondition implements PromotionCondition, DescribesConfig
 {
     /**
      * @since 1.0.0
@@ -66,6 +68,20 @@ class MinSubtotalCondition implements PromotionCondition
     public function label(): string
     {
         return __( 'Minimum subtotal' );
+    }
+
+    /**
+     * Fields this condition's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [
+            ConfigField::make( 'amount', 'money', __( 'Minimum subtotal' ), [ 'required' => true ] ),
+        ];
     }
 
     /**

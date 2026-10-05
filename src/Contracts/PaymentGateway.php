@@ -138,8 +138,18 @@ interface PaymentGateway
      * Voids an authorization that has not yet been captured.
      *
      * Called by the fraud path (engine spec §8.4) when an order is blocked
-     * before capture. Implementations MUST NOT throw for a session that has
-     * already been voided or is not voidable — treat the call as a no-op.
+     * before capture, and by `OrderCancellationService::cancel()` while it
+     * holds the order row lock. The cancel runs the void inside its
+     * database transaction, and a rollback can't undo it: if a later step
+     * of the cancel throws, the order stays `pending` with the
+     * authorization already voided, and the retry voids again.
+     *
+     * Implementations MUST therefore be idempotent: an authorization that
+     * is already voided, cancelled, or expired MUST be treated as a
+     * successful no-op, never an error, or that order could never be
+     * cancelled. Throw only when the provider refuses to void a live
+     * authorization. `PaymentGatewayContractTest` checks this, so
+     * `ecommerce:verify-satellite` does too (engine issue #154).
      *
      * @since 1.0.0
      *

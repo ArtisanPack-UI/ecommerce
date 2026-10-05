@@ -29,11 +29,15 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Promotions\Conditions;
 
+use ArtisanPackUI\Ecommerce\Contracts\DescribesConfig;
 use ArtisanPackUI\Ecommerce\Contracts\OrderAwarePromotionCondition;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
+use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
+use Closure;
 
 /**
  * @package    ArtisanPack_UI
@@ -41,7 +45,7 @@ use ArtisanPackUI\Ecommerce\Models\OrderItem;
  *
  * @since      1.0.0
  */
-class CartContainsProductTypeCondition implements OrderAwarePromotionCondition
+class CartContainsProductTypeCondition implements OrderAwarePromotionCondition, DescribesConfig
 {
     /**
      * @since 1.0.0
@@ -68,6 +72,32 @@ class CartContainsProductTypeCondition implements OrderAwarePromotionCondition
     public function label(): string
     {
         return __( 'Contains product type' );
+    }
+
+    /**
+     * Fields this condition's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        $registry = app( ProductTypeRegistry::class );
+        $types    = [];
+
+        foreach ( $registry->keys() as $key ) {
+            $label         = $registry->meta( $key )['label'] ?? $key;
+            $types[ $key ] = (string) ( $label instanceof Closure ? $label() : $label );
+        }
+
+        return [
+            ConfigField::make( 'types', 'multiselect', __( 'Product types' ), [ 'required' => true, 'options' => ConfigField::options( $types ) ] ),
+            ConfigField::make( 'match', 'select', __( 'Match' ), [
+                'options' => ConfigField::options( [ 'any' => __( 'Any of them' ), 'all' => __( 'All of them' ), 'only' => __( 'Only these' ) ] ),
+                'default' => 'any',
+            ] ),
+        ];
     }
 
     /**

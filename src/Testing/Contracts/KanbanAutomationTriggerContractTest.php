@@ -29,6 +29,7 @@ namespace ArtisanPackUI\Ecommerce\Testing\Contracts;
 use ArtisanPackUI\Ecommerce\Contracts\KanbanAutomationTrigger;
 use ArtisanPackUI\Ecommerce\Models\KanbanAutomation;
 use ArtisanPackUI\Ecommerce\Models\Order;
+use ArtisanPackUI\Ecommerce\Testing\Contracts\Concerns\AssertsConfigSchema;
 use ArtisanPackUI\Ecommerce\Testing\Contracts\Concerns\InteractsWithKanban;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use InvalidArgumentException;
@@ -49,6 +50,7 @@ use stdClass;
  */
 abstract class KanbanAutomationTriggerContractTest extends TestCase
 {
+    use AssertsConfigSchema;
     use InteractsWithKanban;
     use RefreshDatabase;
 
@@ -61,6 +63,18 @@ abstract class KanbanAutomationTriggerContractTest extends TestCase
     {
         $this->assertMatchesRegularExpression( $this->registryKeyPattern, $this->trigger()->key() );
         $this->assertNotSame( '', trim( $this->trigger()->label() ) );
+    }
+
+    /**
+     * A declared config schema is well-formed and accepts the suite's config fixture (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function test_declared_config_schema_is_well_formed(): void
+    {
+        $this->assertDeclaredConfigSchemaIsWellFormed( $this->trigger(), $this->validConfig() );
     }
 
     /**

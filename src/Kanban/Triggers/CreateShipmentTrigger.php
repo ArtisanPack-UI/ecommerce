@@ -27,6 +27,7 @@ namespace ArtisanPackUI\Ecommerce\Kanban\Triggers;
 use ArtisanPackUI\Ecommerce\Models\KanbanAutomation;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Services\ShipmentService;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
 use InvalidArgumentException;
 
 /**
@@ -71,6 +72,22 @@ class CreateShipmentTrigger extends AbstractKanbanAutomationTrigger
     public function label(): string
     {
         return __( 'Create a shipment' );
+    }
+
+    /**
+     * Fields this trigger's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [
+            ConfigField::make( 'method_key', 'text', __( 'Shipping method' ), [ 'rules' => [ 'max:120' ], 'help' => __( 'Defaults to the order\'s shipping method.' ) ] ),
+            ConfigField::make( 'carrier', 'text', __( 'Carrier' ), [ 'rules' => [ 'max:120' ] ] ),
+            ConfigField::make( 'service', 'text', __( 'Service' ), [ 'rules' => [ 'max:120' ] ] ),
+        ];
     }
 
     /**

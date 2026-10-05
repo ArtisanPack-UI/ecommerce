@@ -41,7 +41,7 @@ class PromotionRequest extends ApiFormRequest
     {
         $promotion = $this->route( 'promotion' );
 
-        return $this->sometimes( [
+        $rules = $this->sometimes( [
             'key'                      => [ 'string', 'max:120', 'regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/', Rule::unique( 'promotions', 'key' )->ignore( $promotion ) ],
             'name'                     => [ 'string', 'max:255' ],
             'description'              => [ 'nullable', 'string' ],
@@ -60,6 +60,16 @@ class PromotionRequest extends ApiFormRequest
             'actions.*.type'           => [ 'required', Rule::in( app( PromotionActionRegistry::class )->keys() ) ],
             'actions.*.config'         => [ 'present', 'array' ],
         ], [ 'key', 'name', 'source_type' ] );
+
+        foreach ( [ 'conditions' => PromotionConditionRegistry::class, 'actions' => PromotionActionRegistry::class ] as $relation => $registry ) {
+            foreach ( (array) $this->input( $relation, [] ) as $index => $row ) {
+                if ( is_array( $row ) ) {
+                    $rules += $this->configRules( app( $registry ), $row['type'] ?? null, "{$relation}.{$index}.config." );
+                }
+            }
+        }
+
+        return $rules;
     }
 
     /**

@@ -25,9 +25,11 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Promotions\Conditions;
 
+use ArtisanPackUI\Ecommerce\Contracts\DescribesConfig;
 use ArtisanPackUI\Ecommerce\Contracts\PromotionCondition;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
 
 /**
  * @package    ArtisanPack_UI
@@ -35,7 +37,7 @@ use ArtisanPackUI\Ecommerce\Models\CartItem;
  *
  * @since      1.0.0
  */
-class CartContainsProductCondition implements PromotionCondition
+class CartContainsProductCondition implements PromotionCondition, DescribesConfig
 {
     /**
      * @since 1.0.0
@@ -62,6 +64,23 @@ class CartContainsProductCondition implements PromotionCondition
     public function label(): string
     {
         return __( 'Cart contains product' );
+    }
+
+    /**
+     * Fields this condition's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [
+            ConfigField::make( 'product_ids', 'product', __( 'Products' ), [ 'multiple' => true ] ),
+            ConfigField::make( 'variant_ids', 'variant', __( 'Variants' ), [ 'multiple' => true ] ),
+            ConfigField::make( 'match', 'select', __( 'Match' ), [ 'options' => ConfigField::options( [ 'any' => __( 'Any of them' ), 'all' => __( 'All of them' ) ] ), 'default' => 'any' ] ),
+            ConfigField::make( 'min_quantity', 'number', __( 'Minimum quantity' ), [ 'rules' => [ 'integer', 'min:1' ], 'default' => 1 ] ),
+        ];
     }
 
     /**

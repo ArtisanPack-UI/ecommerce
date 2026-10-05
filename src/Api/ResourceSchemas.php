@@ -639,6 +639,7 @@ final class ResourceSchemas
                 'label'          => 'String!',
                 'default_config' => 'JSON',
                 'provided_by'    => 'String!',
+                'config_schema'  => 'JSON',
             ] ),
 
             'KanbanCard' => self::schema( Resources\KanbanCardResource::class, Models\OrderBoardAssignment::class, "An order's card on a kanban board, with rendered widget payloads.", [

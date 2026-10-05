@@ -3,7 +3,10 @@
 /**
  * InventoryController.
  *
- * `GET admin/inventory` (engine spec §9.6). Admin-gated.
+ * `admin/inventory` (engine spec §9.6): list stock rows, change a row's
+ * stock settings, and adjust its on-hand quantity through
+ * {@see InventoryService} (engine issue #140). Admin-gated; writes need the
+ * `inventory.adjust` ability and an Idempotency-Key.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -17,9 +20,12 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\AdjustInventoryRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\UpdateInventoryItemRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\InventoryItemResource;
 use ArtisanPackUI\Ecommerce\Models\InventoryItem;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
+use ArtisanPackUI\Ecommerce\Services\InventoryService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -32,6 +38,15 @@ use Illuminate\Http\Request;
  */
 class InventoryController extends ApiController
 {
+    /**
+     * @since 1.0.0
+     *
+     * @param  InventoryService  $inventory  Stock writes.
+     */
+    public function __construct( private readonly InventoryService $inventory )
+    {
+    }
+
     /**
      * @since 1.0.0
      *
@@ -56,5 +71,40 @@ class InventoryController extends ApiController
             [ 'quantity_on_hand' => 'quantity_on_hand' ],
             [ 'reservations' => 'reservations' ],
         );
+    }
+
+    /**
+     * Changes the row's stock settings. Quantities are not writable here.
+     *
+     * @since 1.0.0
+     *
+     * @param  UpdateInventoryItemRequest  $request  Validated request.
+     * @param  InventoryItem               $item     Stock row.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Update an inventory item\'s stock settings', resource: InventoryItemResource::class )]
+    public function update( UpdateInventoryItemRequest $request, InventoryItem $item ): JsonResponse
+    {
+        return $this->resourceResponse( $this->inventory->updateSettings( $item, $request->validated() ), $request, InventoryItemResource::class );
+    }
+
+    /**
+     * Adds a signed delta to the row's on-hand quantity, with a reason for
+     * the audit log.
+     *
+     * @since 1.0.0
+     *
+     * @param  AdjustInventoryRequest  $request  Validated request.
+     * @param  InventoryItem           $item     Stock row.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Adjust an inventory item\'s on-hand quantity', resource: InventoryItemResource::class )]
+    public function adjust( AdjustInventoryRequest $request, InventoryItem $item ): JsonResponse
+    {
+        $adjusted = $this->inventory->adjust( $item, (int) $request->validated( 'delta' ), trim( (string) $request->validated( 'reason' ) ) );
+
+        return $this->resourceResponse( $adjusted, $request, InventoryItemResource::class );
     }
 }

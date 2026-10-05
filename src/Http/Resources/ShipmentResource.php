@@ -18,6 +18,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Resources;
 
+use ArtisanPackUI\Ecommerce\Services\ShipmentService;
 use Illuminate\Http\Request;
 
 /**
@@ -77,7 +78,8 @@ class ShipmentResource extends EcommerceResource
 
     /**
      * Shipment meta with the local-pickup code hash removed — the hash is
-     * a verification secret and never leaves the server.
+     * a verification secret and never leaves the server — and without the
+     * key of an in-progress label purchase claim.
      *
      * @since 1.0.0
      *
@@ -88,6 +90,8 @@ class ShipmentResource extends EcommerceResource
         $meta = (array) ( $this->resource->meta ?? [] );
 
         unset( $meta['pickup']['code_hash'] );
+        // The label-purchase claim key doubles as the carrier idempotency key.
+        unset( $meta[ ShipmentService::LABEL_CLAIM_META ]['key'] );
 
         return $meta;
     }

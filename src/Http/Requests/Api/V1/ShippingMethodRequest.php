@@ -40,7 +40,7 @@ class ShippingMethodRequest extends ApiFormRequest
      */
     public function rules(): array
     {
-        return $this->sometimes( [
+        $rules = $this->sometimes( [
             'key'           => [ 'string', 'max:120', function ( string $attribute, mixed $value, Closure $fail ): void {
                 if ( ! is_string( $value ) || ! $this->isKnownKey( $value ) ) {
                     $fail( __( 'Unknown shipping method key.' ) );
@@ -52,6 +52,33 @@ class ShippingMethodRequest extends ApiFormRequest
             'is_active'     => [ 'boolean' ],
             'position'      => [ 'integer', 'min:0' ],
         ], [ 'key', 'label' ] );
+
+        $method = $this->route( 'method' );
+        $key    = $this->input( 'key', $method instanceof ShippingMethod ? $method->key : null );
+
+        if ( ! $this->isUpdate() || $this->has( 'config' ) ) {
+            $rules += $this->configRules( app( ShippingMethodTypeRegistry::class ), $key, 'config.' );
+        }
+
+        return $rules;
+    }
+
+    /**
+     * A key change without a new `config` re-checks the stored config against
+     * the new method type's schema (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function prepareForValidation(): void
+    {
+        $current = $this->route( 'method' );
+
+        if ( $current instanceof ShippingMethod && $this->isUpdate() && $this->has( 'key' ) && ! $this->has( 'config' )
+            && $this->input( 'key' ) !== $current->key ) {
+            $this->merge( [ 'config' => (array) ( $current->config ?? [] ) ] );
+        }
     }
 
     /**

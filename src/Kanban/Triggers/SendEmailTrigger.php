@@ -28,6 +28,7 @@ namespace ArtisanPackUI\Ecommerce\Kanban\Triggers;
 use ArtisanPackUI\Ecommerce\Mail\KanbanAutomationMail;
 use ArtisanPackUI\Ecommerce\Models\KanbanAutomation;
 use ArtisanPackUI\Ecommerce\Models\Order;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
 use Illuminate\Support\Facades\Mail;
 use InvalidArgumentException;
 
@@ -64,6 +65,22 @@ class SendEmailTrigger extends AbstractKanbanAutomationTrigger
     public function label(): string
     {
         return __( 'Send an email' );
+    }
+
+    /**
+     * Fields this trigger's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [
+            ConfigField::make( 'to', 'list', __( 'Recipients' ), [ 'required' => true, 'help' => __( 'Email addresses, or "customer" for the order\'s email.' ) ] ),
+            ConfigField::make( 'subject', 'template', __( 'Subject' ), [ 'required' => true, 'rules' => [ 'max:255' ], 'tokens' => self::TOKENS ] ),
+            ConfigField::make( 'body', 'template', __( 'Body' ), [ 'tokens' => self::TOKENS ] ),
+        ];
     }
 
     /**

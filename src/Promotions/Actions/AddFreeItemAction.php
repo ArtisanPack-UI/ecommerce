@@ -21,6 +21,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Promotions\Actions;
 
 use ArtisanPackUI\Ecommerce\Models\Cart;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
 use ArtisanPackUI\Ecommerce\Support\DiscountLedger;
 
 /**
@@ -56,6 +57,22 @@ class AddFreeItemAction extends AbstractPromotionAction
     public function label(): string
     {
         return __( 'Add free item' );
+    }
+
+    /**
+     * Fields this action's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [
+            ConfigField::make( 'product_id', 'product', __( 'Product' ), [ 'required' => true ] ),
+            ConfigField::make( 'variant_id', 'variant', __( 'Variant' ) ),
+            ConfigField::make( 'quantity', 'number', __( 'Quantity' ), [ 'rules' => [ 'integer', 'min:1' ], 'default' => 1 ] ),
+        ];
     }
 
     /**

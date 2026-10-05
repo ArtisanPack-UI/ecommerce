@@ -19,6 +19,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Shipping\Methods;
 
+use ArtisanPackUI\Ecommerce\Contracts\DescribesConfig;
 use ArtisanPackUI\Ecommerce\Contracts\ShippingMethodType;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
@@ -34,7 +35,7 @@ use Money\Money;
  *
  * @since      1.0.0
  */
-abstract class AbstractShippingMethod implements ShippingMethodType
+abstract class AbstractShippingMethod implements ShippingMethodType, DescribesConfig
 {
     /**
      * Grams per supported weight unit.

@@ -20,6 +20,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Services;
 
+use ArtisanPackUI\Ecommerce\Contracts\ShippingLabelProvider;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
 use ArtisanPackUI\Ecommerce\Models\Shipment;
@@ -31,8 +32,11 @@ use ArtisanPackUI\Ecommerce\ValueObjects\ShippingLabel;
 use ArtisanPackUI\Ecommerce\ValueObjects\TrackingStatus;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 use RuntimeException;
+use Throwable;
 
 /**
  * @package    ArtisanPack_UI
@@ -42,6 +46,14 @@ use RuntimeException;
  */
 class ShipmentService
 {
+    /**
+     * `meta` key holding an in-progress label purchase claim.
+     *
+     * @since 1.0.0
+     *
+     * @var string
+     */
+    public const LABEL_CLAIM_META = 'label_purchase';
 
     /**
      * System statuses an order can no longer be shipped from.
@@ -222,32 +234,61 @@ class ShipmentService
      * Purchases a label for `$shipment` through the provider registered
      * under `$providerKey` and copies its tracking details onto the row.
      *
-     * The shipment row is locked while the label is bought, so two
-     * concurrent requests cannot both buy (and pay for) a label; a shipment
-     * that already has one is refused.
+     * The purchase runs in three steps so no row lock or transaction is
+     * held while the carrier responds (engine issue #155):
+     *
+     * 1. **Claim** — a short locked transaction refuses a shipment that
+     *    already has a label or a live claim, then records
+     *    `meta.label_purchase = { key, provider, claimed_at }`.
+     * 2. **Buy** — the provider is called outside any transaction. The
+     *    claim key, on the shipment's `meta.label_purchase.key`, is the
+     *    purchase's idempotency key for carriers that accept one.
+     * 3. **Finalize** — a second short locked transaction writes the label
+     *    and tracking fields and clears the claim. A failed purchase clears
+     *    the claim and rethrows.
+     *
+     * A claim older than `artisanpack.ecommerce.fulfillment.label_claim_ttl_minutes`
+     * (a crashed worker) may be taken over; the retry reuses its key when
+     * the provider is the same, so the carrier can return the label it
+     * already sold instead of charging again.
      *
      * @since 1.0.0
      *
      * @param  Shipment  $shipment     Shipment to label.
      * @param  string    $providerKey  Label provider registry key.
      *
-     * @throws InvalidArgumentException When the shipment already has a label.
+     * @throws InvalidArgumentException When the shipment already has a label, or another purchase is in progress.
      *
      * @return ShippingLabel
      */
     public function buyLabel( Shipment $shipment, string $providerKey ): ShippingLabel
     {
         $provider = $this->labelProviders->get( $providerKey );
+        $claimKey = $this->claimLabelPurchase( $shipment, $providerKey );
 
-        return DB::transaction( function () use ( $shipment, $provider ): ShippingLabel {
+        try {
+            $label = $provider->buyLabel( $shipment );
+        } catch ( Throwable $exception ) {
+            $this->releaseLabelClaim( $shipment, $claimKey );
+
+            throw $exception;
+        }
+
+        $won = DB::transaction( function () use ( $shipment, $label, $claimKey ): bool {
             $locked = Shipment::query()->whereKey( $shipment->id )->lockForUpdate()->firstOrFail();
 
-            if ( null !== $locked->label_id ) {
-                throw new InvalidArgumentException( __( 'Shipment :id already has a label.', [ 'id' => $locked->id ] ) );
+            // A request that took over our claim as stale finished first.
+            if ( null !== $locked->label_id && (int) $locked->label_id !== (int) $label->id ) {
+                return false;
             }
 
-            $label = $provider->buyLabel( $locked );
+            $meta = (array) ( $locked->meta ?? [] );
 
+            if ( $claimKey === ( $meta[ self::LABEL_CLAIM_META ]['key'] ?? null ) ) {
+                unset( $meta[ self::LABEL_CLAIM_META ] );
+            }
+
+            $locked->meta            = [] === $meta ? null : $meta;
             $locked->label_id        = $label->id;
             $locked->tracking_number = $label->trackingNumber ?? $locked->tracking_number;
             $locked->tracking_url    = $label->trackingUrl ?? $locked->tracking_url;
@@ -257,8 +298,16 @@ class ShipmentService
 
             $shipment->setRawAttributes( $locked->getAttributes(), true );
 
-            return $label;
+            return true;
         } );
+
+        if ( ! $won ) {
+            $this->voidDuplicateLabel( $provider, $label, $shipment );
+
+            throw new InvalidArgumentException( __( 'Shipment :id already has a label.', [ 'id' => $shipment->id ] ) );
+        }
+
+        return $label;
     }
 
     /**
@@ -404,6 +453,136 @@ class ShipmentService
             return null === $item->product || $item->product->productType()->requiresFulfillment();
         } catch ( RuntimeException ) {
             return true;
+        }
+    }
+
+    /**
+     * Step 1 of {@see self::buyLabel()}: claims the shipment for one label
+     * purchase and returns the claim key.
+     *
+     * @since 1.0.0
+     *
+     * @param  Shipment  $shipment     Shipment to label.
+     * @param  string    $providerKey  Label provider key.
+     *
+     * @throws InvalidArgumentException When the shipment has a label or a live claim.
+     *
+     * @return string
+     */
+    protected function claimLabelPurchase( Shipment $shipment, string $providerKey ): string
+    {
+        return DB::transaction( function () use ( $shipment, $providerKey ): string {
+            $locked = Shipment::query()->whereKey( $shipment->id )->lockForUpdate()->firstOrFail();
+
+            if ( null !== $locked->label_id ) {
+                throw new InvalidArgumentException( __( 'Shipment :id already has a label.', [ 'id' => $locked->id ] ) );
+            }
+
+            $meta  = (array) ( $locked->meta ?? [] );
+            $claim = $meta[ self::LABEL_CLAIM_META ] ?? null;
+
+            if ( is_array( $claim ) && ! $this->labelClaimIsStale( $claim ) ) {
+                throw new InvalidArgumentException( __( 'A label for shipment :id is already being bought.', [ 'id' => $locked->id ] ) );
+            }
+
+            $key = is_array( $claim ) && is_string( $claim['key'] ?? null ) && $providerKey === ( $claim['provider'] ?? null )
+                ? $claim['key']
+                : (string) Str::uuid();
+
+            $meta[ self::LABEL_CLAIM_META ] = [
+                'key'        => $key,
+                'provider'   => $providerKey,
+                'claimed_at' => Carbon::now()->toIso8601String(),
+            ];
+
+            $locked->meta = $meta;
+            $locked->save();
+
+            $shipment->setRawAttributes( $locked->getAttributes(), true );
+
+            return $key;
+        } );
+    }
+
+    /**
+     * Clears our claim after a failed purchase so the label can be bought
+     * again. A claim another request has since taken over is left alone.
+     *
+     * @since 1.0.0
+     *
+     * @param  Shipment  $shipment  Shipment.
+     * @param  string    $claimKey  Our claim key.
+     *
+     * @return void
+     */
+    protected function releaseLabelClaim( Shipment $shipment, string $claimKey ): void
+    {
+        try {
+            DB::transaction( function () use ( $shipment, $claimKey ): void {
+                $locked = Shipment::query()->whereKey( $shipment->id )->lockForUpdate()->firstOrFail();
+                $meta   = (array) ( $locked->meta ?? [] );
+
+                if ( $claimKey !== ( $meta[ self::LABEL_CLAIM_META ]['key'] ?? null ) ) {
+                    return;
+                }
+
+                unset( $meta[ self::LABEL_CLAIM_META ] );
+                $locked->meta = [] === $meta ? null : $meta;
+                $locked->save();
+
+                $shipment->setRawAttributes( $locked->getAttributes(), true );
+            } );
+        } catch ( Throwable $exception ) {
+            // The purchase error matters more; the claim expires on its own.
+            report( $exception );
+        }
+    }
+
+    /**
+     * Whether a label claim is old enough to take over.
+     *
+     * @since 1.0.0
+     *
+     * @param  array<string, mixed>  $claim  `meta.label_purchase`.
+     *
+     * @return bool
+     */
+    protected function labelClaimIsStale( array $claim ): bool
+    {
+        $ttl = max( 1, (int) config( 'artisanpack.ecommerce.fulfillment.label_claim_ttl_minutes', 10 ) );
+
+        try {
+            $claimedAt = Carbon::parse( (string) ( $claim['claimed_at'] ?? '' ) );
+        } catch ( Throwable ) {
+            return true;
+        }
+
+        return $claimedAt->lte( Carbon::now()->subMinutes( $ttl ) );
+    }
+
+    /**
+     * Best-effort void of a label bought while another request finished the
+     * purchase first. Failures are logged for reconciliation.
+     *
+     * @since 1.0.0
+     *
+     * @param  ShippingLabelProvider  $provider  Provider that sold it.
+     * @param  ShippingLabel          $label     The duplicate label.
+     * @param  Shipment               $shipment  Shipment.
+     *
+     * @return void
+     */
+    protected function voidDuplicateLabel( ShippingLabelProvider $provider, ShippingLabel $label, Shipment $shipment ): void
+    {
+        try {
+            $provider->voidLabel( $label );
+        } catch ( Throwable $exception ) {
+            Log::channel( 'ecommerce' )->warning( 'Could not void a duplicate shipping label; void it with the carrier.', [
+                'shipment_id' => $shipment->id,
+                'label_id'    => $label->id,
+                'provider'    => $label->providerKey,
+                'error'       => $exception->getMessage(),
+            ] );
         }
     }
 }

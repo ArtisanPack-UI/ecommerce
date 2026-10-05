@@ -1711,9 +1711,9 @@ All registries live under `ArtisanPackUI\Ecommerce\Registries\` and are bound as
 | 10 | `KanbanCardWidgetRegistry` | `ArtisanPackUI\Ecommerce\Registries\KanbanCardWidgetRegistry` | `Contracts\KanbanCardWidget` | Core registers: `total`, `item-count`, `customer`, `shipping-method`, `tags`, `days-in-column` (time on the card's current sub-status — covers the earlier `substatus-age` idea), `payment-status`, `fulfillment-status`. |
 | 11 | `KanbanAutomationRegistry` | `ArtisanPackUI\Ecommerce\Registries\KanbanAutomationRegistry` | `Contracts\KanbanAutomationTrigger` | Core registers: `send-email`, `dispatch-job`, `webhook`, `update-order-field`, `create-shipment`, `print-shipping-label` (delegates to any `ShippingLabelProviderRegistry` entry). Satellites add `notify-slack`, etc. |
 | 12 | `FraudProviderRegistry` | `ArtisanPackUI\Ecommerce\Registries\FraudProviderRegistry` | `Contracts\FraudProvider` | Core registers `stripe-radar`, `always-approve`. Supports `chain` mode (§6.1 parent plan) — a comma-list in settings runs providers in sequence, most-conservative verdict wins. |
-| 13 | `NotificationChannelRegistry` | `ArtisanPackUI\Ecommerce\Registries\NotificationChannelRegistry` | Laravel channel drivers | Thin wrapper for discoverability. Core surfaces `mail`, `database`. |
+| 13 | `NotificationChannelRegistry` | `ArtisanPackUI\Ecommerce\Registries\NotificationChannelRegistry` | Laravel channel drivers | Thin wrapper for discoverability. Core surfaces `mail`, `database`. `register( $key, $driver = $key, [ 'label', 'provided_by' ] )`; `get()` returns `{ key, label, driver, provided_by }`. Sends nothing itself. |
 | 14 | `SubStatusRegistry` | `ArtisanPackUI\Ecommerce\Registries\SubStatusRegistry` | DB-backed | Populated from `order_substatuses` and cached under `ap.ecommerce.order_substatuses`; `OrderSubstatusService` and the model's saved/deleted events flush it. `all()`, `forSystemStatus()`, `get( $idOrKey, $systemStatus )`. Not directly extensible via `register()`; use `OrderSubstatusService` or the admin API to add rows. Exposed as a registry so downstream code shares one lookup surface. |
-| 15 | `AdminMenuRegistry` | `ArtisanPackUI\Ecommerce\Registries\AdminMenuRegistry` | menu entries (array shape) | Satellites append admin-nav entries here. Consumed by admin UI packages. Shape: `{ key, label, icon?, route, position, permission?, badge? }`. |
+| 15 | `AdminMenuRegistry` | `ArtisanPackUI\Ecommerce\Registries\AdminMenuRegistry` | menu entries (array shape) | Satellites append admin-nav entries here. Consumed by admin UI packages. Shape: `{ key, label, icon?, route, position, permission?, section?, badge?, satellite? }` — `label` may be a closure (translated per viewer), `route` is a route name or URL, `permission` an engine ability `{resource}.{action}`, `badge` an int or callable. `all()` drops entries of uninstalled satellites and sorts unsectioned entries first, then by section (`registerSection()` order) and `position`; `visibleTo( $user )` also drops entries the viewer lacks the ability for. Output runs through `ap.ecommerce.adminMenu.entries`. |
 | 16 | `SatelliteRegistry` | `ArtisanPackUI\Ecommerce\Registries\SatelliteRegistry` | descriptor (array) | Backed by `ecommerce_satellites` (§3.32). Satellites `register()` in service-provider `boot()`; the entry powers `php artisan ecommerce:satellite:uninstall`. |
 
 Registration example (from a satellite):
@@ -1961,6 +1961,16 @@ Every Laravel Gate ability check routes through `ap.ecommerce.abilities.{resourc
 | `settings` | `view`, `update` |
 | `report` | `view` |
 
+The list is also data: `ArtisanPackUI\Ecommerce\Auth\AbilityCatalog`, which satellites extend through the `ap.ecommerce.abilities.catalog` filter.
+
+**cms-framework integration (decision, engine issue #151).** Roles and permissions are wired by the engine, once; admin navigation is wired by each admin satellite.
+
+- When cms-framework is installed (and `artisanpack.ecommerce.cms_framework.enabled` is on), the engine registers every catalogue ability as an RBAC permission with slug `ecommerce.{resource}.{action}`, plus a `shop-manager` role holding all of them. `php artisan ecommerce:sync-permissions` does this, and it also runs after every `migrate`. The role is never stripped of permissions it already has.
+- The engine also defines each ability as a Gate that only defers to the `ecommerce.admin` umbrella. `EcommerceAuthorizer` consults a Gate ability only when one is defined, so without this a seeded permission alone could not grant anything. rbac's `Gate::before` decides first whenever the permission exists. A host `Gate::define()` for the same ability still wins.
+- Navigation stays in the admin satellites (Livewire, React, Vue): each adds its own core entries to the cms-framework admin menu, plus whatever satellites put in `AdminMenuRegistry` (§5 row 15). The engine has no nav of its own and no dependency on cms-framework.
+
+Why: permissions are framework-neutral and every admin needs the same set, so registering them in the engine avoids three copies drifting apart. Nav is UI and differs per admin.
+
 ---
 
 ## 7. Events (Laravel)
@@ -2141,11 +2151,15 @@ All routes are under `/api/ecommerce/v1/`. Every mutating endpoint requires an `
 | PATCH | `admin/inventory/{item}` | admin | required | `ecommerce.admin.mutate` |
 | POST | `admin/inventory/{item}/adjust` | admin | required | `ecommerce.admin.mutate` |
 
+Both writes need `inventory.adjust` (engine issue #140). `PATCH` changes `track_inventory`, `allow_backorder`, and `low_stock_threshold` only; quantities move through `adjust` (`{ delta, reason }`, signed and non-zero) so every change goes through `InventoryService::adjust()` and the activity log. GraphQL: `adjustInventory`.
+
 ### 9.7 Promotions + coupons (admin)
 
 | Method | Path | Auth | Idempotent | Rate policy |
 |---|---|---|---|---|
 | GET | `admin/promotions` | admin | — | `ecommerce.admin.mutate` |
+| GET | `admin/promotion-conditions` | admin (`promotion.viewAny`) | — | `ecommerce.admin.mutate` |
+| GET | `admin/promotion-actions` | admin (`promotion.viewAny`) | — | `ecommerce.admin.mutate` |
 | POST | `admin/promotions` | admin | required | `ecommerce.admin.mutate` |
 | PATCH | `admin/promotions/{promotion}` | admin | required | `ecommerce.admin.mutate` |
 | DELETE | `admin/promotions/{promotion}` | admin | required | `ecommerce.admin.mutate` |
@@ -2177,6 +2191,7 @@ All routes are under `/api/ecommerce/v1/`. Every mutating endpoint requires an `
 | POST | `admin/shipping-zones` | admin | required | `ecommerce.admin.mutate` |
 | PATCH | `admin/shipping-zones/{zone}` | admin | required | `ecommerce.admin.mutate` |
 | DELETE | `admin/shipping-zones/{zone}` | admin | required | `ecommerce.admin.mutate` |
+| GET | `admin/shipping-method-types` | admin (`shippingZone.viewAny`) | — | `ecommerce.admin.mutate` |
 | POST | `admin/shipping-zones/{zone}/methods` | admin | required | `ecommerce.admin.mutate` |
 | PATCH | `admin/shipping-methods/{method}` | admin | required | `ecommerce.admin.mutate` |
 | DELETE | `admin/shipping-methods/{method}` | admin | required | `ecommerce.admin.mutate` |
@@ -2225,7 +2240,11 @@ All routes are under `/api/ecommerce/v1/`. Every mutating endpoint requires an `
 | POST | `admin/webhook-subscriptions` | admin | required | `ecommerce.admin.mutate` |
 | PATCH | `admin/webhook-subscriptions/{sub}` | admin | required | `ecommerce.admin.mutate` |
 | DELETE | `admin/webhook-subscriptions/{sub}` | admin | required | `ecommerce.admin.mutate` |
+| GET | `admin/webhook-subscriptions/{sub}/deliveries` | admin | — | `ecommerce.admin.mutate` |
+| GET | `admin/webhook-subscriptions/{sub}/deliveries/{delivery}` | admin | — | `ecommerce.admin.mutate` |
 | POST | `admin/webhook-subscriptions/{sub}/replay/{delivery}` | admin | required | `ecommerce.admin.mutate` |
+
+The deliveries list (engine issue #150) is cursor-paginated, newest first, filterable by `event` and `status` (`delivered`, `retrying`, `failed`, `pending`), and gated by `webhookSubscription.viewAny`. `payload` and `response_body` appear only on the single-delivery read.
 
 ### 9.12 Inbound webhooks (payment providers)
 
@@ -2484,4 +2503,5 @@ Authorization: `EcommerceChannelPolicy` gates all three.
 
 - **2026-09-06** — Draft v0.1. Initial authoring against parent plan v2.
 - **2026-09-29** — Phase 5: `NotificationTemplate` gains `category()`, `defaultSubject()`, and `defaultBody()` (the catalog needs a preference category and shipped copy); `digitalFile` gains `viewAny` for `GET admin/digital-files`; `LicenseActivated` event added for new license activations. The §10 GraphQL fields for reviews, licenses, digital files, and notification preferences are deferred; the notification-template fields shipped.
+- **2026-10-04** — Admin prerequisites. Inventory writes in §9.6 (#140). `AdminMenuRegistry` (#144) and `NotificationChannelRegistry` (#150), with their §5 rows filled in. The webhook deliveries list and read (#150). Optional `Contracts\DescribesConfig` config schemas on promotion conditions and actions, shipping method types, kanban triggers, and card widgets; writes validate against them, and the new `admin/promotion-conditions`, `admin/promotion-actions`, and `admin/shipping-method-types` catalogs, plus `kanban/widgets` and `kanban/triggers`, return them (#149). The cms-framework decision in §6.18 (#151). `PaymentGateway::voidPendingPayment()` must be idempotent (#154). Label purchases claim the shipment instead of holding its lock during the carrier call, and `ShippingLabelProvider::buyLabel()` receives a stable claim key (#155).
 - **2026-10-01** — Catalog writes (#139): `ProductService` / `ProductCategoryService` / `ProductTagService` are the one write path for products, variants, prices, images, attributes, categories, tags, and stock; §9.5 admin REST endpoints and the §10.3 catalog mutations ship; `product_children` (§3.10a) stores grouped/bundled members; core now registers `variable`, `grouped`, and `bundled`; the §6.9 product lifecycle hooks fire from the models; digital products may override the download limit and expiry in `meta.digital`.

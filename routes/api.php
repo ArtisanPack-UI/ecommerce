@@ -30,6 +30,7 @@ declare( strict_types=1 );
 
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ActivityLogController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CartController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ConfigCatalogController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CouponController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CustomerAddressController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CustomerController;
@@ -273,6 +274,8 @@ Route::prefix( 'admin' )->name( 'admin.' )->group( function () use ( $admin, $au
 
     // Inventory.
     Route::get( 'inventory', [ InventoryController::class, 'index' ] )->middleware( $admin( 'inventory', 'viewAny' ) )->name( 'inventory.index' );
+    Route::patch( 'inventory/{item}', [ InventoryController::class, 'update' ] )->whereNumber( 'item' )->middleware( $admin( 'inventory', 'adjust', true ) )->name( 'inventory.update' );
+    Route::post( 'inventory/{item}/adjust', [ InventoryController::class, 'adjust' ] )->whereNumber( 'item' )->middleware( $admin( 'inventory', 'adjust', true ) )->name( 'inventory.adjust' );
 
     // Settings (engine issue #145).
     Route::get( 'settings', [ SettingsController::class, 'index' ] )->middleware( $admin( 'settings', 'view' ) )->name( 'settings.index' );
@@ -310,12 +313,15 @@ Route::prefix( 'admin' )->name( 'admin.' )->group( function () use ( $admin, $au
     Route::post( 'shipping-zones', [ ShippingZoneController::class, 'store' ] )->middleware( $admin( 'shippingZone', 'create', true ) )->name( 'shipping-zones.store' );
     Route::patch( 'shipping-zones/{zone}', [ ShippingZoneController::class, 'update' ] )->middleware( $admin( 'shippingZone', 'update', true ) )->name( 'shipping-zones.update' );
     Route::delete( 'shipping-zones/{zone}', [ ShippingZoneController::class, 'destroy' ] )->middleware( $admin( 'shippingZone', 'delete', true ) )->name( 'shipping-zones.destroy' );
+    Route::get( 'shipping-method-types', [ ConfigCatalogController::class, 'shippingMethodTypes' ] )->middleware( $admin( 'shippingZone', 'viewAny' ) )->name( 'shipping-method-types.index' );
     Route::post( 'shipping-zones/{zone}/methods', [ ShippingMethodController::class, 'store' ] )->middleware( $admin( 'shippingZone', 'update', true ) )->name( 'shipping-methods.store' );
     Route::patch( 'shipping-methods/{method}', [ ShippingMethodController::class, 'update' ] )->middleware( $admin( 'shippingZone', 'update', true ) )->name( 'shipping-methods.update' );
     Route::delete( 'shipping-methods/{method}', [ ShippingMethodController::class, 'destroy' ] )->middleware( $admin( 'shippingZone', 'update', true ) )->name( 'shipping-methods.destroy' );
 
     // Promotions + coupons.
     Route::get( 'promotions', [ PromotionController::class, 'index' ] )->middleware( $admin( 'promotion', 'viewAny' ) )->name( 'promotions.index' );
+    Route::get( 'promotion-conditions', [ ConfigCatalogController::class, 'promotionConditions' ] )->middleware( $admin( 'promotion', 'viewAny' ) )->name( 'promotion-conditions.index' );
+    Route::get( 'promotion-actions', [ ConfigCatalogController::class, 'promotionActions' ] )->middleware( $admin( 'promotion', 'viewAny' ) )->name( 'promotion-actions.index' );
     Route::post( 'promotions', [ PromotionController::class, 'store' ] )->middleware( $admin( 'promotion', 'create', true ) )->name( 'promotions.store' );
     Route::patch( 'promotions/{promotion}', [ PromotionController::class, 'update' ] )->middleware( $admin( 'promotion', 'update', true ) )->name( 'promotions.update' );
     Route::delete( 'promotions/{promotion}', [ PromotionController::class, 'destroy' ] )->middleware( $admin( 'promotion', 'delete', true ) )->name( 'promotions.destroy' );
@@ -348,6 +354,13 @@ Route::prefix( 'admin' )->name( 'admin.' )->group( function () use ( $admin, $au
     Route::post( 'webhook-subscriptions', [ WebhookSubscriptionController::class, 'store' ] )->middleware( $admin( 'webhookSubscription', 'create', true ) )->name( 'webhook-subscriptions.store' );
     Route::patch( 'webhook-subscriptions/{subscription}', [ WebhookSubscriptionController::class, 'update' ] )->middleware( $admin( 'webhookSubscription', 'update', true ) )->name( 'webhook-subscriptions.update' );
     Route::delete( 'webhook-subscriptions/{subscription}', [ WebhookSubscriptionController::class, 'destroy' ] )->middleware( $admin( 'webhookSubscription', 'delete', true ) )->name( 'webhook-subscriptions.destroy' );
+    Route::get( 'webhook-subscriptions/{subscription}/deliveries', [ WebhookSubscriptionController::class, 'deliveries' ] )
+        ->middleware( $admin( 'webhookSubscription', 'viewAny' ) )
+        ->name( 'webhook-subscriptions.deliveries.index' );
+    Route::get( 'webhook-subscriptions/{subscription}/deliveries/{delivery}', [ WebhookSubscriptionController::class, 'delivery' ] )
+        ->scopeBindings()
+        ->middleware( $admin( 'webhookSubscription', 'viewAny' ) )
+        ->name( 'webhook-subscriptions.deliveries.show' );
     Route::post( 'webhook-subscriptions/{subscription}/replay/{delivery}', [ WebhookSubscriptionController::class, 'replay' ] )
         ->scopeBindings()
         ->middleware( $admin( 'webhookSubscription', 'update', true ) )

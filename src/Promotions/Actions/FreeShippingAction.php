@@ -58,6 +58,18 @@ class FreeShippingAction extends AbstractPromotionAction
     }
 
     /**
+     * Fields this action's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [];
+    }
+
+    /**
      * @since 1.0.0
      *
      * @param  Cart                  $cart    Cart.

@@ -17,8 +17,13 @@ it( 'declares exactly the fields each REST resource emits', function ( string $t
     $emitted  = array_keys( ( new $schema['resource']( $schema['model']::factory()->create() ) )->resolve( $request ) );
     $declared = array_keys( $schema['fields'] );
 
-    // `secret` is only rendered on the create response.
-    $optional = 'WebhookSubscription' === $type ? [ 'secret' ] : [];
+    // `secret` is only rendered on the create response; a delivery's
+    // payload and response body only on the single-delivery read.
+    $optional = match ( $type ) {
+        'WebhookSubscription' => [ 'secret' ],
+        'WebhookDelivery'     => [ 'payload', 'response_body' ],
+        default               => [],
+    };
 
     expect( array_values( array_diff( $emitted, $declared ) ) )->toBe( [] )
         ->and( array_values( array_diff( $declared, $emitted, $optional ) ) )->toBe( [] );

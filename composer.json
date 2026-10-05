@@ -59,7 +59,7 @@
   },
   "suggest": {
     "sentry/sentry-laravel": "Attaches EcommerceException context to the Sentry scope when installed.",
-    "artisanpack-ui/cms-framework": "Auto-registers admin nav entries and reuses cms auth/roles when present.",
+    "artisanpack-ui/cms-framework": "Registers the ecommerce abilities as RBAC permissions and a shop-manager role when present. Admin nav comes from the admin satellites.",
     "artisanpack-ui/visual-editor": "Enables commerce blocks (product grid, single-product, add-to-cart, cart, checkout, price, gallery).",
     "artisanpack-ui/media-library": "Product images via media-library; falls back to a nullable image_url on ProductImage.",
     "artisanpack-ui/forms": "Enables product-inquiry and quote-request form field types and draft-order spawning from submissions.",

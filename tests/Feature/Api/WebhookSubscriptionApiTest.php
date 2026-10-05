@@ -6,6 +6,7 @@ use ArtisanPackUI\Ecommerce\Jobs\DeliverWebhookJob;
 use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Queue;
 
 require_once __DIR__ . '/ApiTestHelpers.php';
@@ -139,4 +140,77 @@ it( 'refuses to replay another subscription\'s delivery', function (): void {
     $this->actingAs( ecommerceAdmin(), 'sanctum' )
         ->postJson( "/api/ecommerce/v1/admin/webhook-subscriptions/{$subscription->id}/replay/{$foreign->id}", [], idem() )
         ->assertNotFound();
+} );
+
+it( 'lists a subscription\'s deliveries, cursor-paginated, without payloads', function (): void {
+    $subscription = WebhookSubscription::factory()->create();
+    WebhookDelivery::factory()->count( 3 )->create( [ 'subscription_id' => $subscription->id, 'response_body' => 'nope' ] );
+    WebhookDelivery::factory()->create();
+
+    $response = $this->actingAs( ecommerceAdmin(), 'sanctum' )
+        ->getJson( "/api/ecommerce/v1/admin/webhook-subscriptions/{$subscription->id}/deliveries?per_page=2" )
+        ->assertOk()
+        ->assertJsonCount( 2, 'data' )
+        ->assertJsonPath( 'data.0.type', 'webhookDelivery' )
+        ->assertJsonMissingPath( 'data.0.payload' )
+        ->assertJsonMissingPath( 'data.0.response_body' );
+
+    $next = $response->json( 'meta.next_cursor' );
+
+    expect( $next )->not->toBeNull();
+
+    $this->getJson( "/api/ecommerce/v1/admin/webhook-subscriptions/{$subscription->id}/deliveries?per_page=2&cursor={$next}" )
+        ->assertOk()
+        ->assertJsonCount( 1, 'data' );
+} );
+
+it( 'filters deliveries by event and delivery status', function (): void {
+    $subscription = WebhookSubscription::factory()->create();
+    $base         = [ 'subscription_id' => $subscription->id ];
+
+    $delivered = WebhookDelivery::factory()->create( $base + [ 'delivered_at' => now(), 'next_retry_at' => null, 'attempts' => 1, 'response_status' => 200 ] );
+    $retrying  = WebhookDelivery::factory()->create( $base + [ 'next_retry_at' => now()->addMinute(), 'attempts' => 2, 'response_status' => 500 ] );
+    $failed    = WebhookDelivery::factory()->create( $base + [ 'next_retry_at' => null, 'attempts' => 8, 'response_status' => 500, 'event' => 'order.placed' ] );
+    $pending   = WebhookDelivery::factory()->create( $base + [ 'attempts' => 0 ] );
+
+    $this->actingAs( ecommerceAdmin(), 'sanctum' );
+
+    $ids = fn ( string $query ): array => array_column( $this->getJson( "/api/ecommerce/v1/admin/webhook-subscriptions/{$subscription->id}/deliveries?{$query}" )->assertOk()->json( 'data' ), 'id' );
+
+    expect( $ids( 'filter[status]=delivered' ) )->toBe( [ $delivered->id ] )
+        ->and( $ids( 'filter[status]=retrying' ) )->toBe( [ $retrying->id ] )
+        ->and( $ids( 'filter[status]=failed' ) )->toBe( [ $failed->id ] )
+        ->and( $ids( 'filter[status]=pending' ) )->toBe( [ $pending->id ] )
+        ->and( $ids( 'filter[status]=bogus' ) )->toBe( [] )
+        ->and( $ids( 'filter[event]=order.placed' ) )->toBe( [ $failed->id ] );
+} );
+
+it( 'shows one delivery with its payload and response body', function (): void {
+    $subscription = WebhookSubscription::factory()->create();
+    $delivery     = WebhookDelivery::factory()->create( [ 'subscription_id' => $subscription->id, 'response_status' => 500, 'response_body' => 'Server error' ] );
+
+    $this->actingAs( ecommerceAdmin(), 'sanctum' )
+        ->getJson( "/api/ecommerce/v1/admin/webhook-subscriptions/{$subscription->id}/deliveries/{$delivery->id}" )
+        ->assertOk()
+        ->assertJsonPath( 'data.id', $delivery->id )
+        ->assertJsonPath( 'data.payload.event', 'order.refunded' )
+        ->assertJsonPath( 'data.response_body', 'Server error' );
+} );
+
+it( 'scopes a delivery read to its subscription and gates it on webhookSubscription.viewAny', function (): void {
+    $subscription = WebhookSubscription::factory()->create();
+    $foreign      = WebhookDelivery::factory()->create();
+
+    $this->actingAs( ecommerceAdmin(), 'sanctum' )
+        ->getJson( "/api/ecommerce/v1/admin/webhook-subscriptions/{$subscription->id}/deliveries/{$foreign->id}" )
+        ->assertNotFound();
+
+    $this->actingAs( ecommerceShopper(), 'sanctum' );
+
+    $this->getJson( "/api/ecommerce/v1/admin/webhook-subscriptions/{$subscription->id}/deliveries" )->assertForbidden();
+    $this->getJson( "/api/ecommerce/v1/admin/webhook-subscriptions/{$foreign->subscription_id}/deliveries/{$foreign->id}" )->assertForbidden();
+
+    Gate::define( 'ecommerce.webhookSubscription.viewAny', fn (): bool => true );
+
+    $this->getJson( "/api/ecommerce/v1/admin/webhook-subscriptions/{$subscription->id}/deliveries" )->assertOk();
 } );

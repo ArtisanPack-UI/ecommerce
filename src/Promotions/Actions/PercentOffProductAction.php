@@ -19,6 +19,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Promotions\Actions;
 
 use ArtisanPackUI\Ecommerce\Models\Cart;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
 use ArtisanPackUI\Ecommerce\Support\DiscountLedger;
 
 /**
@@ -54,6 +55,22 @@ class PercentOffProductAction extends AbstractPromotionAction
     public function label(): string
     {
         return __( 'Percent off products' );
+    }
+
+    /**
+     * Fields this action's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [
+            ConfigField::make( 'percent', 'percent', __( 'Percent off' ), [ 'required' => true ] ),
+            ConfigField::make( 'product_ids', 'product', __( 'Products' ), [ 'multiple' => true ] ),
+            ConfigField::make( 'variant_ids', 'variant', __( 'Variants' ), [ 'multiple' => true ] ),
+        ];
     }
 
     /**

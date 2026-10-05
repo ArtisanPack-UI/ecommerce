@@ -29,6 +29,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Promotions\Actions;
 
 use ArtisanPackUI\Ecommerce\Models\Cart;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
 use ArtisanPackUI\Ecommerce\Support\DiscountLedger;
 
 /**
@@ -64,6 +65,27 @@ class BuyXGetYAction extends AbstractPromotionAction
     public function label(): string
     {
         return __( 'Buy X get Y' );
+    }
+
+    /**
+     * Fields this action's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [
+            ConfigField::make( 'buy_quantity', 'number', __( 'Buy quantity' ), [ 'required' => true, 'rules' => [ 'integer', 'min:1' ] ] ),
+            ConfigField::make( 'buy_product_ids', 'product', __( 'Buy products' ), [ 'multiple' => true ] ),
+            ConfigField::make( 'buy_variant_ids', 'variant', __( 'Buy variants' ), [ 'multiple' => true ] ),
+            ConfigField::make( 'get_quantity', 'number', __( 'Get quantity' ), [ 'required' => true, 'rules' => [ 'integer', 'min:1' ] ] ),
+            ConfigField::make( 'get_product_ids', 'product', __( 'Get products' ), [ 'multiple' => true, 'help' => __( 'Leave empty to reward the products being bought.' ) ] ),
+            ConfigField::make( 'get_variant_ids', 'variant', __( 'Get variants' ), [ 'multiple' => true ] ),
+            ConfigField::make( 'percent', 'percent', __( 'Discount on the rewarded items' ), [ 'default' => 100 ] ),
+            ConfigField::make( 'max_applications', 'number', __( 'Maximum applications' ), [ 'rules' => [ 'integer', 'min:0' ] ] ),
+        ];
     }
 
     /**

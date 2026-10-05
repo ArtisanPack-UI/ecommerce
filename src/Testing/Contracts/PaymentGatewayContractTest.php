@@ -21,6 +21,10 @@
  *    throw {@see \ArtisanPackUI\Ecommerce\Exceptions\PaymentCurrencyMismatchException}
  *    when the money passed in is not in the order's payment currency —
  *    the engine never silently converts on FX drift.
+ * 5. **Voids are idempotent.** `voidPendingPayment()` MUST treat an
+ *    authorization that is already voided as a successful no-op, so a
+ *    cancel that rolled back after its void can be retried (engine issue
+ *    #154).
  *
  * Engine spec §4.2, parent plan §15.2.
  *
@@ -46,6 +50,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Money\Money;
 use Orchestra\Testbench\TestCase;
+use Throwable;
 
 /**
  * Contract test for {@see PaymentGateway} implementations.
@@ -219,6 +224,32 @@ abstract class PaymentGatewayContractTest extends TestCase
     }
 
     /**
+     * Voiding an authorization that is already voided MUST be a no-op, not
+     * an error. `OrderCancellationService::cancel()` voids inside its
+     * transaction; when a later step rolls the cancel back, the void has
+     * already happened at the provider and the retry voids again.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function test_voiding_an_already_voided_authorization_is_a_no_op(): void
+    {
+        $gateway = $this->gateway();
+        $order   = $this->makePendingAuthorizationOrder();
+
+        $gateway->voidPendingPayment( $order );
+
+        try {
+            $gateway->voidPendingPayment( $order->fresh() ?? $order );
+        } catch ( Throwable $exception ) {
+            $this->fail( 'A second void of the same authorization MUST NOT throw (got ' . $exception::class . ': ' . $exception->getMessage() . '); a rolled-back cancel could never be retried.' );
+        }
+
+        $this->addToAssertionCount( 1 );
+    }
+
+    /**
      * The gateway under test.
      *
      * @since 1.0.0
@@ -285,6 +316,24 @@ abstract class PaymentGatewayContractTest extends TestCase
      * @return PaymentResult
      */
     abstract protected function captureRetryableResult(): PaymentResult;
+
+    /**
+     * A persisted order with a live, uncaptured authorization at the
+     * gateway under test. Defaults to {@see self::makeOrder()} with
+     * `payment_status = pending`; satellites whose gateway needs a real
+     * authorization (a stub client holding the intent) override it.
+     *
+     * @since 1.0.0
+     *
+     * @return Order
+     */
+    protected function makePendingAuthorizationOrder(): Order
+    {
+        $order = $this->makeOrder();
+        $order->forceFill( [ 'payment_status' => 'pending' ] )->save();
+
+        return $order;
+    }
 
     /**
      * Whether the gateway under test supports refunds. Defaults to `true`;
