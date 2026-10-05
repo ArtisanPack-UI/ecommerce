@@ -709,7 +709,10 @@ final class ResourceSchemas
                 'last_downloaded_at'  => 'DateTime',
                 'download_count'      => 'Int!',
             ] + $timestamps, [
-                'file' => [ 'DigitalFile', false, 'file', true ],
+                // Shoppers see their own entitlements' files (#174); the
+                // storage disk and path stay admin-only on DigitalFile.
+                'file'       => [ 'DigitalFile', false, 'file' ],
+                'order_item' => [ 'OrderItem', false, 'orderItem' ],
             ] ),
 
             'LicenseKey' => self::schema( Resources\LicenseKeyResource::class, Models\LicenseKey::class, 'A software license key issued for an order line.', [
@@ -724,6 +727,7 @@ final class ResourceSchemas
                 'meta'              => 'JSON',
             ] + $timestamps, [
                 'activations' => [ 'LicenseActivation', true, 'activations' ],
+                'order_item'  => [ 'OrderItem', false, 'orderItem' ],
             ] ),
 
             'LicenseActivation' => self::schema( Resources\LicenseActivationResource::class, Models\LicenseActivation::class, 'A machine a license key is activated on.', [

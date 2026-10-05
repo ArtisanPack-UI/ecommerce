@@ -35,7 +35,7 @@ final class ResponseSchemas
      *
      * @var array<int, string>
      */
-    public const BINARY = [ 'downloadsShow', 'downloadsStream' ];
+    public const BINARY = [ 'downloadsShow', 'downloadsStream', 'meDownloadsShow', 'meDownloadsStream' ];
 
     /**
      * The success body schema for `$operationId`, or null when none is known.

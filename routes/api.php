@@ -227,6 +227,10 @@ Route::where( [ 'order' => '[0-9]+', 'address' => '[0-9]+' ] )->group( function 
         Route::get( 'me/addresses', [ MeController::class, 'addresses' ] )->name( 'me.addresses.index' );
         Route::get( 'me/orders', [ MeController::class, 'orders' ] )->name( 'me.orders.index' );
         Route::get( 'me/orders/{order}', [ MeController::class, 'order' ] )->name( 'me.orders.show' );
+        Route::get( 'me/downloads', [ MeController::class, 'downloads' ] )->name( 'me.downloads.index' );
+        Route::get( 'me/downloads/{download}', [ MeController::class, 'download' ] )->whereNumber( 'download' )->name( 'me.downloads.show' );
+        Route::get( 'me/downloads/{download}/stream', [ MeController::class, 'streamDownload' ] )->whereNumber( 'download' )->name( 'me.downloads.stream' );
+        Route::get( 'me/license-keys', [ MeController::class, 'licenseKeys' ] )->name( 'me.license-keys.index' );
     } );
 
     Route::middleware( array_merge( $auth, [ 'ecommerce.rate-limit:ecommerce.admin.mutate', 'ecommerce.idempotency' ] ) )->group( function (): void {

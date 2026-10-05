@@ -35,6 +35,7 @@ use ArtisanPackUI\Ecommerce\Events\LicenseActivated;
 use ArtisanPackUI\Ecommerce\Events\LicenseDeactivated;
 use ArtisanPackUI\Ecommerce\Events\LicenseIssued;
 use ArtisanPackUI\Ecommerce\Events\LicenseRevoked;
+use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\DigitalFile;
 use ArtisanPackUI\Ecommerce\Models\LicenseActivation;
 use ArtisanPackUI\Ecommerce\Models\LicenseKey;
@@ -43,6 +44,7 @@ use ArtisanPackUI\Ecommerce\Models\OrderItem;
 use ArtisanPackUI\Ecommerce\Support\AfterCommit;
 use ArtisanPackUI\Ecommerce\Support\Timestamp;
 use DateTimeInterface;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use RuntimeException;
@@ -267,6 +269,23 @@ class LicenseService
             'activations_limit' => null === $license->activations_limit ? null : (int) $license->activations_limit,
             'reason'            => $deactivated ? null : 'not-activated',
         ];
+    }
+
+    /**
+     * The license keys of `$customer`'s orders, newest first, with their
+     * activations and order line (#174).
+     *
+     * @since 1.0.0
+     *
+     * @param  Customer  $customer  Customer.
+     *
+     * @return Builder<LicenseKey>
+     */
+    public function forCustomer( Customer $customer ): Builder
+    {
+        return LicenseKey::query()
+            ->whereHas( 'orderItem.order', static fn ( Builder $orders ) => $orders->where( 'customer_id', $customer->id ) )
+            ->with( [ 'activations', 'orderItem' ] );
     }
 
     /**

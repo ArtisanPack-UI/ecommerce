@@ -68,7 +68,8 @@ class DigitalDownloadResource extends EcommerceResource
     protected function relations(): array
     {
         return [
-            'file' => [ 'file', DigitalFileResource::class ],
+            'file'       => [ 'file', DigitalFileResource::class ],
+            'order_item' => [ 'orderItem', OrderItemResource::class ],
         ];
     }
 }
