@@ -33,6 +33,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Controllers;
 
+use ArtisanPackUI\Ecommerce\Jobs\ReconcilePaymentSession;
 use ArtisanPackUI\Ecommerce\Models\IdempotencyRecord;
 use ArtisanPackUI\Ecommerce\Models\InboundWebhookDelivery;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
@@ -131,6 +132,12 @@ class WebhookController
                 doAction( 'ap.ecommerce.webhook_received', $provider, $result, $request );
                 doAction( sprintf( 'ap.ecommerce.gateway.%s.webhook_received', $provider ), $result, $request );
                 doAction( 'ap.ecommerce.payment.webhookReceived', $result->payload, $provider );
+
+                // A payment outcome settles its checkout (a shopper who closed
+                // the tab still gets their order), off the request (#168).
+                if ( $result->hasPaymentOutcome() && null !== $result->sessionReference ) {
+                    ReconcilePaymentSession::dispatch( $provider, $result->sessionReference, (string) $result->outcome );
+                }
             } catch ( Throwable $e ) {
                 // A listener failed part-way, so not every hook ran. Release
                 // the claim so the provider's retry dispatches again instead

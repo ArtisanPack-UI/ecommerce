@@ -24,6 +24,7 @@ use ArtisanPackUI\Ecommerce\Console\Commands\GenerateOpenApiCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\LintPciColumnsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\LintTranslationsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\PruneIdempotencyRecordsCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\ReconcilePaymentsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\RefreshFxRatesCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\ReleaseExpiredReservationsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\RetryWebhookDeliveriesCommand;
@@ -385,6 +386,7 @@ class EcommerceServiceProvider extends ServiceProvider
                 LintPciColumnsCommand::class,
                 LintTranslationsCommand::class,
                 PruneIdempotencyRecordsCommand::class,
+                ReconcilePaymentsCommand::class,
                 RefreshFxRatesCommand::class,
                 ReleaseExpiredReservationsCommand::class,
                 RetryWebhookDeliveriesCommand::class,
@@ -417,6 +419,10 @@ class EcommerceServiceProvider extends ServiceProvider
                     ->runInBackground();
                 $schedule->command( 'ecommerce:refresh-fx-rates' )
                     ->dailyAt( '05:30' )
+                    ->withoutOverlapping()
+                    ->runInBackground();
+                $schedule->command( 'ecommerce:reconcile-payments' )
+                    ->everyFifteenMinutes()
                     ->withoutOverlapping()
                     ->runInBackground();
             } );

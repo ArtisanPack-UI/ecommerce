@@ -176,12 +176,17 @@ return [
     | `account_creation` — Whether storefronts offer to create an account at
     |                    checkout.
     |
+    | `reconcile_after_minutes` — How long a payment session may go quiet
+    |                    before `ecommerce:reconcile-payments` asks the
+    |                    provider how it ended.
+    |
     */
 
     'checkout' => [
         'reservation_ttl_minutes' => (int) env( 'ECOMMERCE_RESERVATION_TTL_MINUTES', 15 ),
         'guest_checkout'          => env( 'ECOMMERCE_GUEST_CHECKOUT', 'allowed' ),
         'account_creation'        => (bool) env( 'ECOMMERCE_CHECKOUT_ACCOUNT_CREATION', true ),
+        'reconcile_after_minutes' => (int) env( 'ECOMMERCE_RECONCILE_AFTER_MINUTES', 15 ),
     ],
 
     /*
