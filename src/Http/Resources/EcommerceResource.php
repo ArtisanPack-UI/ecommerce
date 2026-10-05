@@ -28,6 +28,7 @@ namespace ArtisanPackUI\Ecommerce\Http\Resources;
 
 use ArtisanPackUI\Ecommerce\Api\ResourceSchemas;
 use ArtisanPackUI\Ecommerce\Http\Middleware\EnsureEcommerceAbility;
+use ArtisanPackUI\Ecommerce\Support\Timestamp;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -73,11 +74,12 @@ abstract class EcommerceResource extends JsonResource
         // Strip conditional values (admin-only fields) before listeners see
         // the payload, so a filter never has to handle MissingValue.
         // The envelope keys are merged last so no model column can shadow them.
-        $data = $this->filter( array_merge(
+        // Dates go out as RFC 3339 UTC (audit F15).
+        $data = Timestamp::inArray( $this->filter( array_merge(
             $this->fields( $request ),
             $this->includes( $request ),
             [ 'id' => $this->resource->getKey(), 'type' => static::NAME ],
-        ) );
+        ) ) );
 
         return (array) applyFilters( 'ap.ecommerce.api.resource.' . static::NAME, $data, $this->resource, $request );
     }

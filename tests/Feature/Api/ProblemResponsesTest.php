@@ -67,3 +67,17 @@ it( 'makes guests use a strong idempotency key and never replays a guest cart to
         ->assertHeader( 'Idempotent-Replay', 'true' )
         ->assertJsonMissingPath( 'data.token' );
 } );
+
+it( 'writes timestamps as RFC 3339 UTC in REST, GraphQL, and webhooks (F15)', function (): void {
+    require_once __DIR__ . '/../GraphQL/GraphQLTestHelpers.php';
+
+    $pattern = '/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/';
+    $product = ArtisanPackUI\Ecommerce\Models\Product::factory()->create();
+
+    expect( $this->getJson( "/api/ecommerce/v1/products/{$product->id}" )->json( 'data.created_at' ) )->toMatch( $pattern )
+        ->and( gql( $this, '{ products { nodes { created_at } } }' )->json( 'data.products.nodes.0.created_at' ) )->toMatch( $pattern );
+
+    $payload = app( ArtisanPackUI\Ecommerce\Webhooks\WebhookPayloadFactory::class )->serialize( [ 'at' => Illuminate\Support\Carbon::parse( '2026-03-02 10:04:05', 'America/New_York' ) ] );
+
+    expect( $payload['at'] )->toBe( '2026-03-02T15:04:05Z' );
+} );
