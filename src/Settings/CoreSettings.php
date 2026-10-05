@@ -143,6 +143,12 @@ final class CoreSettings
 
             // Checkout.
             new SettingDefinition( 'checkout.reservation_ttl_minutes', 'checkout', 'integer', __( 'Stock reservation (minutes)' ), [ 'required', 'min:1', 'max:1440' ], __( 'How long stock stays held for a shopper at checkout.' ), position: 10 ),
+            new SettingDefinition( 'checkout.guest_checkout', 'checkout', 'select', __( 'Guest checkout' ), [ 'required' ], __( 'Whether shoppers can check out without an account.' ), [
+                'allowed'          => __( 'Allowed' ),
+                'required_account' => __( 'Create an account during checkout' ),
+                'disabled'         => __( 'Sign in required' ),
+            ], position: 20 ),
+            new SettingDefinition( 'checkout.account_creation', 'checkout', 'boolean', __( 'Offer account creation' ), [], __( 'Storefronts offer to create an account at checkout.' ), position: 30 ),
 
             // Tax.
             new SettingDefinition( 'tax.provider', 'tax', 'select', __( 'Tax provider' ), [ 'required' ], __( 'Calculates tax at checkout. Tax satellites add providers here.' ), self::registryOptions( TaxProviderRegistry::class ), position: 10 ),

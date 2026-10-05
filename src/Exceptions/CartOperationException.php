@@ -43,4 +43,28 @@ class CartOperationException extends EcommerceException
     ) {
         parent::__construct( $message, [ 'field' => $field, 'code' => $errorCode ] );
     }
+
+    /**
+     * HTTP status the REST API answers with.
+     *
+     * @since 1.0.0
+     *
+     * @return int
+     */
+    public function httpStatus(): int
+    {
+        return 422;
+    }
+
+    /**
+     * Problem title the REST API answers with.
+     *
+     * @since 1.0.0
+     *
+     * @return string
+     */
+    public function title(): string
+    {
+        return __( 'Cart operation failed' );
+    }
 }

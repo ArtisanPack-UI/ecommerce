@@ -1300,10 +1300,11 @@ class EcommerceServiceProvider extends ServiceProvider
                     : null;
             } );
 
-            // Expected storefront cart failures (unknown product, bad coupon, …).
+            // Expected storefront cart and checkout failures (unknown product,
+            // bad coupon, stock shortfall, payment in progress, …).
             $handler->renderable( static function ( CartOperationException $e, $request ) {
                 return $request->routeIs( 'ecommerce.api.*' )
-                    ? Problem::make( 422, $e->errorCode, __( 'Cart operation failed' ), $e->getMessage(), $request, [
+                    ? Problem::make( $e->httpStatus(), $e->errorCode, $e->title(), $e->getMessage(), $request, [
                         [ 'field' => $e->field, 'code' => $e->errorCode, 'message' => $e->getMessage() ],
                     ] )
                     : null;

@@ -5,6 +5,8 @@ declare( strict_types=1 );
 use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\Product;
+use ArtisanPackUI\Ecommerce\Models\Promotion;
+use ArtisanPackUI\Ecommerce\Models\PromotionUsage;
 use ArtisanPackUI\Ecommerce\Registries\PromotionActionRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PromotionConditionRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PromotionSourceRegistry;
@@ -104,7 +106,19 @@ it( 'evaluates customer-first-order by customer, then by email, ignoring failed 
 
     expect( condition( 'customer-first-order' )->evaluate( cartWithLines( [ [] ], 'USD', [ 'customer_id' => $customer->id ] ), [] ) )->toBeTrue();
     expect( condition( 'customer-first-order' )->evaluate( cartWithLines( [ [] ], 'USD', [ 'email' => 'returning@example.com' ] ), [] ) )->toBeFalse();
-    expect( condition( 'customer-first-order' )->evaluate( cartWithLines( [ [] ], 'USD', [ 'email' => null, 'customer_id' => null ] ), [] ) )->toBeTrue();
+    // D12: an anonymous cart (no customer, no email) can't prove it's a first order.
+    expect( condition( 'customer-first-order' )->evaluate( cartWithLines( [ [] ], 'USD', [ 'email' => null, 'customer_id' => null ] ), [] ) )->toBeFalse();
+    expect( condition( 'customer-first-order' )->evaluate( cartWithLines( [ [] ], 'USD', [ 'email' => 'new@example.com' ] ), [] ) )->toBeTrue();
+} );
+
+it( 'holds guests to per-customer limits by the email on their orders (D12)', function (): void {
+    $promotion = Promotion::factory()->create( [ 'usage_limit_per_customer' => 1 ] );
+    $order     = Order::factory()->guest()->create( [ 'email' => 'ada@example.com' ] );
+    PromotionUsage::query()->create( [ 'promotion_id' => $promotion->id, 'order_id' => $order->id, 'customer_id' => null, 'amount_discounted' => 100, 'currency' => 'USD' ] );
+
+    expect( $promotion->hasUsageRemaining( null, 'ADA@example.com' ) )->toBeFalse()
+        ->and( $promotion->hasUsageRemaining( null, 'eve@example.com' ) )->toBeTrue()
+        ->and( $promotion->hasUsageRemaining() )->toBeTrue();
 } );
 
 it( 'takes percent-off-cart spread proportionally across lines', function (): void {

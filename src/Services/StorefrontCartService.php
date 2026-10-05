@@ -526,6 +526,39 @@ class StorefrontCartService
     }
 
     /**
+     * The promotion evaluation behind the cart's current discount (its paid
+     * lines and applied coupon), for recording usage at placement.
+     *
+     * @since 1.0.0
+     *
+     * @param  Cart  $cart  Cart.
+     *
+     * @return PromotionResult
+     */
+    public function promotionResult( Cart $cart ): PromotionResult
+    {
+        $coupon = ( (array) ( $cart->meta ?? [] ) )[ self::COUPON_META_KEY ] ?? null;
+
+        return $this->evaluatePromotions( $cart, is_string( $coupon ) ? $coupon : null );
+    }
+
+    /**
+     * Whether any line needs shipping (its product type requires fulfillment).
+     *
+     * @since 1.0.0
+     *
+     * @param  Cart  $cart  Cart.
+     *
+     * @return bool
+     */
+    public function requiresShipping( Cart $cart ): bool
+    {
+        return $cart->loadMissing( 'items.product' )->items->contains(
+            static fn ( CartItem $item ): bool => null !== $item->product && ! $item->product->typeIsMissing() && $item->product->productType()->requiresFulfillment(),
+        );
+    }
+
+    /**
      * Re-prices the cart in another enabled currency: every line is priced
      * again in `$currency`, promotions are re-applied, and the shipping rate
      * and any payment session are dropped (their amounts were in the old
@@ -962,7 +995,8 @@ class StorefrontCartService
     /**
      * Adds, resizes, or removes the zero-priced lines promotions grant
      * (`meta.free_item`) to match `$result`. A free item that can't be sold
-     * (unavailable product) is skipped. Returns whether anything changed.
+     * (unavailable product) is skipped, and one is capped at what is in
+     * stock (left out when none is). Returns whether anything changed.
      *
      * @since 1.0.0
      *
@@ -987,8 +1021,23 @@ class StorefrontCartService
         }
 
         foreach ( $wanted as $key => $free ) {
-            $quantity = min( self::MAX_LINE_QUANTITY, max( 1, (int) $free['quantity'] ) );
-            $line     = $existing->get( $key );
+            $line    = $existing->get( $key );
+            $product = Product::query()->storefrontVisible()->find( $free['product_id'] );
+            $variant = null === $free['variant_id'] ? null : ProductVariant::query()->whereKey( $free['variant_id'] )->where( 'product_id', $free['product_id'] )->first();
+
+            if ( null === $product || $product->typeIsMissing() || ( null !== $free['variant_id'] && null === $variant ) ) {
+                continue;
+            }
+
+            // A gift is only given while it's in stock (the cart's own holds count as its own).
+            $inStock  = $this->stock->sellable( $product, $variant, $cart );
+            $quantity = min( self::MAX_LINE_QUANTITY, max( 1, (int) $free['quantity'] ), $inStock ?? PHP_INT_MAX );
+
+            if ( $quantity < 1 ) {
+                unset( $wanted[ $key ] );
+
+                continue;
+            }
 
             if ( null !== $line ) {
                 if ( (int) $line->quantity !== $quantity ) {
@@ -996,12 +1045,6 @@ class StorefrontCartService
                     $changed = true;
                 }
 
-                continue;
-            }
-
-            $product = Product::query()->storefrontVisible()->find( $free['product_id'] );
-
-            if ( null === $product || $product->typeIsMissing() ) {
                 continue;
             }
 

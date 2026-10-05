@@ -53,6 +53,7 @@ namespace ArtisanPackUI\Ecommerce\GraphQL\Fields;
 
 use ArtisanPackUI\Ecommerce\Exceptions\CartCurrencyMismatchException;
 use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
+use ArtisanPackUI\Ecommerce\Exceptions\CheckoutException;
 use ArtisanPackUI\Ecommerce\Exceptions\NotificationTemplateException;
 use ArtisanPackUI\Ecommerce\Exceptions\OrderNotCancellableException;
 use ArtisanPackUI\Ecommerce\Exceptions\OrderSubstatusWriteException;
@@ -66,6 +67,11 @@ use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\AddOrderNoteRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\AdjustInventoryRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ApplyCouponRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CancelOrderRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CheckoutAddressRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CheckoutFinalizeRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CheckoutPaymentGatewayRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CheckoutSessionRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CheckoutShippingMethodRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CreateCartRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\IssueRefundRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\MergeCartRequest;
@@ -94,6 +100,7 @@ use ArtisanPackUI\Ecommerce\Models\ProductTag;
 use ArtisanPackUI\Ecommerce\Models\ProductVariant;
 use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
+use ArtisanPackUI\Ecommerce\Services\CheckoutService;
 use ArtisanPackUI\Ecommerce\Services\CurrentCart;
 use ArtisanPackUI\Ecommerce\Services\CustomerService;
 use ArtisanPackUI\Ecommerce\Services\InventoryService;
@@ -107,8 +114,12 @@ use ArtisanPackUI\Ecommerce\Services\ProductTagService;
 use ArtisanPackUI\Ecommerce\Services\RefundService;
 use ArtisanPackUI\Ecommerce\Services\StorefrontCartService;
 use ArtisanPackUI\Ecommerce\Services\WebhookSubscriptionService;
+use ArtisanPackUI\Ecommerce\Support\ClientPaymentConfig;
+use ArtisanPackUI\Ecommerce\Support\ReturnUrl;
+use ArtisanPackUI\Ecommerce\ValueObjects\Address;
 use ArtisanPackUI\Ecommerce\ValueObjects\CartMergeResolution;
 use ArtisanPackUI\Ecommerce\ValueObjects\PendingCartMerge;
+use ArtisanPackUI\Ecommerce\ValueObjects\ShippingRate;
 use Closure;
 use GraphQL\Type\Definition\ResolveInfo;
 use Illuminate\Support\Facades\Validator;
@@ -168,7 +179,21 @@ class Mutations
             'MergeCartInput'        => $input( [ 'cart_token' => 'String!', 'resolution' => 'String' ] ),
             'MergeCartPayload'      => $output( [ 'cart' => 'Cart', 'merged' => 'Boolean!', 'pending' => 'CartMergePending' ] ),
             'CartMergePending'      => [ 'fields' => [ 'guest_currency' => 'String!', 'account_currency' => 'String!', 'resolutions' => '[String!]!' ] ],
-            'RefundLineInput'       => [
+
+            'StartCheckoutInput'          => $input( [ 'cart_token' => 'String!' ] ),
+            'StartCheckoutPayload'        => $output( [ 'cart' => 'Cart', 'adjustments' => 'JSON' ] ),
+            'SetCheckoutAddressInput'     => $input( [ 'cart_token' => 'String!', 'email' => 'String', 'shipping_address' => 'JSON', 'billing_address' => 'JSON' ] ),
+            'SetCheckoutAddressPayload'   => $output( [ 'cart' => 'Cart', 'shipping_rates' => 'JSON' ] ),
+            'SetShippingMethodInput'      => $input( [ 'cart_token' => 'String!', 'rate_id' => 'String!' ] ),
+            'SetShippingMethodPayload'    => $output( [ 'cart' => 'Cart' ] ),
+            'SetPaymentGatewayInput'      => $input( [ 'cart_token' => 'String!', 'gateway' => 'String!' ] ),
+            'SetPaymentGatewayPayload'    => $output( [ 'cart' => 'Cart' ] ),
+            'CheckoutPaymentSession'      => [ 'fields' => [ 'reference' => 'String!', 'status' => 'String', 'amount' => 'Money!', 'client' => 'JSON' ] ],
+            'CreatePaymentSessionInput'   => $input( [ 'cart_token' => 'String!', 'return_url' => 'String' ] ),
+            'CreatePaymentSessionPayload' => $output( [ 'cart' => 'Cart', 'session' => 'CheckoutPaymentSession' ] ),
+            'PlaceOrderInput'             => $input( [ 'cart_token' => 'String!', 'payment_reference' => 'String', 'customer_note' => 'String' ] ),
+            'PlaceOrderPayload'           => $output( [ 'order' => 'Order', 'status' => 'String', 'complete' => 'Boolean', 'step_up_token' => 'String' ] ),
+            'RefundLineInput'             => [
                 'kind'   => 'input',
                 'fields' => [ 'order_item_id' => 'ID!', 'quantity' => 'Int!', 'amount' => 'BigInt!', 'restock' => 'Boolean' ],
             ],
@@ -397,6 +422,95 @@ class Mutations
                 }
 
                 return [ 'cart' => null === $cart ? null : $this->cart( $cart, $info ), 'merged' => null !== $cart, 'pending' => null ];
+            } ),
+
+            'startCheckout' => $this->mutation( 'StartCheckout', function ( array $input, ResolveInfo $info ): array {
+                $start = $this->checkout()->start( $this->findCart( $input ) );
+
+                return [ 'cart' => $this->cart( $start->cart, $info ), 'adjustments' => $start->adjustments ];
+            } ),
+
+            'setCheckoutAddress' => $this->mutation( 'SetCheckoutAddress', function ( array $input, ResolveInfo $info ): array {
+                $cart = $this->findCart( $input );
+                $this->validate( $input, CheckoutAddressRequest::baseRules() );
+
+                if ( isset( $input['email'] ) ) {
+                    $this->checkout()->setEmail( $cart, (string) $input['email'] );
+                }
+
+                $this->checkout()->setAddress(
+                    $cart,
+                    isset( $input['shipping_address'] ) ? Address::fromArray( (array) $input['shipping_address'] ) : null,
+                    isset( $input['billing_address'] ) ? Address::fromArray( (array) $input['billing_address'] ) : null,
+                );
+
+                $rates = null === $cart->refresh()->shipping_address ? [] : $this->checkout()->shippingRates( $cart )->map( static fn ( ShippingRate $rate ): array => $rate->toArray() )->values()->all();
+
+                return [ 'cart' => $this->cart( $cart, $info ), 'shipping_rates' => $rates ];
+            } ),
+
+            'setShippingMethod' => $this->mutation( 'SetShippingMethod', function ( array $input, ResolveInfo $info ): array {
+                $cart = $this->findCart( $input );
+                $this->validate( $input, CheckoutShippingMethodRequest::baseRules() );
+
+                $this->checkout()->setShippingMethod( $cart, (string) $input['rate_id'] );
+
+                return [ 'cart' => $this->cart( $cart, $info ) ];
+            } ),
+
+            'setPaymentGateway' => $this->mutation( 'SetPaymentGateway', function ( array $input, ResolveInfo $info ): array {
+                $cart = $this->findCart( $input );
+                $this->validate( $input, CheckoutPaymentGatewayRequest::baseRules() );
+
+                $this->checkout()->setPaymentGateway( $cart, (string) $input['gateway'] );
+
+                return [ 'cart' => $this->cart( $cart, $info ) ];
+            } ),
+
+            'createPaymentSession' => $this->mutation( 'CreatePaymentSession', function ( array $input, ResolveInfo $info ): array {
+                $cart = $this->findCart( $input, 'ecommerce.checkout.finalize' );
+                $this->validate( $input, CheckoutSessionRequest::baseRules() );
+
+                $returnUrl = $input['return_url'] ?? null;
+
+                if ( null !== $returnUrl && ! ReturnUrl::isAllowed( (string) $returnUrl, request() ) ) {
+                    throw new CheckoutException( 'return_url', 'return-url-invalid', __( 'The return URL must be on this site.' ) );
+                }
+
+                $session = $this->checkout()->createPaymentSession( $cart, array_filter( [
+                    'return_url'      => $returnUrl,
+                    'idempotency_key' => request()->header( 'Idempotency-Key' ),
+                ], static fn ( mixed $value ): bool => null !== $value && '' !== $value ) );
+                $gateway = $this->checkout()->availableGateways( $cart )[ (string) $cart->refresh()->payment_gateway_key ] ?? null;
+
+                return [
+                    'cart'    => $this->cart( $cart, $info ),
+                    'session' => [
+                        'reference' => $session->reference,
+                        'status'    => $session->status,
+                        'amount'    => [ 'amount' => (int) $session->amount->getAmount(), 'currency' => $session->amount->getCurrency()->getCode() ],
+                        'client'    => null === $gateway ? null : ClientPaymentConfig::for( $gateway, $cart, $session ),
+                    ],
+                ];
+            } ),
+
+            'placeOrder' => $this->mutation( 'PlaceOrder', function ( array $input, ResolveInfo $info ): array {
+                $cart = $this->findCart( $input, 'ecommerce.checkout.finalize' );
+                $this->validate( $input, CheckoutFinalizeRequest::baseRules() );
+
+                $result = $this->checkout()->finalize( $cart, isset( $input['payment_reference'] ) ? (string) $input['payment_reference'] : null, array_filter( [
+                    'idempotency_key' => request()->header( 'Idempotency-Key' ),
+                    'ip_address'      => request()->ip(),
+                    'user_agent'      => request()->userAgent(),
+                    'customer_note'   => $input['customer_note'] ?? null,
+                ], static fn ( mixed $value ): bool => null !== $value && '' !== $value ) );
+
+                return [
+                    'order'         => $this->r->present( $result->order->fresh(), 'Order', $this->r->selection( $info, 'order' ) ),
+                    'status'        => $result->status(),
+                    'complete'      => $result->isComplete(),
+                    'step_up_token' => $result->stepUpToken(),
+                ];
             } ),
 
             'issueRefund' => $this->mutation( 'IssueRefund', function ( array $input, ResolveInfo $info ): array {
@@ -1183,5 +1297,15 @@ class Mutations
     protected function carts(): StorefrontCartService
     {
         return app( StorefrontCartService::class );
+    }
+
+    /**
+     * @since 1.0.0
+     *
+     * @return CheckoutService
+     */
+    protected function checkout(): CheckoutService
+    {
+        return app( CheckoutService::class );
     }
 }

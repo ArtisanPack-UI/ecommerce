@@ -28,6 +28,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\GraphQL\Fields;
 
 use ArtisanPackUI\Ecommerce\Auth\TokenAbilities;
+use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
 use ArtisanPackUI\Ecommerce\GraphQL\GraphQLError;
 use ArtisanPackUI\Ecommerce\GraphQL\Support\Resolvers;
 use ArtisanPackUI\Ecommerce\Models\Cart;
@@ -43,11 +44,15 @@ use ArtisanPackUI\Ecommerce\Models\TaxClass;
 use ArtisanPackUI\Ecommerce\Models\TaxRate;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
 use ArtisanPackUI\Ecommerce\Registries\SubStatusRegistry;
+use ArtisanPackUI\Ecommerce\Services\CheckoutService;
 use ArtisanPackUI\Ecommerce\Services\NotificationTemplateService;
+use ArtisanPackUI\Ecommerce\Services\StorefrontCartService;
+use ArtisanPackUI\Ecommerce\ValueObjects\ShippingRate;
 use GraphQL\Type\Definition\ResolveInfo;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Gate;
+use Throwable;
 
 /**
  * @package    ArtisanPack_UI
@@ -122,6 +127,16 @@ class Queries
                 'kind'   => 'input',
                 'fields' => [ 'email' => 'String' ],
             ],
+            'CheckoutInfo' => [
+                'fields' => [
+                    'state'             => 'String!',
+                    'requires_shipping' => 'Boolean!',
+                    'shipping_rates'    => 'JSON',
+                    'gateways'          => 'JSON',
+                    'guest_checkout'    => 'String!',
+                    'account_creation'  => 'Boolean!',
+                ],
+            ],
         ];
     }
 
@@ -183,6 +198,41 @@ class Queries
                     }
 
                     return $this->r->present( $cart, 'Cart', $this->r->selection( $info ) );
+                },
+            ],
+
+            // Checkout state, shipping rates, and gateways for a cart.
+            'checkout' => [
+                'type'    => 'CheckoutInfo',
+                'args'    => [ 'token' => 'String!' ],
+                'resolve' => function ( $root, array $args ): ?array {
+                    $this->r->throttle( 'ecommerce.cart.mutate', [ 'cart_token' => $args['token'] ] );
+
+                    $cart = Cart::query()->where( 'token', $args['token'] )->first();
+
+                    if ( null === $cart || ! $cart->isAccessibleBy( $this->r->user() ) ) {
+                        return null;
+                    }
+
+                    $checkout = app( CheckoutService::class );
+                    $rates    = [];
+
+                    if ( null !== $cart->shipping_address && null === $cart->completed_order_id ) {
+                        try {
+                            $rates = $checkout->shippingRates( $cart )->map( static fn ( ShippingRate $rate ): array => $rate->toArray() )->values()->all();
+                        } catch ( Throwable ) {
+                            $rates = [];
+                        }
+                    }
+
+                    return [
+                        'state'             => (string) $cart->checkout_state,
+                        'requires_shipping' => app( StorefrontCartService::class )->requiresShipping( $cart ),
+                        'shipping_rates'    => $rates,
+                        'gateways'          => array_values( array_map( static fn ( PaymentGateway $gateway ): array => [ 'key' => $gateway->key(), 'label' => $gateway->label() ], $checkout->availableGateways( $cart ) ) ),
+                        'guest_checkout'    => $checkout->guestCheckout(),
+                        'account_creation'  => $checkout->offersAccountCreation(),
+                    ];
                 },
             ],
 

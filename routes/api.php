@@ -30,6 +30,7 @@ declare( strict_types=1 );
 
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ActivityLogController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CartController;
+use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CheckoutController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\ConfigCatalogController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CouponController;
 use ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1\CustomerAddressController;
@@ -139,6 +140,26 @@ Route::where( [ 'cart' => '[A-Za-z0-9]{40}', 'item' => '[0-9]+' ] )->middleware(
     Route::post( 'carts/{cart}/coupons', [ CartController::class, 'applyCoupon' ] )
         ->middleware( [ 'ecommerce.rate-limit:ecommerce.coupon.attempt', 'ecommerce.idempotency' ] )
         ->name( 'carts.coupons.store' );
+} );
+
+// Checkout (engine spec §9.2): the cart token is the credential for a guest
+// cart; an account's cart also needs that account's session.
+Route::where( [ 'cart' => '[A-Za-z0-9]{40}' ] )->middleware( 'ecommerce.optional-auth' )->group( function (): void {
+    Route::get( 'checkout/{cart}', [ CheckoutController::class, 'show' ] )
+        ->middleware( 'ecommerce.rate-limit:ecommerce.cart.mutate' )
+        ->name( 'checkout.show' );
+
+    Route::middleware( [ 'ecommerce.rate-limit:ecommerce.cart.mutate', 'ecommerce.idempotency' ] )->group( function (): void {
+        Route::post( 'checkout/{cart}/start', [ CheckoutController::class, 'start' ] )->name( 'checkout.start' );
+        Route::post( 'checkout/{cart}/address', [ CheckoutController::class, 'address' ] )->name( 'checkout.address' );
+        Route::post( 'checkout/{cart}/shipping-method', [ CheckoutController::class, 'shippingMethod' ] )->name( 'checkout.shipping-method' );
+        Route::post( 'checkout/{cart}/payment-gateway', [ CheckoutController::class, 'paymentGateway' ] )->name( 'checkout.payment-gateway' );
+    } );
+
+    Route::middleware( [ 'ecommerce.rate-limit:ecommerce.checkout.finalize', 'ecommerce.idempotency' ] )->group( function (): void {
+        Route::post( 'checkout/{cart}/session', [ CheckoutController::class, 'session' ] )->name( 'checkout.session' );
+        Route::post( 'checkout/{cart}/finalize', [ CheckoutController::class, 'finalize' ] )->name( 'checkout.finalize' );
+    } );
 } );
 
 // Orders.

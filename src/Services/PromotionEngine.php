@@ -87,6 +87,7 @@ class PromotionEngine
     {
         $now          = Carbon::now();
         $customerId   = null === $cart->customer_id ? null : (int) $cart->customer_id;
+        $email        = null === $cart->email ? null : (string) $cart->email;
         $couponCode   = null === $couponCode ? null : Coupon::normalize( $couponCode );
         $couponCode   = '' === $couponCode ? null : $couponCode;
         $couponStatus = null;
@@ -112,7 +113,7 @@ class PromotionEngine
                 if ( null === $couponPromo || ! $couponPromo->isActiveAt( $now ) ) {
                     $couponStatus = PromotionResult::COUPON_INACTIVE;
                     $couponPromo  = null;
-                } elseif ( ! $couponPromo->hasUsageRemaining( $customerId ) ) {
+                } elseif ( ! $couponPromo->hasUsageRemaining( $customerId, $email ) ) {
                     $couponStatus = PromotionResult::COUPON_EXHAUSTED;
                     $couponPromo  = null;
                 } else {
@@ -126,7 +127,7 @@ class PromotionEngine
             fn ( mixed $promotion ): bool => $this->isUsableCandidate( $promotion, $now ),
         );
 
-        $customerUsage = $this->customerUsageCounts( $candidates, $customerId );
+        $customerUsage = $this->customerUsageCounts( $candidates, $customerId, $email );
         $eligible      = [];
 
         foreach ( $candidates as $promotion ) {
@@ -256,9 +257,13 @@ class PromotionEngine
                 }
 
                 // Enforced here too because the cart may have been evaluated
-                // as a guest and placed by a signed-in customer.
-                if ( null !== $order->customer_id && null !== $locked->usage_limit_per_customer
-                    && $locked->usages()->where( 'customer_id', $order->customer_id )->count() >= $locked->usage_limit_per_customer ) {
+                // as a guest and placed by a signed-in customer. Guests are
+                // counted by the email on their orders.
+                $uses = null === $locked->usage_limit_per_customer
+                    ? null
+                    : $locked->usesBy( null === $order->customer_id ? null : (int) $order->customer_id, null === $order->email ? null : (string) $order->email );
+
+                if ( null !== $uses && $uses >= $locked->usage_limit_per_customer ) {
                     throw new PromotionUsageLimitReachedException( __( 'Promotion ":name" has already been used the maximum number of times by this customer.', [ 'name' => $locked->name ] ) );
                 }
 
@@ -310,26 +315,36 @@ class PromotionEngine
     }
 
     /**
-     * Per-customer usage counts for `$candidates`, in one grouped query.
+     * Per-shopper usage counts for `$candidates`, in one grouped query. A
+     * shopper is their customer id or, for guests, the email on their orders.
      *
      * @since 1.0.0
      *
      * @param  array<int, Promotion>  $candidates  Candidate promotions.
      * @param  int|null               $customerId  Customer id, if known.
+     * @param  string|null            $email       Shopper email, if known.
      *
-     * @return array<int, int> Promotion id → uses by this customer.
+     * @return array<int, int> Promotion id → uses by this shopper.
      */
-    protected function customerUsageCounts( array $candidates, ?int $customerId ): array
+    protected function customerUsageCounts( array $candidates, ?int $customerId, ?string $email = null ): array
     {
         $limited = array_values( array_filter( $candidates, static fn ( Promotion $p ): bool => null !== $p->usage_limit_per_customer ) );
 
-        if ( null === $customerId || [] === $limited ) {
+        if ( [] === $limited ) {
             return [];
         }
 
-        return PromotionUsage::query()
-            ->whereIn( 'promotion_id', array_map( static fn ( Promotion $p ): int => (int) $p->id, $limited ) )
-            ->where( 'customer_id', $customerId )
+        $query = Promotion::shopperUsages(
+            PromotionUsage::query()->whereIn( 'promotion_id', array_map( static fn ( Promotion $p ): int => (int) $p->id, $limited ) ),
+            $customerId,
+            $email,
+        );
+
+        if ( null === $query ) {
+            return [];
+        }
+
+        return $query
             ->groupBy( 'promotion_id' )
             ->selectRaw( 'promotion_id, COUNT(*) as uses' )
             ->pluck( 'uses', 'promotion_id' )

@@ -197,27 +197,80 @@ class Promotion extends Model
     }
 
     /**
-     * Whether the promotion still has usage left, overall and — when a
-     * customer is known — for that customer. Guest carts can only be held
-     * to the overall limit.
+     * Whether the promotion still has usage left, overall and — when the
+     * shopper is known by customer or email — for that shopper. A guest's
+     * uses are counted by the email on their orders, so checking out as a
+     * guest doesn't reset a per-customer limit.
      *
      * @since 1.0.0
      *
-     * @param  int|null  $customerId  Customer id, if known.
+     * @param  int|null     $customerId  Customer id, if known.
+     * @param  string|null  $email       Shopper email, if known.
      *
      * @return bool
      */
-    public function hasUsageRemaining( ?int $customerId = null ): bool
+    public function hasUsageRemaining( ?int $customerId = null, ?string $email = null ): bool
     {
         if ( null !== $this->usage_limit_total && $this->times_used >= $this->usage_limit_total ) {
             return false;
         }
 
-        if ( null === $customerId || null === $this->usage_limit_per_customer ) {
+        if ( null === $this->usage_limit_per_customer ) {
             return true;
         }
 
-        return $this->usages()->where( 'customer_id', $customerId )->count() < $this->usage_limit_per_customer;
+        $uses = $this->usesBy( $customerId, $email );
+
+        return null === $uses || $uses < $this->usage_limit_per_customer;
+    }
+
+    /**
+     * How many times the shopper (by customer id, or the email on their
+     * orders) used this promotion, or null when the shopper is unknown.
+     *
+     * @since 1.0.0
+     *
+     * @param  int|null     $customerId  Customer id.
+     * @param  string|null  $email       Shopper email.
+     *
+     * @return int|null
+     */
+    public function usesBy( ?int $customerId, ?string $email ): ?int
+    {
+        $query = static::shopperUsages( $this->usages()->getQuery(), $customerId, $email );
+
+        return null === $query ? null : $query->count();
+    }
+
+    /**
+     * Narrows a promotion-usage query to one shopper: their customer id, or
+     * orders placed under their email. Null when neither is known.
+     *
+     * @since 1.0.0
+     *
+     * @param  Builder      $query       Promotion usage query.
+     * @param  int|null     $customerId  Customer id.
+     * @param  string|null  $email       Shopper email.
+     *
+     * @return Builder|null
+     */
+    public static function shopperUsages( Builder $query, ?int $customerId, ?string $email ): ?Builder
+    {
+        $email = null === $email ? '' : mb_strtolower( trim( $email ) );
+
+        if ( null === $customerId && '' === $email ) {
+            return null;
+        }
+
+        return $query->where( static function ( Builder $shopper ) use ( $customerId, $email ): void {
+            if ( null !== $customerId ) {
+                $shopper->orWhere( 'customer_id', $customerId );
+            }
+
+            if ( '' !== $email ) {
+                $shopper->orWhereHas( 'order', static fn ( Builder $order ) => $order->where( 'email', $email ) );
+            }
+        } );
     }
 
     /**

@@ -31,19 +31,19 @@ use Money\Money;
  * line items in proportion to each item's line total, where a line total is
  * defined per parent plan §16.7 as:
  *
- *     line_total(item) = item.quantity * item.unit_price_amount - item.discount_amount
+ *     line_total(item) = max( 0, item.quantity * item.unit_price_amount - item.discount_amount )
  *
  * Given that definition, for each item:
  *
- *     allocated_shipping(item) = order.shipping × ( line_total(item) / order.subtotal )
- *     allocated_tax(item)      = order.tax      × ( line_total(item) / order.subtotal )
+ *     allocated_shipping(item) = order.shipping × ( line_total(item) / Σ line_total )
+ *     allocated_tax(item)      = order.tax      × ( line_total(item) / Σ line_total )
  *
  * Per-item results use banker's rounding (`PHP_ROUND_HALF_EVEN`). Any
  * sub-cent residual left over from the rounded terms is pushed onto the
  * last item so summed per-item values still exactly equal the order totals.
  *
- * If `order.subtotal_amount` is zero (or the summed line totals are zero,
- * e.g. every line is a 100%-off promo) shipping and tax split equally with
+ * If the summed line totals are zero (e.g. every line is a 100%-off
+ * promo) shipping and tax split equally with
  * the residual on the last item — the formula would divide by zero
  * otherwise, and refunds would break.
  *
@@ -103,12 +103,16 @@ final class ProportionalByLineTotalStrategy implements FulfillmentAllocationStra
         $totalLines = 0;
 
         foreach ( $list as $item ) {
-            $lineTotal            = ( (int) $item->quantity * (int) $item->unit_price_amount ) - (int) $item->discount_amount;
-            $lineTotals[]         = $lineTotal;
+            // A line discounted past zero carries no weight.
+            $lineTotal    = max( 0, ( (int) $item->quantity * (int) $item->unit_price_amount ) - (int) $item->discount_amount );
+            $lineTotals[] = $lineTotal;
             $totalLines += $lineTotal;
         }
 
-        $divisor = 0 !== (int) $order->subtotal_amount ? (int) $order->subtotal_amount : $totalLines;
+        // Divide by the sum of the weights themselves: the order subtotal is
+        // gross of discounts, so dividing net weights by it would leave part
+        // of the amount unallocated until the last line (audit D10).
+        $divisor = $totalLines;
 
         $shippingAllocations = $this->distribute( $orderShipping, $lineTotals, $divisor );
         $taxAllocations      = $this->distribute( $orderTax, $lineTotals, $divisor );

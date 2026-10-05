@@ -19,8 +19,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\ProductTypes;
 
-use ArtisanPackUI\Ecommerce\Models\Order;
-use ArtisanPackUI\Ecommerce\Models\OrderItem;
+use ArtisanPackUI\Ecommerce\Models\CartItem;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use InvalidArgumentException;
 
@@ -127,26 +126,26 @@ class DigitalProductType extends AbstractProductType
     }
 
     /**
-     * Records that a digital delivery is expected. The
-     * `ecommerce-digital-delivery` satellite listens for `ap.ecommerce.order.placed`
-     * to actually mint the download tokens; the engine only marks intent.
+     * The line snapshot plus a `digital_delivery` marker recording that a
+     * delivery is expected. The `ecommerce-digital-delivery` satellite
+     * listens for `ap.ecommerce.order.placed` to mint the download tokens;
+     * the engine only marks intent. The marker is part of the snapshot
+     * written at placement — the snapshot is immutable afterwards.
      *
      * @since 1.0.0
      *
-     * @param  Order      $order      Placed order.
-     * @param  OrderItem  $orderItem  Line to run side-effects for.
+     * @param  CartItem  $item  Cart line being converted.
      *
-     * @return void
+     * @return array<string, mixed>
      */
-    public function onOrderPlaced( Order $order, OrderItem $orderItem ): void
+    public function buildOrderSnapshot( CartItem $item ): array
     {
-        $snapshot                       = (array) ( $orderItem->product_snapshot ?? [] );
-        $snapshot[ 'digital_delivery' ] = [
-            'expected'   => true,
-            'issued_at'  => null,
-            'expires_at' => null,
+        return parent::buildOrderSnapshot( $item ) + [
+            'digital_delivery' => [
+                'expected'   => true,
+                'issued_at'  => null,
+                'expires_at' => null,
+            ],
         ];
-
-        $orderItem->forceFill( [ 'product_snapshot' => $snapshot ] )->save();
     }
 }

@@ -169,10 +169,19 @@ return [
     | `ecommerce:release-expired-reservations` scheduled command sweeps rows
     | past this TTL every minute.
     |
+    | `guest_checkout` — `allowed` (default), `required_account` (a guest can
+    |                    fill in checkout but needs an account before
+    |                    paying), or `disabled` (sign in first).
+    |
+    | `account_creation` — Whether storefronts offer to create an account at
+    |                    checkout.
+    |
     */
 
     'checkout' => [
         'reservation_ttl_minutes' => (int) env( 'ECOMMERCE_RESERVATION_TTL_MINUTES', 15 ),
+        'guest_checkout'          => env( 'ECOMMERCE_GUEST_CHECKOUT', 'allowed' ),
+        'account_creation'        => (bool) env( 'ECOMMERCE_CHECKOUT_ACCOUNT_CREATION', true ),
     ],
 
     /*
@@ -603,6 +612,10 @@ return [
 
     'webhooks' => [
         'events' => [
+            ArtisanPackUI\Ecommerce\Events\OrderPlaced::class,
+            ArtisanPackUI\Ecommerce\Events\CartCompleted::class,
+            ArtisanPackUI\Ecommerce\Events\CouponRedeemed::class,
+            ArtisanPackUI\Ecommerce\Events\PromotionApplied::class,
             ArtisanPackUI\Ecommerce\Events\OrderStatusChanged::class,
             ArtisanPackUI\Ecommerce\Events\OrderSubstatusChanged::class,
             ArtisanPackUI\Ecommerce\Events\OrderCancelled::class,
