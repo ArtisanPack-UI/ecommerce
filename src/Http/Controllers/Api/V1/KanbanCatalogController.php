@@ -24,6 +24,7 @@ use ArtisanPackUI\Ecommerce\Models\KanbanCardWidget;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use ArtisanPackUI\Ecommerce\Registries\KanbanAutomationRegistry;
 use ArtisanPackUI\Ecommerce\Registries\KanbanCardWidgetRegistry;
+use ArtisanPackUI\Ecommerce\Support\ConfigSchema;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -65,7 +66,8 @@ class KanbanCatalogController extends ApiController
     }
 
     /**
-     * Registered automation triggers.
+     * Registered automation triggers, each with its `config_schema`
+     * (`null` when the trigger declares none).
      *
      * @since 1.0.0
      *
@@ -76,16 +78,6 @@ class KanbanCatalogController extends ApiController
     #[ApiOperation( summary: 'List the available kanban automation triggers' )]
     public function triggers( KanbanAutomationRegistry $triggers ): JsonResponse
     {
-        $data = [];
-
-        foreach ( $triggers->keys() as $key ) {
-            $data[] = [
-                'key'         => $key,
-                'label'       => (string) ( $triggers->meta( $key )['label'] ?? $triggers->get( $key )->label() ),
-                'provided_by' => (string) ( $triggers->meta( $key )['provided_by'] ?? 'ecommerce' ),
-            ];
-        }
-
-        return new JsonResponse( [ 'data' => $data ] );
+        return new JsonResponse( [ 'data' => ConfigSchema::catalog( $triggers ) ] );
     }
 }

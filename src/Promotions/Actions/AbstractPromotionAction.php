@@ -19,6 +19,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Promotions\Actions;
 
+use ArtisanPackUI\Ecommerce\Contracts\DescribesConfig;
 use ArtisanPackUI\Ecommerce\Contracts\PromotionAction;
 use ArtisanPackUI\Ecommerce\Services\CurrencyConverter;
 use ArtisanPackUI\Ecommerce\Support\DiscountLedger;
@@ -31,7 +32,7 @@ use Money\Money;
  *
  * @since      1.0.0
  */
-abstract class AbstractPromotionAction implements PromotionAction
+abstract class AbstractPromotionAction implements PromotionAction, DescribesConfig
 {
     /**
      * @since 1.0.0

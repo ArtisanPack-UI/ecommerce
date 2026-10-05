@@ -19,8 +19,10 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Promotions\Conditions;
 
+use ArtisanPackUI\Ecommerce\Contracts\DescribesConfig;
 use ArtisanPackUI\Ecommerce\Contracts\PromotionCondition;
 use ArtisanPackUI\Ecommerce\Models\Cart;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
 use Illuminate\Support\Carbon;
 use Throwable;
 
@@ -30,7 +32,7 @@ use Throwable;
  *
  * @since      1.0.0
  */
-class DayOfWeekCondition implements PromotionCondition
+class DayOfWeekCondition implements PromotionCondition, DescribesConfig
 {
     /**
      * @since 1.0.0
@@ -57,6 +59,21 @@ class DayOfWeekCondition implements PromotionCondition
     public function label(): string
     {
         return __( 'Day of week' );
+    }
+
+    /**
+     * Fields this condition's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [
+            ConfigField::make( 'days', 'weekday', __( 'Days' ), [ 'required' => true, 'multiple' => true ] ),
+            ConfigField::make( 'timezone', 'text', __( 'Time zone' ), [ 'rules' => [ 'timezone' ], 'help' => __( 'Defaults to the application time zone.' ) ] ),
+        ];
     }
 
     /**

@@ -3,7 +3,8 @@
 /**
  * WebhookSubscriptionController.
  *
- * `admin/webhook-subscriptions` (engine spec §9.11). Every action delegates
+ * `admin/webhook-subscriptions` (engine spec §9.11), plus the delivery
+ * ledger (list and single read, engine issue #150). Writes delegate
  * to {@see WebhookSubscriptionService}, the same service the GraphQL
  * mutations use.
  *
@@ -29,6 +30,7 @@ use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use ArtisanPackUI\Ecommerce\Services\WebhookSubscriptionService;
 use Closure;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -40,6 +42,26 @@ use Illuminate\Http\Request;
  */
 class WebhookSubscriptionController extends ApiController
 {
+    /**
+     * Columns the deliveries listing reads (everything but `payload` and
+     * `response_body`).
+     *
+     * @since 1.0.0
+     *
+     * @var array<int, string>
+     */
+    private const DELIVERY_LIST_COLUMNS = [
+        'id',
+        'subscription_id',
+        'event',
+        'payload_hash',
+        'response_status',
+        'attempts',
+        'delivered_at',
+        'next_retry_at',
+        'created_at',
+    ];
+
     /**
      * @since 1.0.0
      *
@@ -131,6 +153,59 @@ class WebhookSubscriptionController extends ApiController
         $subscription->delete();
 
         return $this->resourceResponse( $subscription, $request, WebhookSubscriptionResource::class );
+    }
+
+    /**
+     * A subscription's deliveries, newest first, without payloads or
+     * response bodies (engine issue #150). Filters: `event`, and `status`
+     * — `delivered`, `retrying` (failed, another attempt scheduled),
+     * `failed` (attempts exhausted), or `pending` (not yet attempted).
+     *
+     * @since 1.0.0
+     *
+     * @param  Request              $request       Request.
+     * @param  WebhookSubscription  $subscription  Subscription.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'List a webhook subscription\'s deliveries', resource: WebhookDeliveryResource::class, collection: true )]
+    public function deliveries( Request $request, WebhookSubscription $subscription ): JsonResponse
+    {
+        return $this->listResponse(
+            // Payloads and response bodies can be large and the listing
+            // doesn't render them, so leave them in the database.
+            $subscription->deliveries()->getQuery()->select( self::DELIVERY_LIST_COLUMNS ),
+            $request,
+            WebhookDeliveryResource::class,
+            [
+                'event'  => 'event',
+                'status' => static fn ( Builder $query, string $value ): Builder => match ( $value ) {
+                    'delivered' => $query->whereNotNull( 'delivered_at' ),
+                    'retrying'  => $query->whereNull( 'delivered_at' )->whereNotNull( 'next_retry_at' )->where( 'attempts', '>', 0 ),
+                    'failed'    => $query->whereNull( 'delivered_at' )->whereNull( 'next_retry_at' )->where( 'attempts', '>', 0 ),
+                    'pending'   => $query->whereNull( 'delivered_at' )->where( 'attempts', 0 ),
+                    default     => $query->whereRaw( '1 = 0' ),
+                },
+            ],
+            [ 'id' => 'id', 'created_at' => 'created_at' ],
+        );
+    }
+
+    /**
+     * One delivery, with its payload and the endpoint's response body.
+     *
+     * @since 1.0.0
+     *
+     * @param  Request              $request       Request.
+     * @param  WebhookSubscription  $subscription  Subscription (scopes the delivery).
+     * @param  WebhookDelivery      $delivery      Delivery.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Show a webhook delivery', resource: WebhookDeliveryResource::class )]
+    public function delivery( Request $request, WebhookSubscription $subscription, WebhookDelivery $delivery ): JsonResponse
+    {
+        return ( new WebhookDeliveryResource( $delivery ) )->withBody()->response( $request );
     }
 
     /**

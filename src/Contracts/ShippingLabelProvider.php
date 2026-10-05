@@ -46,6 +46,13 @@ interface ShippingLabelProvider
     /**
      * Purchases a label for `$shipment`.
      *
+     * Called outside any database transaction, after the engine has
+     * claimed the shipment. `$shipment->meta['label_purchase']['key']` is
+     * stable across retries of the same purchase: pass it to the carrier
+     * as the idempotency key where the API takes one, so a retried
+     * purchase returns the label already sold instead of buying another
+     * (engine issue #155).
+     *
      * @since 1.0.0
      *
      * @param  Shipment  $shipment  Shipment to label.

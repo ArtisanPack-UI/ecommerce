@@ -21,6 +21,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Promotions\Actions;
 
 use ArtisanPackUI\Ecommerce\Models\Cart;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
 use ArtisanPackUI\Ecommerce\Support\DiscountLedger;
 
 /**
@@ -56,6 +57,28 @@ class TieredDiscountAction extends AbstractPromotionAction
     public function label(): string
     {
         return __( 'Tiered discount' );
+    }
+
+    /**
+     * Fields this action's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [
+            ConfigField::make( 'tiers', 'repeater', __( 'Tiers' ), [
+                'required' => true,
+                'help'     => __( 'The highest tier the subtotal reaches applies. Give each tier a percent or an amount.' ),
+                'fields'   => [
+                    ConfigField::make( 'min_subtotal', 'money', __( 'Minimum subtotal' ), [ 'required' => true ] ),
+                    ConfigField::make( 'percent', 'percent', __( 'Percent off' ) ),
+                    ConfigField::make( 'amount', 'money', __( 'Amount off' ) ),
+                ],
+            ] ),
+        ];
     }
 
     /**

@@ -125,13 +125,20 @@ return [
     |                          line items (engine spec §4.6, parent plan §16.7).
     |                          Ships with `proportional-by-line-total`.
     |
+    | `label_claim_ttl_minutes` — How long a shipping-label purchase may stay
+    |                          claimed before another request may retry it
+    |                          (a crashed worker leaves the claim behind).
+    |                          Retries reuse the claim key, so carriers that
+    |                          honour idempotency keys never double-charge.
+    |
     */
 
     'fulfillment' => [
-        'allocation_strategy' => env(
+        'allocation_strategy'     => env(
             'ECOMMERCE_ALLOCATION_STRATEGY',
             'proportional-by-line-total',
         ),
+        'label_claim_ttl_minutes' => (int) env( 'ECOMMERCE_LABEL_CLAIM_TTL_MINUTES', 10 ),
     ],
 
     /*
@@ -764,6 +771,23 @@ return [
     'localization' => [
         'tax_labels'        => [],
         'regional_fallback' => (bool) env( 'ECOMMERCE_REGIONAL_LOCALE_FALLBACK', true ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | cms-framework
+    |--------------------------------------------------------------------------
+    |
+    | When `artisanpack-ui/cms-framework` is installed, the engine registers
+    | every ecommerce ability as an RBAC permission plus a `shop-manager` role
+    | holding them all (`php artisan ecommerce:sync-permissions`, also run
+    | after `migrate`), and defines the abilities as Gates so RBAC can grant
+    | them. Set `enabled` to false to manage permissions yourself.
+    |
+    */
+
+    'cms_framework' => [
+        'enabled' => (bool) env( 'ECOMMERCE_CMS_FRAMEWORK_ENABLED', true ),
     ],
 
     /*

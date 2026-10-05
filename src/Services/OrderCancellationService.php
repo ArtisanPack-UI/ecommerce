@@ -144,6 +144,10 @@ class OrderCancellationService
             // (which also locks it) cannot land between deciding to void and
             // recording the void. The gateway call runs under the lock, as
             // RefundService's does; a failed void rolls everything back.
+            // A void that succeeds can't be rolled back, though: if a later
+            // step throws, the order stays pending and the retry voids
+            // again, which the PaymentGateway contract requires to be a
+            // no-op for an already-voided authorization (engine issue #154).
             $locked  = Order::query()->lockForUpdate()->findOrFail( $current->id );
             $blocked = $this->blockedReason( $locked );
 

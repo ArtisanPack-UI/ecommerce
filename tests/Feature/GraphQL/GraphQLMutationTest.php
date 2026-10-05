@@ -6,6 +6,7 @@ use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
 use ArtisanPackUI\Ecommerce\Models\Coupon;
+use ArtisanPackUI\Ecommerce\Models\InventoryItem;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
 use ArtisanPackUI\Ecommerce\Models\Product;
@@ -220,4 +221,25 @@ it( 'cancels an order and adds a note through the order mutations', function ():
 
     gql( $this, $cancel, [ 'input' => [ 'order_id' => $order->id, 'reason' => 'Again' ] ] )
         ->assertJsonPath( 'data.cancelOrder.errors.0.code', 'order-not-cancellable' );
+} );
+
+it( 'adjusts an inventory row through adjustInventory with the inventory ability', function (): void {
+    $item     = InventoryItem::factory()->create( [ 'quantity_on_hand' => 10 ] );
+    $mutation = 'mutation ($input: AdjustInventoryInput!) { adjustInventory(input: $input) { inventory_item { id quantity_on_hand } errors { field code } } }';
+
+    $this->actingAs( ecommerceShopperUser(), 'sanctum' );
+    gql( $this, $mutation, [ 'input' => [ 'inventory_item_id' => $item->id, 'delta' => 3, 'reason' => 'Count' ] ] )
+        ->assertJsonPath( 'errors.0.extensions.code', 'FORBIDDEN' );
+
+    Gate::define( 'ecommerce.inventory.adjust', fn (): bool => true );
+
+    gql( $this, $mutation, [ 'input' => [ 'inventory_item_id' => $item->id, 'delta' => 0, 'reason' => 'Count' ] ] )
+        ->assertJsonPath( 'data.adjustInventory.inventory_item', null )
+        ->assertJsonPath( 'data.adjustInventory.errors.0.field', 'delta' );
+
+    gql( $this, $mutation, [ 'input' => [ 'inventory_item_id' => $item->id, 'delta' => 3, 'reason' => 'Count' ] ] )
+        ->assertJsonPath( 'data.adjustInventory.inventory_item.quantity_on_hand', 13 )
+        ->assertJsonPath( 'data.adjustInventory.errors', [] );
+
+    expect( $item->fresh()->quantity_on_hand )->toBe( 13 );
 } );

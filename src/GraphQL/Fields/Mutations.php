@@ -31,6 +31,7 @@
  * | `createTag` / `updateTag` / `deleteTag` | `admin/product-tags[/{tag}]` |
  * | `createOrderSubstatus` / `updateOrderSubstatus` / `deleteOrderSubstatus` | `admin/order-substatuses[/{substatus}]` |
  * | `reorderOrderSubstatuses` | `POST admin/order-substatuses/reorder` |
+ * | `adjustInventory` | `POST admin/inventory/{item}/adjust` |
  *
  * Inputs use the REST payload's snake_case keys. Expected failures
  * (validation, unknown product, bad coupon, refused refund) come back in
@@ -61,6 +62,7 @@ use ArtisanPackUI\Ecommerce\GraphQL\Support\Resolvers;
 use ArtisanPackUI\Ecommerce\Http\Middleware\IdempotencyMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\AddCartItemRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\AddOrderNoteRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\AdjustInventoryRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ApplyCouponRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CancelOrderRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\CreateCartRequest;
@@ -79,6 +81,7 @@ use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\WebhookSubscriptionRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\WebhookSubscriptionResource;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
+use ArtisanPackUI\Ecommerce\Models\InventoryItem;
 use ArtisanPackUI\Ecommerce\Models\NotificationTemplate;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderSubstatus;
@@ -89,6 +92,7 @@ use ArtisanPackUI\Ecommerce\Models\ProductTag;
 use ArtisanPackUI\Ecommerce\Models\ProductVariant;
 use ArtisanPackUI\Ecommerce\Models\WebhookDelivery;
 use ArtisanPackUI\Ecommerce\Models\WebhookSubscription;
+use ArtisanPackUI\Ecommerce\Services\InventoryService;
 use ArtisanPackUI\Ecommerce\Services\NotificationTemplateService;
 use ArtisanPackUI\Ecommerce\Services\OrderCancellationService;
 use ArtisanPackUI\Ecommerce\Services\OrderNoteService;
@@ -283,6 +287,9 @@ class Mutations
             'DeleteOrderSubstatusPayload'    => $output( [ 'deleted_id' => 'ID' ] ),
             'ReorderOrderSubstatusesInput'   => $input( [ 'system_status' => 'String!', 'ids' => '[ID!]!' ] ),
             'ReorderOrderSubstatusesPayload' => $output( [ 'substatuses' => '[OrderSubstatus!]' ] ),
+
+            'AdjustInventoryInput'   => $input( [ 'inventory_item_id' => 'ID!', 'delta' => 'Int!', 'reason' => 'String!' ] ),
+            'AdjustInventoryPayload' => $output( [ 'inventory_item' => 'InventoryItem' ] ),
         ];
     }
 
@@ -702,6 +709,17 @@ class Mutations
                 $ordered = app( OrderSubstatusService::class )->reorder( (string) $input['system_status'], (array) $input['ids'] );
 
                 return [ 'substatuses' => $this->r->renderMany( $ordered, true ) ];
+            } ),
+
+            'adjustInventory' => $this->mutation( 'AdjustInventory', function ( array $input, ResolveInfo $info ): array {
+                $this->r->authorize( 'inventory', 'adjust' );
+                $this->r->throttle( 'ecommerce.admin.mutate' );
+                $item = InventoryItem::query()->find( $input['inventory_item_id'] ) ?? throw GraphQLError::notFound();
+                $this->validate( $input, AdjustInventoryRequest::baseRules() );
+
+                $item = app( InventoryService::class )->adjust( $item, (int) $input['delta'], trim( (string) $input['reason'] ) );
+
+                return [ 'inventory_item' => $this->r->present( $item, 'InventoryItem', $this->r->selection( $info, 'inventory_item' ), true ) ];
             } ),
         ];
     }

@@ -28,6 +28,7 @@ namespace ArtisanPackUI\Ecommerce\Testing\Contracts;
 
 use ArtisanPackUI\Ecommerce\Contracts\PromotionCondition;
 use ArtisanPackUI\Ecommerce\Models\Cart;
+use ArtisanPackUI\Ecommerce\Testing\Contracts\Concerns\AssertsConfigSchema;
 use ArtisanPackUI\Ecommerce\Testing\Contracts\Concerns\InteractsWithEcommerceCarts;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Orchestra\Testbench\TestCase;
@@ -46,6 +47,7 @@ use stdClass;
  */
 abstract class PromotionConditionContractTest extends TestCase
 {
+    use AssertsConfigSchema;
     use InteractsWithEcommerceCarts;
     use RefreshDatabase;
 
@@ -58,6 +60,20 @@ abstract class PromotionConditionContractTest extends TestCase
     {
         $this->assertMatchesRegularExpression( $this->registryKeyPattern, $this->condition()->key() );
         $this->assertNotSame( '', trim( $this->condition()->label() ) );
+    }
+
+    /**
+     * A declared config schema is well-formed and accepts the suite's config fixture (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function test_declared_config_schema_is_well_formed(): void
+    {
+        [ , $config ] = $this->satisfiedCase();
+
+        $this->assertDeclaredConfigSchemaIsWellFormed( $this->condition(), $config );
     }
 
     /**

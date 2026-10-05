@@ -25,6 +25,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Promotions\Conditions;
 
+use ArtisanPackUI\Ecommerce\Contracts\DescribesConfig;
 use ArtisanPackUI\Ecommerce\Contracts\OrderAwarePromotionCondition;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\Order;
@@ -35,7 +36,7 @@ use ArtisanPackUI\Ecommerce\Models\Order;
  *
  * @since      1.0.0
  */
-class CustomerFirstOrderCondition implements OrderAwarePromotionCondition
+class CustomerFirstOrderCondition implements OrderAwarePromotionCondition, DescribesConfig
 {
     /**
      * @since 1.0.0
@@ -62,6 +63,18 @@ class CustomerFirstOrderCondition implements OrderAwarePromotionCondition
     public function label(): string
     {
         return __( "Customer's first order" );
+    }
+
+    /**
+     * Fields this condition's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [];
     }
 
     /**

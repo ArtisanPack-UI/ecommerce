@@ -188,3 +188,32 @@ it( 'releases a reservation once when the expiry sweep already took it', functio
     expect( $summary->reservations )->toBe( [] )
         ->and( $item->fresh()->quantity_reserved )->toBe( 0 );
 } );
+
+it( 'can retry a cancel that rolled back after the void, given an idempotent gateway', function (): void {
+    [ $order ] = cancellableOrderWithReservation( 1, [ 'payment_status' => 'pending' ] );
+
+    $voided = 0;
+    $this->gateway->shouldReceive( 'voidPendingPayment' )->twice()->andReturnUsing( function () use ( &$voided ): void {
+        // Idempotent by contract: an already-voided authorization is a no-op.
+        ++$voided;
+    } );
+
+    $fail = function (): void {
+        throw new RuntimeException( 'listener blew up' );
+    };
+    addAction( 'ap.ecommerce.order.statusChanged', $fail );
+
+    expect( fn () => $this->service->cancel( $order, 'Customer asked' ) )->toThrow( RuntimeException::class );
+
+    // The void happened at the gateway, but the order rolled back to pending.
+    expect( $order->fresh()->system_status )->toBe( 'pending' )
+        ->and( $order->fresh()->payment_status )->toBe( 'pending' );
+
+    removeAction( 'ap.ecommerce.order.statusChanged', $fail );
+
+    $summary = $this->service->cancel( $order, 'Customer asked' );
+
+    expect( $summary->order->system_status )->toBe( 'cancelled' )
+        ->and( $summary->order->payment_status )->toBe( OrderCancellationService::PAYMENT_STATUS_VOIDED )
+        ->and( $voided )->toBe( 2 );
+} );

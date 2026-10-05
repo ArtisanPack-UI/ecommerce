@@ -19,6 +19,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Promotions\Actions;
 
 use ArtisanPackUI\Ecommerce\Models\Cart;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
 use ArtisanPackUI\Ecommerce\Support\DiscountLedger;
 
 /**
@@ -54,6 +55,20 @@ class FixedOffCartAction extends AbstractPromotionAction
     public function label(): string
     {
         return __( 'Fixed amount off cart' );
+    }
+
+    /**
+     * Fields this action's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [
+            ConfigField::make( 'amount', 'money', __( 'Amount off' ), [ 'required' => true ] ),
+        ];
     }
 
     /**

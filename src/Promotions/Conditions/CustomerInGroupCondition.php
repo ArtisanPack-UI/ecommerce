@@ -21,8 +21,10 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Promotions\Conditions;
 
+use ArtisanPackUI\Ecommerce\Contracts\DescribesConfig;
 use ArtisanPackUI\Ecommerce\Contracts\PromotionCondition;
 use ArtisanPackUI\Ecommerce\Models\Cart;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
 
 /**
  * @package    ArtisanPack_UI
@@ -30,7 +32,7 @@ use ArtisanPackUI\Ecommerce\Models\Cart;
  *
  * @since      1.0.0
  */
-class CustomerInGroupCondition implements PromotionCondition
+class CustomerInGroupCondition implements PromotionCondition, DescribesConfig
 {
     /**
      * @since 1.0.0
@@ -57,6 +59,20 @@ class CustomerInGroupCondition implements PromotionCondition
     public function label(): string
     {
         return __( 'Customer in group' );
+    }
+
+    /**
+     * Fields this condition's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [
+            ConfigField::make( 'groups', 'list', __( 'Customer groups' ), [ 'required' => true ] ),
+        ];
     }
 
     /**

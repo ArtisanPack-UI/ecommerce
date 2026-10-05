@@ -20,6 +20,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Kanban\Widgets;
 
+use ArtisanPackUI\Ecommerce\Contracts\DescribesConfig;
 use ArtisanPackUI\Ecommerce\Contracts\KanbanCardWidget;
 use ArtisanPackUI\Ecommerce\Models\Order;
 
@@ -29,8 +30,20 @@ use ArtisanPackUI\Ecommerce\Models\Order;
  *
  * @since      1.0.0
  */
-abstract class AbstractKanbanCardWidget implements KanbanCardWidget
+abstract class AbstractKanbanCardWidget implements KanbanCardWidget, DescribesConfig
 {
+    /**
+     * The core widgets take no configuration (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [];
+    }
+
     /**
      * Built-in widgets only change when the card moves or the order is
      * re-fetched.

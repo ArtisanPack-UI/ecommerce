@@ -31,6 +31,7 @@ use ArtisanPackUI\Ecommerce\ValueObjects\RefundResult;
 use ArtisanPackUI\Ecommerce\ValueObjects\WebhookResult;
 use Illuminate\Http\Request;
 use Money\Money;
+use Throwable;
 
 /**
  * PaymentGateway contract.
@@ -138,12 +139,31 @@ interface PaymentGateway
      * Voids an authorization that has not yet been captured.
      *
      * Called by the fraud path (engine spec §8.4) when an order is blocked
-     * before capture. Implementations MUST NOT throw for a session that has
-     * already been voided or is not voidable — treat the call as a no-op.
+     * before capture, and by `OrderCancellationService::cancel()` while it
+     * holds the order row lock. The cancel runs the void inside its
+     * database transaction, and a rollback can't undo it: if a later step
+     * of the cancel throws, the order stays `pending` with the
+     * authorization already voided, and the retry voids again.
+     *
+     * Implementations MUST therefore be idempotent: an authorization the
+     * provider confirms is already voided, cancelled, or expired (or that
+     * does not exist) MUST be treated as a successful no-op, or that order
+     * could never be cancelled. `PaymentGatewayContractTest` checks this,
+     * so `ecommerce:verify-satellite` does too (engine issue #154).
+     *
+     * Returning normally means "nothing is authorized any more". So
+     * implementations MUST throw — never swallow — when the provider
+     * refuses the void, when the payment turns out to be captured (it
+     * needs a refund instead), or when the outcome is unknown (a network
+     * error, or a response that doesn't confirm the cancellation).
+     * Otherwise the cancel records a live authorization as voided. Callers
+     * that treat the void as best-effort (the fraud path) catch and log.
      *
      * @since 1.0.0
      *
      * @param  Order  $order  The order whose pending authorization is being released.
+     *
+     * @throws Throwable When the void is refused, the payment was captured, or the outcome is unconfirmed.
      *
      * @return void
      */

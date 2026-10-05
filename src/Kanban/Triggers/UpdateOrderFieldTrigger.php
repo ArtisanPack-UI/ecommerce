@@ -29,6 +29,7 @@ namespace ArtisanPackUI\Ecommerce\Kanban\Triggers;
 use ArtisanPackUI\Ecommerce\Models\KanbanAutomation;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderTimelineEntry;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
 use InvalidArgumentException;
 
 /**
@@ -64,6 +65,21 @@ class UpdateOrderFieldTrigger extends AbstractKanbanAutomationTrigger
     public function label(): string
     {
         return __( 'Update an order field' );
+    }
+
+    /**
+     * Fields this trigger's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [
+            ConfigField::make( 'field', 'text', __( 'Field' ), [ 'required' => true, 'help' => __( 'A meta path such as meta.priority, or a field allowed by ap.ecommerce.kanban.updatableOrderFields.' ) ] ),
+            ConfigField::make( 'value', 'json', __( 'Value' ) ),
+        ];
     }
 
     /**

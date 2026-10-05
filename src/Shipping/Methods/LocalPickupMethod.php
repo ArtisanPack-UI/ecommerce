@@ -27,6 +27,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Shipping\Methods;
 
 use ArtisanPackUI\Ecommerce\Models\Cart;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
 use ArtisanPackUI\Ecommerce\ValueObjects\Address;
 use Money\Money;
 
@@ -63,6 +64,20 @@ class LocalPickupMethod extends AbstractShippingMethod
     public function label(): string
     {
         return __( 'Local pickup' );
+    }
+
+    /**
+     * Fields this shipping method type's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [
+            ConfigField::make( 'amount', 'money', __( 'Pickup fee' ) ),
+        ];
     }
 
     /**

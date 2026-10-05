@@ -17,6 +17,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Providers;
 
+use ArtisanPackUI\Ecommerce\Auth\CmsFrameworkPermissions;
 use ArtisanPackUI\Ecommerce\Auth\EcommerceAuthorizer;
 use ArtisanPackUI\Ecommerce\Console\Commands\AuditOrderStatusCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\GenerateOpenApiCommand;
@@ -29,6 +30,7 @@ use ArtisanPackUI\Ecommerce\Console\Commands\SatelliteAuditCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\SatelliteReinstallCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\SatelliteUninstallCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\SeedDemoCommand;
+use ArtisanPackUI\Ecommerce\Console\Commands\SyncPermissionsCommand;
 use ArtisanPackUI\Ecommerce\Console\Commands\VerifySatelliteCommand;
 use ArtisanPackUI\Ecommerce\Contracts\CartStorage;
 use ArtisanPackUI\Ecommerce\Contracts\OrderNumberGenerator;
@@ -141,11 +143,13 @@ use ArtisanPackUI\Ecommerce\Promotions\Conditions\CustomerFirstOrderCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\CustomerInGroupCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\DayOfWeekCondition;
 use ArtisanPackUI\Ecommerce\Promotions\Conditions\MinSubtotalCondition;
+use ArtisanPackUI\Ecommerce\Registries\AdminMenuRegistry;
 use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\FraudProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\FulfillmentAllocationStrategyRegistry;
 use ArtisanPackUI\Ecommerce\Registries\KanbanAutomationRegistry;
 use ArtisanPackUI\Ecommerce\Registries\KanbanCardWidgetRegistry;
+use ArtisanPackUI\Ecommerce\Registries\NotificationChannelRegistry;
 use ArtisanPackUI\Ecommerce\Registries\NotificationTemplateRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
@@ -196,15 +200,18 @@ use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Contracts\Translation\Loader;
+use Illuminate\Database\Events\MigrationsEnded;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 use Rebing\GraphQL\GraphQL as RebingGraphQL;
 use Rebing\GraphQL\Support\ExecutionMiddleware\AddAuthUserContextValueMiddleware;
 use Rebing\GraphQL\Support\ExecutionMiddleware\AutomaticPersistedQueriesMiddleware;
 use Rebing\GraphQL\Support\ExecutionMiddleware\ValidateOperationParamsMiddleware;
+use Throwable;
 
 /**
  * Service provider for the Ecommerce package.
@@ -277,6 +284,8 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->app->singleton( SettingsRegistry::class, static fn ( $app ): SettingsRegistry => new SettingsRegistry( $app ) );
         $this->app->singleton( SettingsRepository::class );
         $this->app->singleton( ReportRegistry::class, static fn ( $app ): ReportRegistry => new ReportRegistry( $app ) );
+        $this->app->singleton( AdminMenuRegistry::class, static fn ( $app ): AdminMenuRegistry => new AdminMenuRegistry( $app ) );
+        $this->app->singleton( NotificationChannelRegistry::class, static fn ( $app ): NotificationChannelRegistry => new NotificationChannelRegistry( $app ) );
         // Scoped so queue workers and Octane re-read it per job / request.
         $this->app->scoped( SubStatusRegistry::class );
 
@@ -324,10 +333,12 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->registerCorePromotionRules();
         $this->registerCoreKanban();
         $this->registerCoreNotificationTemplates();
+        $this->registerCoreNotificationChannels();
         $this->registerCoreReports();
         $this->registerRegistryHooks();
         $this->registerWebhookRoute();
         $this->registerPolicies();
+        $this->registerCmsFrameworkPermissions();
         $this->registerRestRoutes();
         $this->registerCustomerListeners();
         $this->registerWebhookListeners();
@@ -363,6 +374,7 @@ class EcommerceServiceProvider extends ServiceProvider
                 SatelliteReinstallCommand::class,
                 SatelliteUninstallCommand::class,
                 SeedDemoCommand::class,
+                SyncPermissionsCommand::class,
                 VerifySatelliteCommand::class,
             ] );
 
@@ -387,6 +399,40 @@ class EcommerceServiceProvider extends ServiceProvider
                     ->runInBackground();
             } );
         }
+    }
+
+    /**
+     * Defines the ability Gates and registers the post-migrate permission
+     * sync when cms-framework is available.
+     *
+     * @since 1.0.0
+     *
+     * @param  CmsFrameworkPermissions  $permissions  cms-framework bridge.
+     *
+     * @return void
+     */
+    public function bootCmsFrameworkPermissions( CmsFrameworkPermissions $permissions ): void
+    {
+        if ( ! $permissions->isAvailable() ) {
+            return;
+        }
+
+        $permissions->defineGates();
+
+        $this->app->make( Dispatcher::class )->listen( MigrationsEnded::class, static function ( MigrationsEnded $event ) use ( $permissions ): void {
+            // Only after real forward migrations: `--pretend` promises no writes.
+            if ( 'up' !== $event->method || ! empty( $event->options['pretend'] ) ) {
+                return;
+            }
+
+            try {
+                $permissions->sync();
+            } catch ( Throwable $exception ) {
+                // A partial install (cms tables not migrated yet) must not
+                // fail the migration; `ecommerce:sync-permissions` retries.
+                Log::channel( 'ecommerce' )->warning( 'Could not sync ecommerce permissions into cms-framework.', [ 'error' => $exception->getMessage() ] );
+            }
+        } );
     }
 
     /**
@@ -1017,6 +1063,23 @@ class EcommerceServiceProvider extends ServiceProvider
     }
 
     /**
+     * Surfaces the Laravel channels the core delivers through (engine spec
+     * §5 row 13).
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCoreNotificationChannels(): void
+    {
+        /** @var NotificationChannelRegistry $registry */
+        $registry = $this->app->make( NotificationChannelRegistry::class );
+
+        $registry->register( 'mail', 'mail', [ 'label' => static fn (): string => __( 'Email' ) ] );
+        $registry->register( 'database', 'database', [ 'label' => static fn (): string => __( 'In-app' ) ] );
+    }
+
+    /**
      * Keeps each product's denormalized rating in step with its approved
      * reviews (parent plan §5.12): the aggregate is recomputed whenever a
      * review is approved, rejected, or marked as spam.
@@ -1311,6 +1374,24 @@ class EcommerceServiceProvider extends ServiceProvider
                 Gate::policy( $model, $policy );
             }
         }
+    }
+
+    /**
+     * The engine's side of the cms-framework integration (engine issue
+     * #151): once every provider has booted — so satellites' additions to
+     * `ap.ecommerce.abilities.catalog` count — define the engine abilities
+     * as Gates rbac can grant, and sync the RBAC permissions and the
+     * `shop-manager` role after each `migrate` run.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected function registerCmsFrameworkPermissions(): void
+    {
+        $this->app->booted( function (): void {
+            $this->bootCmsFrameworkPermissions( $this->app->make( CmsFrameworkPermissions::class ) );
+        } );
     }
 
     /**

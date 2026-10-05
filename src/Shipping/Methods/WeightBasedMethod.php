@@ -28,6 +28,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Shipping\Methods;
 
 use ArtisanPackUI\Ecommerce\Models\Cart;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
 use ArtisanPackUI\Ecommerce\ValueObjects\Address;
 use Money\Money;
 
@@ -64,6 +65,31 @@ class WeightBasedMethod extends AbstractShippingMethod
     public function label(): string
     {
         return __( 'Weight-based' );
+    }
+
+    /**
+     * Fields this shipping method type's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [
+            ConfigField::make( 'unit', 'select', __( 'Weight unit' ), [
+                'options' => ConfigField::options( [ 'g' => __( 'Grams' ), 'kg' => __( 'Kilograms' ), 'oz' => __( 'Ounces' ), 'lb' => __( 'Pounds' ) ] ),
+                'default' => 'kg',
+            ] ),
+            ConfigField::make( 'tiers', 'repeater', __( 'Tiers' ), [
+                'required' => true,
+                'help'     => __( 'The lightest tier the cart fits in applies. Leave the maximum empty on the last tier.' ),
+                'fields'   => [
+                    ConfigField::make( 'max_weight', 'number', __( 'Maximum weight' ), [ 'rules' => [ 'min:0' ] ] ),
+                    ConfigField::make( 'amount', 'money', __( 'Rate' ), [ 'required' => true ] ),
+                ],
+            ] ),
+        ];
     }
 
     /**

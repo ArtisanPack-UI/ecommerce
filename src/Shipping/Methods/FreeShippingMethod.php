@@ -26,6 +26,7 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Shipping\Methods;
 
 use ArtisanPackUI\Ecommerce\Models\Cart;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
 use ArtisanPackUI\Ecommerce\ValueObjects\Address;
 use Money\Money;
 
@@ -62,6 +63,20 @@ class FreeShippingMethod extends AbstractShippingMethod
     public function label(): string
     {
         return __( 'Free shipping' );
+    }
+
+    /**
+     * Fields this shipping method type's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [
+            ConfigField::make( 'min_subtotal', 'money', __( 'Minimum subtotal' ), [ 'help' => __( 'Leave empty to offer free shipping on every order.' ) ] ),
+        ];
     }
 
     /**

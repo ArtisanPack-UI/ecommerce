@@ -30,6 +30,7 @@ use ArtisanPackUI\Ecommerce\Models\KanbanAutomation;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Registries\ShippingLabelProviderRegistry;
 use ArtisanPackUI\Ecommerce\Services\ShipmentService;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
 use InvalidArgumentException;
 
 /**
@@ -77,6 +78,25 @@ class PrintShippingLabelTrigger extends AbstractKanbanAutomationTrigger
     public function label(): string
     {
         return __( 'Print a shipping label' );
+    }
+
+    /**
+     * Fields this trigger's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        $providers = $this->providers->keys();
+
+        return [
+            [] === $providers
+                ? ConfigField::make( 'provider', 'text', __( 'Label provider' ), [ 'required' => true, 'help' => __( 'No shipping label provider is installed.' ) ] )
+                : ConfigField::make( 'provider', 'select', __( 'Label provider' ), [ 'required' => true, 'options' => ConfigField::options( array_combine( $providers, $providers ) ) ] ),
+            ConfigField::make( 'method_key', 'text', __( 'Shipping method' ), [ 'rules' => [ 'max:120' ], 'help' => __( 'Used when the order has no unlabelled shipment yet.' ) ] ),
+        ];
     }
 
     /**

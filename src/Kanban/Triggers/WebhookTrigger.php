@@ -29,6 +29,7 @@ namespace ArtisanPackUI\Ecommerce\Kanban\Triggers;
 use ArtisanPackUI\Ecommerce\Jobs\SendKanbanAutomationWebhookJob;
 use ArtisanPackUI\Ecommerce\Models\KanbanAutomation;
 use ArtisanPackUI\Ecommerce\Models\Order;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
 use ArtisanPackUI\Ecommerce\Webhooks\WebhookPayloadFactory;
 use ArtisanPackUI\Ecommerce\Webhooks\WebhookUrlGuard;
 use Illuminate\Support\Carbon;
@@ -77,6 +78,21 @@ class WebhookTrigger extends AbstractKanbanAutomationTrigger
     public function label(): string
     {
         return __( 'Send a webhook' );
+    }
+
+    /**
+     * Fields this trigger's `config` takes (engine issue #149).
+     *
+     * @since 1.0.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [
+            ConfigField::make( 'url', 'url', __( 'URL' ), [ 'required' => true ] ),
+            ConfigField::make( 'secret', 'text', __( 'Signing secret' ), [ 'rules' => [ 'max:255' ] ] ),
+        ];
     }
 
     /**
