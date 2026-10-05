@@ -1279,6 +1279,12 @@ class EcommerceServiceProvider extends ServiceProvider
             return;
         }
 
+        // Signed service requests are only protected from replay when the
+        // store is shared; an in-memory store forgets between requests.
+        if ( [] !== (array) $config->get( 'artisanpack.ecommerce.api.services', [] ) && $this->app->isProduction() && 'array' === ServiceSignatureMiddleware::replayStoreDriver() ) {
+            Log::channel( 'ecommerce' )->warning( 'The service-signature replay store uses the array cache driver; set artisanpack.ecommerce.api.signature_cache_store to a shared store.' );
+        }
+
         /** @var Router $router */
         $router = $this->app->make( Router::class );
 

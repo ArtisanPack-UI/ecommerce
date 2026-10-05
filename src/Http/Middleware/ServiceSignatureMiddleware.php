@@ -24,9 +24,11 @@
  * the algorithm or covered headers are wrong, the `Date` is not an RFC 7231
  * date within `api.signature_tolerance_seconds`, the `Digest` does not
  * match the body, the signature does not match, or the same signature was
- * already used. Replay protection uses the default cache store: in a
+ * already used. Replay protection uses the cache store named by
+ * `api.signature_cache_store` (default: the default store): in a
  * multi-server deployment it must be a shared store (Redis, database,
- * Memcached) so a request replayed to another node is caught.
+ * Memcached) so a request replayed to another node is caught. The service
+ * provider logs a warning when that store is `array` in production.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -44,6 +46,7 @@ use ArtisanPackUI\Ecommerce\Auth\ServiceActor;
 use ArtisanPackUI\Ecommerce\Auth\ServiceSignature;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
 use Closure;
+use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -84,6 +87,36 @@ class ServiceSignatureMiddleware
         $this->authenticate( $request, $actor );
 
         return $next( $request );
+    }
+
+    /**
+     * The cache store that remembers used signatures.
+     *
+     * @since 1.0.0
+     *
+     * @return Repository
+     */
+    public static function replayStore(): Repository
+    {
+        $store = config( 'artisanpack.ecommerce.api.signature_cache_store' );
+
+        return Cache::store( is_string( $store ) && '' !== $store ? $store : null );
+    }
+
+    /**
+     * The driver of {@see self::replayStore()}, if it can be told.
+     *
+     * @since 1.0.0
+     *
+     * @return string|null
+     */
+    public static function replayStoreDriver(): ?string
+    {
+        $store  = config( 'artisanpack.ecommerce.api.signature_cache_store' );
+        $name   = is_string( $store ) && '' !== $store ? $store : (string) config( 'cache.default' );
+        $driver = config( 'cache.stores.' . $name . '.driver' );
+
+        return is_string( $driver ) ? $driver : null;
     }
 
     /**
@@ -144,7 +177,7 @@ class ServiceSignatureMiddleware
         // A captured request can't be replayed inside the freshness window.
         $ttl = 2 * $this->tolerance();
 
-        if ( ! Cache::add( 'ecommerce:service-signature:' . hash( 'sha256', $expected ), true, $ttl ) ) {
+        if ( ! self::replayStore()->add( 'ecommerce:service-signature:' . hash( 'sha256', $expected ), true, $ttl ) ) {
             return null;
         }
 

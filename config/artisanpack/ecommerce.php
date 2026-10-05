@@ -579,6 +579,11 @@ return [
     | `signature_tolerance_seconds` — Maximum clock skew accepted on a
     |                      signed request's `Date` header (default 300s).
     |
+    | `signature_cache_store` — Cache store that remembers used signatures
+    |                      (replay protection). Must be shared across servers
+    |                      (Redis, database, Memcached); defaults to the
+    |                      default store.
+    |
     */
 
     'api' => [
@@ -591,6 +596,7 @@ return [
         'services' => [],
 
         'signature_tolerance_seconds' => (int) env( 'ECOMMERCE_SERVICE_SIGNATURE_TOLERANCE', 300 ),
+        'signature_cache_store'       => env( 'ECOMMERCE_SERVICE_SIGNATURE_CACHE_STORE' ),
     ],
 
     /*
