@@ -88,6 +88,7 @@ use ArtisanPackUI\Ecommerce\Listeners\RecordModelActivity;
 use ArtisanPackUI\Ecommerce\Listeners\RevokeDigitalDeliverables;
 use ArtisanPackUI\Ecommerce\Listeners\SendCatalogNotifications;
 use ArtisanPackUI\Ecommerce\Listeners\TrackCustomerMilestones;
+use ArtisanPackUI\Ecommerce\Listeners\UpdateCustomerStats;
 use ArtisanPackUI\Ecommerce\Logging\EcommerceLogFormatter;
 use ArtisanPackUI\Ecommerce\Models\Coupon;
 use ArtisanPackUI\Ecommerce\Models\Customer;
@@ -1506,7 +1507,7 @@ class EcommerceServiceProvider extends ServiceProvider
      * Wires the customer-lifecycle listeners: on verified-email registration,
      * back-fill `customers.user_id` for the shopper (engine spec §5.8 / §3.22),
      * on login merge the guest cart into the account cart (parent plan §7.1),
-     * and on a settled payment fire the `customer.firstOrder` /
+     * keep customer stats current, and on a settled payment fire the `customer.firstOrder` /
      * `customer.becameVip` milestones.
      *
      * @since 1.0.0
@@ -1522,6 +1523,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $events->listen( Login::class, MergeGuestCartOnLogin::class );
 
         $this->app->make( TrackCustomerMilestones::class )->subscribe();
+        $this->app->make( UpdateCustomerStats::class )->subscribe();
     }
 
     /**
