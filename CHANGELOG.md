@@ -6,6 +6,13 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Satellite verification report asset name**: GitHub renames a release asset whose name starts with a dot, so a report attached as `.ecommerce-verify-report.json` was published as `default.ecommerce-verify-report.json` (#186).
+  - The reusable `verify-satellite` workflow now adds `ecommerce-verify-report.json` to the `ecommerce-verify-signature` artifact. It's the same signed bytes, and attaching it keeps its name.
+  - The dotfile stays in the artifact for release steps written against v1.0.0.
+  - The workflow stub attaches `ecommerce-verify-report.json` and pins `verify-satellite.yml@v1.0.1`.
+
 ## [1.0.0] - 2026-10-05
 
 The first stable release of the headless commerce engine. Storefront, admin,
