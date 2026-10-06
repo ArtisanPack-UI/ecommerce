@@ -49,8 +49,20 @@ it( 'attaches no release asset whose name starts with a dot in the stub', functi
     }
 } );
 
-it( 'pins the stub to a released engine tag, never a branch', function (): void {
+it( 'pins the stub to an engine version tag, never a branch', function (): void {
     preg_match( '/verify-satellite\.yml@(\S+)/', verifyWorkflowFile( 'stubs/workflows/verify-satellite.yml' ), $match );
 
     expect( $match[1] ?? '' )->toMatch( '/^v\d+\.\d+\.\d+$/' );
+} );
+
+it( 'pins every third-party action in the stub to a full commit SHA', function (): void {
+    preg_match_all( '/uses:\s*(\S+)@(\S+)/', verifyWorkflowFile( 'stubs/workflows/verify-satellite.yml' ), $matches, PREG_SET_ORDER );
+
+    $actions = array_filter( $matches, static fn ( array $match ): bool => ! str_starts_with( $match[1], 'ArtisanPack-UI/ecommerce/' ) );
+
+    expect( $actions )->not->toBeEmpty();
+
+    foreach ( $actions as $match ) {
+        expect( $match[2] )->toMatch( '/^[0-9a-f]{40}$/' );
+    }
 } );

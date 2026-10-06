@@ -300,7 +300,7 @@ jobs:
           name: ecommerce-verify-signature
           path: verification
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
             verification/ecommerce-verify-report.json
@@ -316,8 +316,9 @@ made with the v1.0.0 stub carry.
 
 Keep the reference pinned to an engine release tag (or a commit SHA). The
 job passes the workflow your signing key, so never point it at a moving
-branch such as `@main`. The reusable workflow SHA-pins every third-party
-action it uses.
+branch such as `@main`. The reusable workflow and the stub SHA-pin every
+third-party action they use; the release step runs with `contents: write`,
+so pin it in your own release workflow too.
 
 ### How the workflow runs
 

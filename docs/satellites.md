@@ -18,7 +18,7 @@ See [what a badge does and doesn't prove](satellite-verification.md).
 
 | Badge | Meaning |
 |---|---|
-| ![contract-verified](https://img.shields.io/badge/contract-verified-brightgreen) | The latest tag has an `ecommerce-verify-report.json` release asset with `"verified": true`, and its `verify-report.sig` checks out against the satellite's registered public key. |
+| ![contract-verified](https://img.shields.io/badge/contract-verified-brightgreen) | The latest tag has an `ecommerce-verify-report.json` release asset (or, for releases made with the v1.0.0 stub, `default.ecommerce-verify-report.json` or an asset labelled `.ecommerce-verify-report.json`) with `"verified": true`, and its `verify-report.sig` checks out against the satellite's registered public key. |
 | ![contract-failing](https://img.shields.io/badge/contract-failing-red) | The latest tag has a signed report, but the report says `"verified": false`. The engine's signing tools refuse to sign a failing report, so a failing tag normally has no signed report and shows as unverified. |
 | ![unverified](https://img.shields.io/badge/contract-unverified-lightgrey) | No valid signed report for the latest tag. The satellite may still work — it just hasn't proven it. |
 
