@@ -155,11 +155,24 @@ it( 'uses the spec version it is given, without a leading v', function ( string 
     'a version'     => [ '2.3.4', '2.3.4' ],
     'a pre-release' => [ 'v2.0.0-beta.1', '2.0.0-beta.1' ],
     'build data'    => [ '1.2.3+build.5', '1.2.3+build.5' ],
+    'zeros'         => [ '0.0.0', '0.0.0' ],
+    'alphanumerics' => [ '1.0.0-0alpha.x-y.7+001', '1.0.0-0alpha.x-y.7+001' ],
 ] );
 
 it( 'refuses a spec version that is not a semantic version', function ( string $given ): void {
     app( OpenApiGenerator::class )->generate( $given );
-} )->with( [ 'dev-main', '1.0', 'v1.0.2; rm -rf /', '' ] )->throws( InvalidArgumentException::class );
+} )->with( [
+    'a branch'                 => [ 'dev-main' ],
+    'two parts'                => [ '1.0' ],
+    'shell characters'         => [ 'v1.0.2; rm -rf /' ],
+    'empty'                    => [ '' ],
+    'a leading zero'           => [ '01.2.3' ],
+    'a leading zero in minor'  => [ '1.02.3' ],
+    'a numeric pre-release 0x' => [ '1.2.3-beta.01' ],
+    'an empty pre-release id'  => [ '1.2.3-beta..1' ],
+    'an empty build id'        => [ '1.2.3+build.' ],
+    'a trailing newline'       => [ "1.2.3\nx" ],
+] )->throws( InvalidArgumentException::class );
 
 it( 'reads a version only when it is a semantic version', function ( string $given, ?string $expected ): void {
     expect( OpenApiGenerator::normalizeVersion( $given ) )->toBe( $expected );
@@ -187,15 +200,15 @@ it( 'sets the spec version from the artisan command', function (): void {
     unlink( $path );
 } );
 
-it( 'fails without writing when the command gets a malformed spec version', function (): void {
+it( 'fails without writing when the command gets a malformed or empty spec version', function ( string $given ): void {
     $path = sys_get_temp_dir() . '/ecommerce-openapi-' . uniqid() . '.json';
 
-    $this->artisan( 'ecommerce:generate-openapi', [ '--output' => $path, '--spec-version' => 'latest' ] )
+    $this->artisan( 'ecommerce:generate-openapi', [ '--output' => $path, '--spec-version' => $given ] )
         ->expectsOutputToContain( 'is not a semantic version' )
         ->assertFailed();
 
     expect( file_exists( $path ) )->toBeFalse();
-} );
+} )->with( [ 'a word' => [ 'latest' ], 'empty' => [ '' ] ] );
 
 it( 'converts validation rules to JSON Schema', function (): void {
     $schema = RuleSchema::fromRules( [

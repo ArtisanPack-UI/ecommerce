@@ -58,10 +58,14 @@ class GenerateOpenApiCommand extends Command
      */
     public function handle( OpenApiGenerator $generator, Filesystem $files ): int
     {
-        $version = $this->option( 'spec-version' );
+        // Null only when the option is absent: an empty `--spec-version=` is
+        // refused like any other malformed value, never a silent fallback.
+        $version = $this->input->hasParameterOption( '--spec-version', true )
+            ? (string) ( $this->option( 'spec-version' ) ?? '' )
+            : null;
 
         try {
-            $spec = $generator->generate( is_string( $version ) && '' !== $version ? $version : null );
+            $spec = $generator->generate( $version );
         } catch ( InvalidArgumentException $exception ) {
             $this->error( $exception->getMessage() );
 

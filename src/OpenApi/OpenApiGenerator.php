@@ -181,7 +181,9 @@ class OpenApiGenerator
 
     /**
      * A semantic version without its leading `v` (`v1.0.2` becomes `1.0.2`),
-     * or null when the value isn't one (`dev-main`, `dev`).
+     * or null when the value isn't one (`dev-main`, `dev`). Follows the
+     * SemVer 2.0.0 grammar: no leading zeros in numeric parts, and no empty
+     * pre-release or build identifiers.
      *
      * @since 1.0.2
      *
@@ -193,7 +195,14 @@ class OpenApiGenerator
     {
         $version = trim( $version );
 
-        if ( 1 !== preg_match( '/^v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/', $version, $match ) ) {
+        $numeric    = '(?:0|[1-9]\d*)';
+        $prerelease = '(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)';
+        $build      = '[0-9A-Za-z-]+';
+        $pattern    = '/^v?(' . $numeric . '\.' . $numeric . '\.' . $numeric
+            . '(?:-' . $prerelease . '(?:\.' . $prerelease . ')*)?'
+            . '(?:\+' . $build . '(?:\.' . $build . ')*)?)$/D';
+
+        if ( 1 !== preg_match( $pattern, $version, $match ) ) {
             return null;
         }
 
