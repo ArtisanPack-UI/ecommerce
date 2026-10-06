@@ -18,7 +18,7 @@ See [what a badge does and doesn't prove](satellite-verification.md).
 
 | Badge | Meaning |
 |---|---|
-| ![contract-verified](https://img.shields.io/badge/contract-verified-brightgreen) | The latest tag has a `.ecommerce-verify-report.json` release asset with `"verified": true`, and its `verify-report.sig` checks out against the satellite's registered public key. |
+| ![contract-verified](https://img.shields.io/badge/contract-verified-brightgreen) | The latest tag has an `ecommerce-verify-report.json` release asset with `"verified": true`, and its `verify-report.sig` checks out against the satellite's registered public key. |
 | ![contract-failing](https://img.shields.io/badge/contract-failing-red) | The latest tag has a signed report, but the report says `"verified": false`. The engine's signing tools refuse to sign a failing report, so a failing tag normally has no signed report and shows as unverified. |
 | ![unverified](https://img.shields.io/badge/contract-unverified-lightgrey) | No valid signed report for the latest tag. The satellite may still work — it just hasn't proven it. |
 
@@ -30,18 +30,33 @@ See [what a badge does and doesn't prove](satellite-verification.md).
 2. On a tag, the workflow signs a passing report with Ed25519 in a separate
    job and hands the report and signature over as a workflow artifact. The
    satellite's own release job attaches both files to the GitHub release for
-   that tag.
+   that tag. The report is attached as `ecommerce-verify-report.json`.
+
+   GitHub renames a release asset whose name starts with a dot, so a report
+   attached as `.ecommerce-verify-report.json` is published as
+   `default.ecommerce-verify-report.json`, with the original name as its
+   label. That happened to releases made with the v1.0.0 workflow stub.
+   Releases are immutable, so the docs site also accepts that asset: one
+   named `default.ecommerce-verify-report.json`, or one labelled
+   `.ecommerce-verify-report.json`.
 3. The docs site downloads both assets for the satellite's **latest** tag and
    checks that:
    - the signature is valid for the satellite's registered public key
-     (`ecommerce:verify-satellite --check-signature --public-key=…`);
+     (`ecommerce:verify-satellite --check-signature --public-key=…
+     --output=<report> --signature=<sig>`; the signature covers the report's
+     bytes, not its file name);
    - the report's `package` matches the listed package and its `version`
      matches the tag;
    - the report says `"verified": true`.
 4. If every check passes, the listing shows the green badge. A new tag without
    a valid report drops the satellite back to "unverified".
 
-First-party satellites sign with the ArtisanPack UI organization key.
+First-party satellites sign with the ArtisanPack UI organization key:
+
+```text
+GGLkQlSDIt+Gz6J/K+kTpxwL/3doEQ4AvVlEfWFi69c=
+```
+
 Third-party authors add their satellite to this page with a pull request that
 includes their base64 Ed25519 public key; that key is what the site checks
 their signatures against.
@@ -118,7 +133,7 @@ release yet are listed as unverified.
 | `artisanpack-ui/ecommerce-storefront-livewire` | Storefront pages/components in Livewire. | ![unverified](https://img.shields.io/badge/contract-unverified-lightgrey) |
 | `artisanpack-ui/ecommerce-storefront-react` | Storefront in React. | ![unverified](https://img.shields.io/badge/contract-unverified-lightgrey) |
 | `artisanpack-ui/ecommerce-storefront-vue` | Storefront in Vue. | ![unverified](https://img.shields.io/badge/contract-unverified-lightgrey) |
-| `artisanpack-ui/ecommerce-admin-livewire` | Admin surfaces in Livewire. | ![unverified](https://img.shields.io/badge/contract-unverified-lightgrey) |
+| `artisanpack-ui/ecommerce-admin-livewire` | Admin surfaces in Livewire. | ![contract-verified](https://img.shields.io/badge/contract-verified-brightgreen) (v1.0.0, `--allow-empty`) |
 | `artisanpack-ui/ecommerce-admin-react` | Admin surfaces in React. | ![unverified](https://img.shields.io/badge/contract-unverified-lightgrey) |
 | `artisanpack-ui/ecommerce-admin-vue` | Admin surfaces in Vue. | ![unverified](https://img.shields.io/badge/contract-unverified-lightgrey) |
 | `artisanpack-ui/ecommerce-kanban-livewire` | Kanban board UI in Livewire. | ![unverified](https://img.shields.io/badge/contract-unverified-lightgrey) |
