@@ -2,6 +2,7 @@
 
 declare( strict_types=1 );
 
+use ArtisanPackUI\Ecommerce\Ecommerce;
 use ArtisanPackUI\Ecommerce\OpenApi\OpenApiGenerator;
 use ArtisanPackUI\Ecommerce\OpenApi\RuleSchema;
 use Illuminate\Routing\Route;
@@ -35,7 +36,7 @@ function documentedOperations( array $spec ): array
 
 it( 'produces an OpenAPI 3.1 document', function (): void {
     expect( $this->spec['openapi'] )->toBe( '3.1.0' )
-        ->and( $this->spec['info']['version'] )->toBe( '1.0.1' )
+        ->and( $this->spec['info']['version'] )->toBe( OpenApiGenerator::normalizeVersion( Ecommerce::version() ) ?? OpenApiGenerator::FALLBACK_VERSION )
         ->and( $this->spec['info']['license'] )->toBe( [ 'name' => 'MIT', 'identifier' => 'MIT' ] )
         ->and( $this->spec['servers'][0]['url'] )->toBe( '/api/ecommerce/v1' )
         ->and( $this->spec['components']['securitySchemes'] )->toHaveKeys( [ 'sanctum', 'sessionCookie', 'serviceSignature' ] );
@@ -145,6 +146,55 @@ it( 'writes the spec from the artisan command', function (): void {
     expect( json_decode( (string) file_get_contents( $path ), true )['openapi'] )->toBe( '3.1.0' );
 
     unlink( $path );
+} );
+
+it( 'uses the spec version it is given, without a leading v', function ( string $given, string $expected ): void {
+    expect( app( OpenApiGenerator::class )->generate( $given )['info']['version'] )->toBe( $expected );
+} )->with( [
+    'a tag'         => [ 'v1.0.2', '1.0.2' ],
+    'a version'     => [ '2.3.4', '2.3.4' ],
+    'a pre-release' => [ 'v2.0.0-beta.1', '2.0.0-beta.1' ],
+    'build data'    => [ '1.2.3+build.5', '1.2.3+build.5' ],
+] );
+
+it( 'refuses a spec version that is not a semantic version', function ( string $given ): void {
+    app( OpenApiGenerator::class )->generate( $given );
+} )->with( [ 'dev-main', '1.0', 'v1.0.2; rm -rf /', '' ] )->throws( InvalidArgumentException::class );
+
+it( 'reads a version only when it is a semantic version', function ( string $given, ?string $expected ): void {
+    expect( OpenApiGenerator::normalizeVersion( $given ) )->toBe( $expected );
+} )->with( [
+    'a tag'          => [ 'v1.0.2', '1.0.2' ],
+    'spaces'         => [ ' 1.0.2 ', '1.0.2' ],
+    'a branch'       => [ 'dev-main', null ],
+    'a release line' => [ 'dev-release/1.x', null ],
+    'dev'            => [ 'dev', null ],
+] );
+
+it( 'never falls back to a release number', function (): void {
+    expect( OpenApiGenerator::FALLBACK_VERSION )->toBe( '0.0.0-dev' )
+        ->and( (string) file_get_contents( dirname( __DIR__, 3 ) . '/src/OpenApi/OpenApiGenerator.php' ) )
+        ->not->toMatch( "/: '\\d+\\.\\d+\\.\\d+';/" );
+} );
+
+it( 'sets the spec version from the artisan command', function (): void {
+    $path = sys_get_temp_dir() . '/ecommerce-openapi-' . uniqid() . '.json';
+
+    $this->artisan( 'ecommerce:generate-openapi', [ '--output' => $path, '--spec-version' => 'v9.8.7' ] )->assertSuccessful();
+
+    expect( json_decode( (string) file_get_contents( $path ), true )['info']['version'] )->toBe( '9.8.7' );
+
+    unlink( $path );
+} );
+
+it( 'fails without writing when the command gets a malformed spec version', function (): void {
+    $path = sys_get_temp_dir() . '/ecommerce-openapi-' . uniqid() . '.json';
+
+    $this->artisan( 'ecommerce:generate-openapi', [ '--output' => $path, '--spec-version' => 'latest' ] )
+        ->expectsOutputToContain( 'is not a semantic version' )
+        ->assertFailed();
+
+    expect( file_exists( $path ) )->toBeFalse();
 } );
 
 it( 'converts validation rules to JSON Schema', function (): void {
