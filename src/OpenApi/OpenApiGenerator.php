@@ -982,6 +982,6 @@ class OpenApiGenerator
         $path     = dirname( __DIR__, 2 ) . '/composer.json';
         $composer = is_file( $path ) ? json_decode( (string) file_get_contents( $path ), true ) : null;
 
-        return is_array( $composer ) && isset( $composer['version'] ) ? (string) $composer['version'] : '1.0.0';
+        return is_array( $composer ) && isset( $composer['version'] ) ? (string) $composer['version'] : '1.0.1';
     }
 }

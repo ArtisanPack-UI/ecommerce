@@ -94,7 +94,7 @@ class Ecommerce
     }
 
     /**
-     * The installed engine version (`1.0.0`), or `dev` when Composer can't
+     * The installed engine version (e.g. `1.0.1`), or `dev` when Composer can't
      * report it (a path repository without a version, for example).
      *
      * @since 1.0.0
