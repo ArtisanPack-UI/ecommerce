@@ -6,6 +6,28 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-06
+
+A patch release for satellite verification: signed reports now reach a
+release under a name GitHub keeps.
+
+### Fixed
+
+- **Satellite verification report asset name**: GitHub renames a release asset whose name starts with a dot, so a report attached as `.ecommerce-verify-report.json` was published as `default.ecommerce-verify-report.json` (#186).
+  - The reusable `verify-satellite` workflow now adds `ecommerce-verify-report.json` to the `ecommerce-verify-signature` artifact. It's the same signed bytes, and attaching it keeps its name.
+  - The dotfile stays in the artifact for release steps written against v1.0.0.
+  - The workflow stub attaches `ecommerce-verify-report.json` and pins `verify-satellite.yml@v1.0.1`.
+- The workflow stub pins `softprops/action-gh-release` to a full commit SHA, since its release step runs with `contents: write`.
+- The OpenAPI spec reports the release's version (`info.version`).
+
+### Changed
+
+- **Satellites page** (`docs/satellites.md`):
+  - The contract-verified rule looks for `ecommerce-verify-report.json`. It still accepts the `default.ecommerce-verify-report.json` asset that releases made with the v1.0.0 stub carry.
+  - Publishes the ArtisanPack UI organization's signing key.
+  - Lists `artisanpack-ui/ecommerce-admin-livewire` as contract-verified.
+- **Satellite verification guide** (`docs/satellite-verification.md`): the CI example uses the new asset name and engine tag, and shows how to check a published release's signature.
+
 ## [1.0.0] - 2026-10-05
 
 The first stable release of the headless commerce engine. Storefront, admin,

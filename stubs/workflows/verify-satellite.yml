@@ -10,6 +10,11 @@
 # once published). This file's `release` job creates the release once, with
 # both files attached. If you already have a release workflow, move that
 # job's two steps into it and make it `needs: verify`.
+#
+# Attach `ecommerce-verify-report.json`, not the `.ecommerce-verify-report.json`
+# dotfile: GitHub renames an asset whose name starts with a dot to
+# `default.ecommerce-verify-report.json`, and the satellites page looks for
+# `ecommerce-verify-report.json`.
 name: Verify satellite
 
 on:
@@ -26,7 +31,7 @@ jobs:
     # Pinned to an engine release tag on purpose: this job hands the workflow
     # your signing key, so never point it at a moving branch like @main.
     # Bump the tag (or pin a commit SHA) when you target a newer engine.
-    uses: ArtisanPack-UI/ecommerce/.github/workflows/verify-satellite.yml@v1.0.0
+    uses: ArtisanPack-UI/ecommerce/.github/workflows/verify-satellite.yml@v1.0.1
     permissions:
       contents: read
     with:
@@ -46,8 +51,8 @@ jobs:
           name: ecommerce-verify-signature
           path: verification
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
-            verification/.ecommerce-verify-report.json
+            verification/ecommerce-verify-report.json
             verification/verify-report.sig
