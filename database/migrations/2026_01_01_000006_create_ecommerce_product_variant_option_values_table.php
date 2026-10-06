@@ -27,8 +27,13 @@ return new class extends Migration {
     {
         Schema::create( 'ecommerce_product_variant_option_values', function ( Blueprint $table ): void {
             $table->bigIncrements( 'id' );
-            $table->foreignId( 'product_variant_id' )
-                ->constrained( 'ecommerce_product_variants' )
+            // Named explicitly: Laravel's default
+            // (`{table}_product_variant_id_foreign`) is 66 characters, past
+            // MySQL's 64-character identifier limit.
+            $table->unsignedBigInteger( 'product_variant_id' );
+            $table->foreign( 'product_variant_id', 'ecommerce_pvov_variant_fk' )
+                ->references( 'id' )
+                ->on( 'ecommerce_product_variants' )
                 ->cascadeOnDelete();
             $table->unsignedBigInteger( 'product_attribute_id' );
             $table->unsignedBigInteger( 'product_attribute_value_id' );
