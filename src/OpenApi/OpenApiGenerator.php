@@ -37,6 +37,7 @@ namespace ArtisanPackUI\Ecommerce\OpenApi;
 
 use ArtisanPackUI\Ecommerce\Api\ResourceSchemas;
 use ArtisanPackUI\Ecommerce\Auth\TokenAbilities;
+use ArtisanPackUI\Ecommerce\Ecommerce;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use ArtisanPackUI\Ecommerce\Webhooks\WebhookPayloadFactory;
 use ArtisanPackUI\Ecommerce\Webhooks\WebhookSigner;
@@ -45,6 +46,7 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Routing\Route;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 use ReflectionMethod;
 use ReflectionNamedType;
 use Throwable;
@@ -80,6 +82,17 @@ class OpenApiGenerator
      *
      * @param  Router  $router  Router holding the registered routes.
      */
+    /**
+     * The `info.version` used when no release version can be found. It
+     * names no release, so a spec built from a development checkout can't
+     * pass for one.
+     *
+     * @since 1.0.2
+     *
+     * @var string
+     */
+    public const FALLBACK_VERSION = '0.0.0-dev';
+
     public function __construct( protected Router $router )
     {
     }
@@ -88,13 +101,19 @@ class OpenApiGenerator
      * Builds the document.
      *
      * @since 1.0.0
+     * @since 1.0.2 Accepts the spec version.
+     *
+     * @param  string|null  $version  The `info.version`, e.g. the release tag (`v1.0.2` or `1.0.2`). Null resolves it; see {@see self::version()}.
+     *
+     * @throws InvalidArgumentException When `$version` isn't a semantic version.
      *
      * @return array<string, mixed>
      */
-    public function generate(): array
+    public function generate( ?string $version = null ): array
     {
-        $base  = '/' . trim( (string) config( 'artisanpack.ecommerce.api_prefix', 'api/ecommerce' ), '/' ) . '/' . config( 'artisanpack.ecommerce.api.version', 'v1' );
-        $paths = [];
+        $specVersion = $this->version( $version );
+        $base        = '/' . trim( (string) config( 'artisanpack.ecommerce.api_prefix', 'api/ecommerce' ), '/' ) . '/' . config( 'artisanpack.ecommerce.api.version', 'v1' );
+        $paths       = [];
 
         foreach ( $this->routes() as $route ) {
             $isApi = str_starts_with( (string) $route->getName(), self::ROUTE_PREFIX );
@@ -123,7 +142,7 @@ class OpenApiGenerator
             'jsonSchemaDialect' => 'https://spec.openapis.org/oas/3.1/dialect/base',
             'info'              => [
                 'title'       => 'ArtisanPack UI Ecommerce API',
-                'version'     => $this->version(),
+                'version'     => $specVersion,
                 'description' => $this->description(),
                 'license'     => [ 'name' => 'MIT', 'identifier' => 'MIT' ],
             ],
@@ -158,6 +177,36 @@ class OpenApiGenerator
         usort( $routes, static fn ( Route $a, Route $b ): int => [ $a->uri(), $a->getName() ] <=> [ $b->uri(), $b->getName() ] );
 
         return array_values( $routes );
+    }
+
+    /**
+     * A semantic version without its leading `v` (`v1.0.2` becomes `1.0.2`),
+     * or null when the value isn't one (`dev-main`, `dev`). Follows the
+     * SemVer 2.0.0 grammar: no leading zeros in numeric parts, and no empty
+     * pre-release or build identifiers.
+     *
+     * @since 1.0.2
+     *
+     * @param  string  $version  The version or tag.
+     *
+     * @return string|null
+     */
+    public static function normalizeVersion( string $version ): ?string
+    {
+        $version = trim( $version );
+
+        $numeric    = '(?:0|[1-9]\d*)';
+        $prerelease = '(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)';
+        $build      = '[0-9A-Za-z-]+';
+        $pattern    = '/^v?(' . $numeric . '\.' . $numeric . '\.' . $numeric
+            . '(?:-' . $prerelease . '(?:\.' . $prerelease . ')*)?'
+            . '(?:\+' . $build . '(?:\.' . $build . ')*)?)$/D';
+
+        if ( 1 !== preg_match( $pattern, $version, $match ) ) {
+            return null;
+        }
+
+        return $match[1];
     }
 
     /**
@@ -971,17 +1020,34 @@ class OpenApiGenerator
     }
 
     /**
-     * Package version from `composer.json`.
+     * The spec's `info.version`, the first of:
+     *
+     * 1. `$version`, when given (the release workflow passes the tag);
+     * 2. the `version` field of the engine's `composer.json`;
+     * 3. the version Composer installed the engine at;
+     * 4. {@see self::FALLBACK_VERSION}.
      *
      * @since 1.0.0
+     * @since 1.0.2 Accepts an explicit version, and falls back to the installed version, then {@see self::FALLBACK_VERSION}.
+     *
+     * @param  string|null  $version  An explicit version.
+     *
+     * @throws InvalidArgumentException When `$version` isn't a semantic version.
      *
      * @return string
      */
-    protected function version(): string
+    protected function version( ?string $version = null ): string
     {
+        if ( null !== $version ) {
+            return self::normalizeVersion( $version )
+                ?? throw new InvalidArgumentException( sprintf( 'The spec version "%s" is not a semantic version, such as 1.2.3 or v1.2.3.', $version ) );
+        }
+
         $path     = dirname( __DIR__, 2 ) . '/composer.json';
         $composer = is_file( $path ) ? json_decode( (string) file_get_contents( $path ), true ) : null;
 
-        return is_array( $composer ) && isset( $composer['version'] ) ? (string) $composer['version'] : '1.0.1';
+        $declared = is_array( $composer ) && is_string( $composer['version'] ?? null ) ? self::normalizeVersion( $composer['version'] ) : null;
+
+        return $declared ?? self::normalizeVersion( Ecommerce::version() ) ?? self::FALLBACK_VERSION;
     }
 }

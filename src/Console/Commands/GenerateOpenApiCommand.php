@@ -5,8 +5,9 @@
  *
  * `php artisan ecommerce:generate-openapi` — writes the OpenAPI 3.1 spec for
  * the REST API (parent plan §12.1) built by {@see OpenApiGenerator}. The
- * release workflow runs it (via `vendor/bin/testbench`) and attaches the
- * file to each GitHub release.
+ * release workflow runs it (via `vendor/bin/testbench`) with
+ * `--spec-version` set to the tag, and attaches the file to each GitHub
+ * release.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -23,6 +24,7 @@ namespace ArtisanPackUI\Ecommerce\Console\Commands;
 use ArtisanPackUI\Ecommerce\OpenApi\OpenApiGenerator;
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
+use InvalidArgumentException;
 
 /**
  * @package    ArtisanPack_UI
@@ -37,7 +39,8 @@ class GenerateOpenApiCommand extends Command
      */
     protected $signature = 'ecommerce:generate-openapi
         {--output= : File to write (defaults to storage/app/ecommerce-openapi.json)}
-        {--stdout : Print the spec instead of writing a file}';
+        {--stdout : Print the spec instead of writing a file}
+        {--spec-version= : The spec\'s info.version, e.g. the release tag (1.2.3 or v1.2.3). Defaults to the installed engine version}';
 
     /**
      * @var string
@@ -46,6 +49,7 @@ class GenerateOpenApiCommand extends Command
 
     /**
      * @since 1.0.0
+     * @since 1.0.2 Takes `--spec-version`.
      *
      * @param  OpenApiGenerator  $generator  Spec builder.
      * @param  Filesystem        $files      Filesystem.
@@ -54,7 +58,20 @@ class GenerateOpenApiCommand extends Command
      */
     public function handle( OpenApiGenerator $generator, Filesystem $files ): int
     {
-        $spec = $generator->generate();
+        // Null only when the option is absent: an empty `--spec-version=` is
+        // refused like any other malformed value, never a silent fallback.
+        $version = $this->input->hasParameterOption( '--spec-version', true )
+            ? (string) ( $this->option( 'spec-version' ) ?? '' )
+            : null;
+
+        try {
+            $spec = $generator->generate( $version );
+        } catch ( InvalidArgumentException $exception ) {
+            $this->error( $exception->getMessage() );
+
+            return self::FAILURE;
+        }
+
         $json = (string) json_encode( $spec, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) . "\n";
 
         if ( (bool) $this->option( 'stdout' ) ) {

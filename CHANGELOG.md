@@ -6,6 +6,15 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `ecommerce:generate-openapi --spec-version=` sets the spec's `info.version` (a leading `v` is dropped; anything that isn't a semantic version is refused). The release workflow passes the tag (#189).
+- `OpenApiGenerator::generate()` takes an optional version, and `OpenApiGenerator::normalizeVersion()` reads a version or tag.
+
+### Changed
+
+- Without `--spec-version`, `info.version` comes from `composer.json`, then the installed engine version. It falls back to `0.0.0-dev` (`OpenApiGenerator::FALLBACK_VERSION`), not a hard-coded release number that had to be bumped by hand each release.
+
 ## [1.0.1] - 2026-10-06
 
 A patch release for satellite verification: signed reports now reach a
