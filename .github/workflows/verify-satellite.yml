@@ -15,7 +15,11 @@
 #    engine at the exact commit of this workflow file (no `composer
 #    install`), signs with the engine's dependency-free `bin/ecommerce-sign-report`,
 #    and uploads the report plus `verify-report.sig` as the
-#    `ecommerce-verify-signature` artifact.
+#    `ecommerce-verify-signature` artifact. The report is in it twice, as
+#    the same signed bytes: `ecommerce-verify-report.json` is the one to
+#    attach to a release (GitHub renames an asset whose name starts with a
+#    dot to `default.<name>`), and `.ecommerce-verify-report.json` is kept
+#    for release steps written against v1.0.0.
 #
 # This workflow never creates or edits a GitHub release: under immutable
 # releases a release created here would lock before the satellite's own
@@ -169,6 +173,8 @@ jobs:
             exit 0
           fi
           php engine/bin/ecommerce-sign-report report/.ecommerce-verify-report.json report/verify-report.sig
+          # The release asset name: GitHub doesn't keep a leading dot.
+          cp report/.ecommerce-verify-report.json report/ecommerce-verify-report.json
           echo "signed=true" >> "$GITHUB_OUTPUT"
 
       - name: Upload signed report
@@ -177,6 +183,7 @@ jobs:
         with:
           name: ecommerce-verify-signature
           path: |
+            report/ecommerce-verify-report.json
             report/.ecommerce-verify-report.json
             report/verify-report.sig
           include-hidden-files: true

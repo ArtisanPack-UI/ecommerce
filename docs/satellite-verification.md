@@ -254,6 +254,15 @@ Check a signature locally:
 vendor/bin/testbench ecommerce:verify-satellite --check-signature --public-key=<base64>
 ```
 
+To check a published release, download its `ecommerce-verify-report.json` and
+`verify-report.sig` and point the command at them. The signature covers the
+report's bytes, not its file name:
+
+```bash
+vendor/bin/testbench ecommerce:verify-satellite --check-signature --public-key=<base64> \
+    --output=ecommerce-verify-report.json --signature=verify-report.sig
+```
+
 ## CI
 
 The engine ships a reusable workflow at
@@ -271,7 +280,7 @@ on:
 
 jobs:
   verify:
-    uses: ArtisanPack-UI/ecommerce/.github/workflows/verify-satellite.yml@v1.0.0
+    uses: ArtisanPack-UI/ecommerce/.github/workflows/verify-satellite.yml@v1.0.1
     permissions:
       contents: read
     with:
@@ -291,17 +300,25 @@ jobs:
           name: ecommerce-verify-signature
           path: verification
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
-            verification/.ecommerce-verify-report.json
+            verification/ecommerce-verify-report.json
             verification/verify-report.sig
 ```
 
+Attach `ecommerce-verify-report.json`, not `.ecommerce-verify-report.json`.
+GitHub renames a release asset whose name starts with a dot to
+`default.<name>`, and releases can't be changed once published. The
+[satellites page](satellites.md) looks for `ecommerce-verify-report.json`.
+It still accepts the `default.ecommerce-verify-report.json` that releases
+made with the v1.0.0 stub carry.
+
 Keep the reference pinned to an engine release tag (or a commit SHA). The
 job passes the workflow your signing key, so never point it at a moving
-branch such as `@main`. The reusable workflow SHA-pins every third-party
-action it uses.
+branch such as `@main`. The reusable workflow and the stub SHA-pin every
+third-party action they use; the release step runs with `contents: write`,
+so pin it in your own release workflow too.
 
 ### How the workflow runs
 
@@ -322,6 +339,11 @@ with your satellite's code:
    with `ECOMMERCE_VERIFY_SIGNING_KEY`, and uploads the report and
    `verify-report.sig` as the `ecommerce-verify-signature` artifact. With no
    key passed, it logs a notice and skips signing.
+
+   The artifact holds the report twice, as the same signed bytes:
+   - `ecommerce-verify-report.json`, the name to attach to your release;
+   - `.ecommerce-verify-report.json`, kept so release steps written for
+     v1.0.0 keep working.
 
 The workflow's `signed` output is `true` when the
 `ecommerce-verify-signature` artifact exists.
