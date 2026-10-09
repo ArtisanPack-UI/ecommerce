@@ -30,6 +30,7 @@ use ArtisanPackUI\Ecommerce\Inventory\StockStatus;
 use ArtisanPackUI\Ecommerce\ProductTypes\MissingProductType;
 use ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry;
 use ArtisanPackUI\Ecommerce\Services\ProductPriceResolver;
+use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -382,6 +383,41 @@ class Product extends Model
     {
         $query->where( $this->qualifyColumn( 'status' ), 'active' )
             ->where( fn ( Builder $q ) => $q->whereNull( $this->qualifyColumn( 'published_at' ) )->orWhere( $this->qualifyColumn( 'published_at' ), '<=', Carbon::now() ) );
+    }
+
+    /**
+     * Eager-loads what a display price and stock state need — prices,
+     * stock rows, and variants with theirs — so `PriceDisplayResolver` and
+     * `StockStatus` run no query per product in a listing.
+     *
+     * @since 1.0.0
+     *
+     * @param  Builder<Product>  $query  Query.
+     *
+     * @return void
+     */
+    public function scopeWithDisplayData( Builder $query ): void
+    {
+        $query->with( self::displayRelations() );
+    }
+
+    /**
+     * The relations {@see self::scopeWithDisplayData()} loads, for
+     * `loadMissing()` on products already fetched.
+     *
+     * @since 1.0.0
+     *
+     * @return array<int|string, Closure|string>
+     */
+    public static function displayRelations(): array
+    {
+        return [
+            'prices',
+            'inventoryItems',
+            'variants' => static fn ( HasMany $variants ) => $variants->orderBy( 'position' )->orderBy( 'id' ),
+            'variants.prices',
+            'variants.inventoryItems',
+        ];
     }
 
     /**
