@@ -223,6 +223,7 @@ use ArtisanPackUI\Ecommerce\Support\RegionalJsonFallbackLoader;
 use ArtisanPackUI\Ecommerce\Support\RegistryHookRegistrar;
 use ArtisanPackUI\Ecommerce\Support\RequestContext;
 use ArtisanPackUI\Ecommerce\Tax\ManualTaxProvider;
+use ArtisanPackUI\Ecommerce\Tax\TaxRateCandidates;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Verified;
@@ -338,6 +339,7 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->app->singleton( NotificationChannelRegistry::class, static fn ( $app ): NotificationChannelRegistry => new NotificationChannelRegistry( $app ) );
         // Scoped so queue workers and Octane re-read it per job / request.
         $this->app->scoped( SubStatusRegistry::class );
+        $this->app->scoped( TaxRateCandidates::class );
 
         $this->app->singleton( CartStorage::class, DatabaseCartStorage::class );
         $this->app->singleton( CurrencyResolver::class, SessionCurrencyResolver::class );

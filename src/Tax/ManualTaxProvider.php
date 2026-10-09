@@ -192,13 +192,8 @@ class ManualTaxProvider implements ContextAwareTaxProvider
      */
     public function resolveRates( TaxContext $context ): array
     {
-        $candidates = TaxRate::query()
-            ->active()
-            ->where( 'tax_class_key', $context->taxClassKey )
-            ->where( 'country_code', strtoupper( $context->destination->countryCode ) )
-            ->orderBy( 'priority' )
-            ->orderBy( 'id' )
-            ->get()
+        $candidates = app( TaxRateCandidates::class )
+            ->for( $context->taxClassKey, $context->destination->countryCode )
             ->filter( static fn ( TaxRate $rate ): bool => $rate->matches( $context->destination ) );
 
         $byPriority = [];

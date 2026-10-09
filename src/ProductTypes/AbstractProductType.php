@@ -187,7 +187,9 @@ abstract class AbstractProductType implements ProductType
         }
 
         $variantId = (int) $options[ 'variant_id' ];
-        $variant   = ProductVariant::query()->find( $variantId );
+        $variant   = $product->relationLoaded( 'variants' )
+            ? $product->variants->firstWhere( 'id', $variantId )
+            : ProductVariant::query()->find( $variantId );
 
         if ( null === $variant || $variant->product_id !== $product->getKey() ) {
             throw new RuntimeException(

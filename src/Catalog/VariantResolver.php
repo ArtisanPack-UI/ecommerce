@@ -72,7 +72,9 @@ class VariantResolver
     }
 
     /**
-     * Every variant of `$product` as a picker row.
+     * Every variant of `$product` as a picker row. The variants are loaded
+     * once with their prices and stock rows, so the matrix runs the same
+     * queries however many variants there are.
      *
      * @since 1.0.0
      *
@@ -86,8 +88,14 @@ class VariantResolver
         $combinations = $this->combinations( $product );
         $rows         = [];
 
-        foreach ( $product->variants()->orderBy( 'position' )->orderBy( 'id' )->get() as $variant ) {
-            $stock = StockStatus::for( $variant->setRelation( 'product', $product ) );
+        $variants = $product->variants()->with( [ 'prices', 'inventoryItems' ] )->orderBy( 'position' )->orderBy( 'id' )->get();
+
+        // A copy that knows its variants, so pricing a variant doesn't look
+        // it up again; the caller's product is left as it was.
+        $owner = ( clone $product )->setRelation( 'variants', $variants );
+
+        foreach ( $variants as $variant ) {
+            $stock = StockStatus::for( $variant->setRelation( 'product', $owner ) );
             $price = $this->prices->for( $variant, $currency );
 
             $rows[] = [
