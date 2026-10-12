@@ -29,6 +29,7 @@ use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
 use ArtisanPackUI\Ecommerce\ValueObjects\Currency as CurrencyVO;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use InvalidArgumentException;
 use Money\Currency as MoneyCurrency;
 use Money\Money;
@@ -45,6 +46,10 @@ use Money\Money;
  * Windowing rules (§3.2): the row whose `[starts_at, ends_at]` contains `$at`
  * wins; otherwise the row with both timestamps `null` (the base price) is
  * used; when both apply, the scheduled row takes precedence.
+ *
+ * A priceable whose `prices` relation is already loaded (e.g.
+ * `Product::query()->withDisplayData()`) is resolved from it without a
+ * query, so listings price every product in one eager load.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -170,7 +175,8 @@ final class ProductPriceResolver
 
     /**
      * Applies §3.2 precedence to find the active row for `$priceable` in
-     * `$currency` at `$at`.
+     * `$currency` at `$at`, from the loaded `prices` relation when there is
+     * one.
      *
      * @since 1.0.0
      *
@@ -182,16 +188,18 @@ final class ProductPriceResolver
      */
     private function activeRowFor( Product|ProductVariant $priceable, string $currency, Carbon $at ): ?ProductPrice
     {
-        $rows = ProductPrice::query()
-            ->where( 'priceable_type', $priceable->getMorphClass() )
-            ->where( 'priceable_id', $priceable->getKey() )
-            ->where( 'currency', $currency )
-            ->orderByRaw( '(starts_at IS NULL) ASC' )
-            ->orderBy( 'starts_at', 'desc' )
-            ->orderByRaw( '(ends_at IS NULL) ASC' )
-            ->orderBy( 'ends_at', 'asc' )
-            ->orderBy( 'id', 'desc' )
-            ->get();
+        $rows = $priceable->relationLoaded( 'prices' )
+            ? self::sortRows( $priceable->prices->filter( static fn ( ProductPrice $row ): bool => $currency === strtoupper( (string) $row->currency ) ) )
+            : ProductPrice::query()
+                ->where( 'priceable_type', $priceable->getMorphClass() )
+                ->where( 'priceable_id', $priceable->getKey() )
+                ->where( 'currency', $currency )
+                ->orderByRaw( '(starts_at IS NULL) ASC' )
+                ->orderBy( 'starts_at', 'desc' )
+                ->orderByRaw( '(ends_at IS NULL) ASC' )
+                ->orderBy( 'ends_at', 'asc' )
+                ->orderBy( 'id', 'desc' )
+                ->get();
 
         $base      = null;
         $scheduled = null;
@@ -215,6 +223,34 @@ final class ProductPriceResolver
         }
 
         return $scheduled ?? $base;
+    }
+
+    /**
+     * Loaded price rows in the order {@see self::activeRowFor()} queries
+     * them: scheduled rows first by latest start, then soonest end, then
+     * newest.
+     *
+     * @since 1.0.0
+     *
+     * @param  Collection<int, ProductPrice>  $rows  Rows in one currency.
+     *
+     * @return Collection<int, ProductPrice>
+     */
+    private static function sortRows( Collection $rows ): Collection
+    {
+        return $rows->sort( static fn ( ProductPrice $a, ProductPrice $b ): int => [
+            null === $a->starts_at,
+            $b->starts_at?->getTimestamp() ?? 0,
+            null === $a->ends_at,
+            $a->ends_at?->getTimestamp() ?? 0,
+            (int) $b->id,
+        ] <=> [
+            null === $b->starts_at,
+            $a->starts_at?->getTimestamp() ?? 0,
+            null === $b->ends_at,
+            $b->ends_at?->getTimestamp() ?? 0,
+            (int) $a->id,
+        ] )->values();
     }
 
     /**

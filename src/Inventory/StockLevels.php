@@ -78,14 +78,23 @@ class StockLevels
     /**
      * The inventory row of a stockable in the default warehouse, if any.
      *
+     * With `$preferLoaded`, a loaded `inventoryItems` relation is used
+     * instead of a query (`Product::withDisplayData()`). Only display code
+     * opts in; reservations, checkout, and refunds always read the row.
+     *
      * @since 1.0.0
      *
-     * @param  Product|ProductVariant  $stockable  Product or variant.
+     * @param  Product|ProductVariant  $stockable     Product or variant.
+     * @param  bool                    $preferLoaded  Use a loaded `inventoryItems` relation.
      *
      * @return InventoryItem|null
      */
-    public function itemFor( Product|ProductVariant $stockable ): ?InventoryItem
+    public function itemFor( Product|ProductVariant $stockable, bool $preferLoaded = false ): ?InventoryItem
     {
+        if ( $preferLoaded && $stockable->relationLoaded( 'inventoryItems' ) ) {
+            return $stockable->inventoryItems->first( static fn ( InventoryItem $item ): bool => InventoryItem::DEFAULT_WAREHOUSE === (int) $item->warehouse_id );
+        }
+
         return InventoryItem::query()
             ->where( 'stockable_type', $stockable->getMorphClass() )
             ->where( 'stockable_id', $stockable->getKey() )
@@ -99,14 +108,15 @@ class StockLevels
      *
      * @since 1.0.0
      *
-     * @param  Product|ProductVariant  $stockable  Product or variant.
-     * @param  Model|null              $holder     Whose own reservations to add back.
+     * @param  Product|ProductVariant  $stockable     Product or variant.
+     * @param  Model|null              $holder        Whose own reservations to add back.
+     * @param  bool                    $preferLoaded  Use a loaded `inventoryItems` relation ({@see self::itemFor()}).
      *
      * @return int|null
      */
-    public function available( Product|ProductVariant $stockable, ?Model $holder = null ): ?int
+    public function available( Product|ProductVariant $stockable, ?Model $holder = null, bool $preferLoaded = false ): ?int
     {
-        $item = $this->itemFor( $stockable );
+        $item = $this->itemFor( $stockable, $preferLoaded );
 
         if ( null === $item || ! $item->track_inventory || $item->allow_backorder ) {
             return null;
@@ -127,18 +137,19 @@ class StockLevels
      *
      * @since 1.0.0
      *
-     * @param  Product              $product  Product.
-     * @param  ProductVariant|null  $variant  Variant.
-     * @param  Model|null           $holder   Whose own reservations to add back.
+     * @param  Product              $product       Product.
+     * @param  ProductVariant|null  $variant       Variant.
+     * @param  Model|null           $holder        Whose own reservations to add back.
+     * @param  bool                 $preferLoaded  Use loaded `inventoryItems` relations ({@see self::itemFor()}).
      *
      * @return int|null
      */
-    public function sellable( Product $product, ?ProductVariant $variant, ?Model $holder = null ): ?int
+    public function sellable( Product $product, ?ProductVariant $variant, ?Model $holder = null, bool $preferLoaded = false ): ?int
     {
         $limit = null;
 
         foreach ( $this->components( $product, $variant, 1 ) as $component ) {
-            $available = $this->available( $component['stockable'], $holder );
+            $available = $this->available( $component['stockable'], $holder, $preferLoaded );
 
             if ( null === $available ) {
                 continue;

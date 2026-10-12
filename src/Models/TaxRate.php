@@ -24,6 +24,7 @@ namespace ArtisanPackUI\Ecommerce\Models;
 
 use ArtisanPackUI\Ecommerce\Database\Factories\TaxRateFactory;
 use ArtisanPackUI\Ecommerce\Support\TaxRateMath;
+use ArtisanPackUI\Ecommerce\Tax\TaxRateCandidates;
 use ArtisanPackUI\Ecommerce\ValueObjects\Address;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -290,5 +291,25 @@ class TaxRate extends Model
     protected static function newFactory(): TaxRateFactory
     {
         return TaxRateFactory::new();
+    }
+
+    /**
+     * Forgets the request's cached rates ({@see TaxRateCandidates}) when a
+     * rate is saved or deleted.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    protected static function booted(): void
+    {
+        $forget = static function (): void {
+            if ( app()->resolved( TaxRateCandidates::class ) ) {
+                app( TaxRateCandidates::class )->flush();
+            }
+        };
+
+        static::saved( $forget );
+        static::deleted( $forget );
     }
 }

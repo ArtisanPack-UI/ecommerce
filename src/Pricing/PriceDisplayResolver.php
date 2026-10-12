@@ -81,7 +81,7 @@ class PriceDisplayResolver
             return null;
         }
 
-        $variants = $subject instanceof Product ? $product->variants()->orderBy( 'position' )->get() : new EloquentCollection();
+        $variants = $subject instanceof Product ? self::variantsOf( $product ) : new EloquentCollection();
         $min      = null;
         $max      = null;
 
@@ -131,6 +131,25 @@ class PriceDisplayResolver
             $inclusive,
             $label,
         );
+    }
+
+    /**
+     * A product's variants in position order: the loaded relation when
+     * there is one (`Product::withDisplayData()`), else a query.
+     *
+     * @since 1.0.0
+     *
+     * @param  Product  $product  Product.
+     *
+     * @return EloquentCollection<int, ProductVariant>
+     */
+    protected static function variantsOf( Product $product ): EloquentCollection
+    {
+        if ( ! $product->relationLoaded( 'variants' ) ) {
+            return $product->variants()->orderBy( 'position' )->get();
+        }
+
+        return $product->variants->sortBy( [ [ 'position', 'asc' ], [ 'id', 'asc' ] ] )->values();
     }
 
     /**
