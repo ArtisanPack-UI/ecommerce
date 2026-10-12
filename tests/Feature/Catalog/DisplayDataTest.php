@@ -25,7 +25,7 @@ beforeEach( function (): void {
  */
 function ddProduct( int $amount, ?int $onHand = 5, array $prices = [] ): Product
 {
-    $product = Product::factory()->create();
+    $product = Product::factory()->createOne();
     ProductPrice::factory()->forPriceable( $product )->create( [ 'currency' => 'USD', 'price_amount' => $amount, 'compare_at_amount' => null ] );
 
     foreach ( $prices as $row ) {
@@ -52,7 +52,7 @@ function ddProduct( int $amount, ?int $onHand = 5, array $prices = [] ): Product
  */
 function ddVariableProduct( int $amount, int $variants = 2, int $onHand = 5 ): Product
 {
-    $product = Product::factory()->create( [ 'type' => 'variable' ] );
+    $product = Product::factory()->createOne( [ 'type' => 'variable' ] );
 
     foreach ( range( 1, $variants ) as $position ) {
         $variant = ProductVariant::factory()->for( $product )->create( [ 'position' => $position ] );
