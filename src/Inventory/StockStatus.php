@@ -73,7 +73,9 @@ final class StockStatus
     }
 
     /**
-     * The availability of `$subject`.
+     * The availability of `$subject`. Loaded `variants` and
+     * `inventoryItems` relations (`Product::withDisplayData()`) are used
+     * instead of queries, so a listing needs no query per product.
      *
      * @since 1.0.0
      *
@@ -85,8 +87,10 @@ final class StockStatus
     {
         $levels = app( StockLevels::class );
 
-        if ( $subject instanceof Product && $subject->variants()->exists() ) {
-            $states = $subject->variants()->get()->map( static fn ( ProductVariant $variant ): self => self::single( $levels, $subject, $variant ) );
+        $variants = $subject instanceof Product && $subject->relationLoaded( 'variants' ) ? $subject->variants : null;
+
+        if ( $subject instanceof Product && ( null === $variants ? $subject->variants()->exists() : $variants->isNotEmpty() ) ) {
+            $states = ( $variants ?? $subject->variants()->get() )->map( static fn ( ProductVariant $variant ): self => self::single( $levels, $subject, $variant ) );
 
             return self::aggregate( $states->all() );
         }
@@ -141,12 +145,12 @@ final class StockStatus
             return new self( self::IN_STOCK );
         }
 
-        $sellable  = $levels->sellable( $product, $variant );
+        $sellable  = $levels->sellable( $product, $variant, null, true );
         $backorder = false;
         $low       = false;
 
         foreach ( $components as $component ) {
-            $item = $levels->itemFor( $component['stockable'] );
+            $item = $levels->itemFor( $component['stockable'], true );
 
             if ( null === $item || ! $item->track_inventory ) {
                 continue;

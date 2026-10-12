@@ -174,6 +174,28 @@ inventory row is in stock. A variable product takes its best variant; a
 bundle follows its components. The quantity is included only when
 `inventory.show_quantity` is on (off by default).
 
+### Listings
+
+Pricing and stocking one product runs a few queries; a listing would run
+them per product. Load what both services read with the
+`withDisplayData()` scope (or `loadMissing( Product::displayRelations() )` on
+products you already have) and they read the loaded relations instead:
+
+```php
+$products = Product::query()->storefrontVisible()->withDisplayData()->paginate( 24 );
+
+foreach ( $products as $product ) {
+    $price = app( PriceDisplayResolver::class )->for( $product, 'USD' );
+    $stock = StockStatus::for( $product );
+}
+```
+
+The listing then runs the same queries for 2 products or 200: prices, stock
+rows, and variants with theirs come from the eager load, and tax rates are
+read once per request (`Tax\TaxRateCandidates`). `VariantResolver::matrix()`
+loads its variants' prices and stock the same way. Reservations, checkout,
+and refunds always read stock rows fresh; only display code uses loaded rows.
+
 ### Add-to-cart fields
 
 A product type that implements `Contracts\ProvidesStorefrontOptions` describes

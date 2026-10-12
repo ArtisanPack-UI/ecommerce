@@ -130,7 +130,7 @@ jobs:
       - name: Generate OpenAPI spec
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: vendor/bin/testbench ecommerce:generate-openapi --output="build/openapi/ecommerce-openapi-v${VERSION}.json"
+        run: vendor/bin/testbench ecommerce:generate-openapi --spec-version="$VERSION" --output="build/openapi/ecommerce-openapi-v${VERSION}.json"
 
       - name: Validate OpenAPI spec
         run: npx --yes @redocly/cli@2 lint build/openapi/*.json

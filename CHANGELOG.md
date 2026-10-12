@@ -6,6 +6,29 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-12
+
+Storefront listings, carts, and variable product pages now price and stock
+products in a fixed number of queries, the OpenAPI spec takes its version
+from the release tag, and the engine installs on MySQL.
+
+### Added
+
+- `Product::withDisplayData()` scope and `Product::displayRelations()`: eager-load what a display price and stock state need (prices, stock rows, variants with theirs) (#195).
+- `Tax\TaxRateCandidates` (scoped): active tax rates are read once per request per tax class and country, and re-read after a `TaxRate` is saved or deleted (#195).
+- `StockLevels::itemFor()`, `available()`, and `sellable()` take an optional `$preferLoaded` flag to read a loaded `inventoryItems` relation. Only `StockStatus` uses it; reservations, checkout, and refunds always read fresh rows (#195).
+- `ecommerce:generate-openapi --spec-version=` sets the spec's `info.version` (a leading `v` is dropped; anything that isn't a semantic version is refused). The release workflow passes the tag (#189).
+- `OpenApiGenerator::generate()` takes an optional version, and `OpenApiGenerator::normalizeVersion()` reads a version or tag.
+
+### Changed
+
+- `ProductPriceResolver`, `PriceDisplayResolver`, `StockStatus`, and product-type variant lookup use relations the caller already loaded instead of querying per product or variant; `VariantResolver::matrix()` loads variant prices and stock once. Nothing changes for callers that load nothing (#195).
+- Without `--spec-version`, `info.version` comes from `composer.json`, then the installed engine version. It falls back to `0.0.0-dev` (`OpenApiGenerator::FALLBACK_VERSION`), not a hard-coded release number that had to be bumped by hand each release.
+
+### Fixed
+
+- **MySQL install**: the `product_variant_id` foreign key on `ecommerce_product_variant_option_values` is named `ecommerce_pvov_variant_fk`. Laravel's default name was 66 characters, past MySQL's 64-character limit, so `migrate` failed on MySQL. Existing SQLite and Postgres installs are unaffected. A test now compiles every migration as MySQL and fails on any identifier over 64 characters (#191).
+
 ## [1.0.1] - 2026-10-06
 
 A patch release for satellite verification: signed reports now reach a
