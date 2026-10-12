@@ -47,6 +47,30 @@ function ddProduct( int $amount, ?int $onHand = 5, array $prices = [] ): Product
 }
 
 /**
+ * A variable product with `$variants` variants priced from `$amount` USD,
+ * each with `$onHand` units tracked.
+ */
+function ddVariableProduct( int $amount, int $variants = 2, int $onHand = 5 ): Product
+{
+    $product = Product::factory()->create( [ 'type' => 'variable' ] );
+
+    foreach ( range( 1, $variants ) as $position ) {
+        $variant = ProductVariant::factory()->for( $product )->create( [ 'position' => $position ] );
+        ProductPrice::factory()->forPriceable( $variant )->create( [ 'currency' => 'USD', 'price_amount' => $amount + $position, 'compare_at_amount' => null ] );
+        InventoryItem::factory()->create( [
+            'stockable_type'    => $variant->getMorphClass(),
+            'stockable_id'      => $variant->id,
+            'track_inventory'   => true,
+            'allow_backorder'   => false,
+            'quantity_on_hand'  => $onHand,
+            'quantity_reserved' => 0,
+        ] );
+    }
+
+    return $product;
+}
+
+/**
  * The SQL run by `$callback`.
  *
  * @return array<int, string>
@@ -77,12 +101,13 @@ it( 'prices and stocks a listing without a query per product once its display da
     };
 
     ddProduct( 1000 );
-    ddProduct( 2000 );
+    ddVariableProduct( 2000 );
     app()->forgetScopedInstances();
     $few = $count();
 
-    foreach ( range( 1, 6 ) as $i ) {
+    foreach ( range( 1, 3 ) as $i ) {
         ddProduct( 1000 + $i );
+        ddVariableProduct( 2000 + $i, 4 );
     }
 
     app()->forgetScopedInstances();
