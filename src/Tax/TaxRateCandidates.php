@@ -8,7 +8,7 @@
  *
  * @author     Jacob Martella <me@jacobmartella.com>
  *
- * @since      1.0.0
+ * @since      1.1.0
  */
 
 declare( strict_types=1 );
@@ -29,14 +29,14 @@ use Illuminate\Database\Eloquent\Collection;
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
  *
- * @since      1.0.0
+ * @since      1.1.0
  */
 final class TaxRateCandidates
 {
     /**
      * Rates per `class|COUNTRY`.
      *
-     * @since 1.0.0
+     * @since 1.1.0
      *
      * @var array<string, Collection<int, TaxRate>>
      */
@@ -47,7 +47,7 @@ final class TaxRateCandidates
      * then id. Whether each matches a destination's region and postcode is
      * the caller's to check.
      *
-     * @since 1.0.0
+     * @since 1.1.0
      *
      * @param  string  $taxClassKey  Tax class key.
      * @param  string  $countryCode  ISO 3166-1 alpha-2 country.
@@ -70,7 +70,7 @@ final class TaxRateCandidates
     /**
      * Forgets every rate read so far.
      *
-     * @since 1.0.0
+     * @since 1.1.0
      *
      * @return void
      */

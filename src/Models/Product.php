@@ -390,7 +390,7 @@ class Product extends Model
      * stock rows, and variants with theirs — so `PriceDisplayResolver` and
      * `StockStatus` run no query per product in a listing.
      *
-     * @since 1.0.0
+     * @since 1.1.0
      *
      * @param  Builder<Product>  $query  Query.
      *
@@ -405,7 +405,7 @@ class Product extends Model
      * The relations {@see self::scopeWithDisplayData()} loads, for
      * `loadMissing()` on products already fetched.
      *
-     * @since 1.0.0
+     * @since 1.1.0
      *
      * @return array<int|string, Closure|string>
      */

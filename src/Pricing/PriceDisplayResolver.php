@@ -137,7 +137,7 @@ class PriceDisplayResolver
      * A product's variants in position order: the loaded relation when
      * there is one (`Product::withDisplayData()`), else a query.
      *
-     * @since 1.0.0
+     * @since 1.1.0
      *
      * @param  Product  $product  Product.
      *

@@ -49,7 +49,7 @@ class GenerateOpenApiCommand extends Command
 
     /**
      * @since 1.0.0
-     * @since 1.0.2 Takes `--spec-version`.
+     * @since 1.1.0 Takes `--spec-version`.
      *
      * @param  OpenApiGenerator  $generator  Spec builder.
      * @param  Filesystem        $files      Filesystem.

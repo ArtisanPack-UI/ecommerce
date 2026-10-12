@@ -87,7 +87,7 @@ class OpenApiGenerator
      * names no release, so a spec built from a development checkout can't
      * pass for one.
      *
-     * @since 1.0.2
+     * @since 1.1.0
      *
      * @var string
      */
@@ -101,7 +101,7 @@ class OpenApiGenerator
      * Builds the document.
      *
      * @since 1.0.0
-     * @since 1.0.2 Accepts the spec version.
+     * @since 1.1.0 Accepts the spec version.
      *
      * @param  string|null  $version  The `info.version`, e.g. the release tag (`v1.0.2` or `1.0.2`). Null resolves it; see {@see self::version()}.
      *
@@ -185,7 +185,7 @@ class OpenApiGenerator
      * SemVer 2.0.0 grammar: no leading zeros in numeric parts, and no empty
      * pre-release or build identifiers.
      *
-     * @since 1.0.2
+     * @since 1.1.0
      *
      * @param  string  $version  The version or tag.
      *
@@ -1028,7 +1028,7 @@ class OpenApiGenerator
      * 4. {@see self::FALLBACK_VERSION}.
      *
      * @since 1.0.0
-     * @since 1.0.2 Accepts an explicit version, and falls back to the installed version, then {@see self::FALLBACK_VERSION}.
+     * @since 1.1.0 Accepts an explicit version, and falls back to the installed version, then {@see self::FALLBACK_VERSION}.
      *
      * @param  string|null  $version  An explicit version.
      *

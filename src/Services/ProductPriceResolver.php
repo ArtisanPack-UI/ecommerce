@@ -230,7 +230,7 @@ final class ProductPriceResolver
      * them: scheduled rows first by latest start, then soonest end, then
      * newest.
      *
-     * @since 1.0.0
+     * @since 1.1.0
      *
      * @param  Collection<int, ProductPrice>  $rows  Rows in one currency.
      *

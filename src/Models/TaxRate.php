@@ -297,7 +297,7 @@ class TaxRate extends Model
      * Forgets the request's cached rates ({@see TaxRateCandidates}) when a
      * rate is saved or deleted.
      *
-     * @since 1.0.0
+     * @since 1.1.0
      *
      * @return void
      */

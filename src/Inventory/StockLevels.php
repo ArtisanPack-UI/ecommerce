@@ -83,6 +83,7 @@ class StockLevels
      * opts in; reservations, checkout, and refunds always read the row.
      *
      * @since 1.0.0
+     * @since 1.1.0 Takes `$preferLoaded`.
      *
      * @param  Product|ProductVariant  $stockable     Product or variant.
      * @param  bool                    $preferLoaded  Use a loaded `inventoryItems` relation.
@@ -107,6 +108,7 @@ class StockLevels
      * no limit.
      *
      * @since 1.0.0
+     * @since 1.1.0 Takes `$preferLoaded`.
      *
      * @param  Product|ProductVariant  $stockable     Product or variant.
      * @param  Model|null              $holder        Whose own reservations to add back.
@@ -136,6 +138,7 @@ class StockLevels
      * component allows. Null when nothing limits it.
      *
      * @since 1.0.0
+     * @since 1.1.0 Takes `$preferLoaded`.
      *
      * @param  Product              $product       Product.
      * @param  ProductVariant|null  $variant       Variant.
