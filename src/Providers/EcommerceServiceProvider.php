@@ -68,6 +68,7 @@ use ArtisanPackUI\Ecommerce\Http\Middleware\RateLimitEcommerce;
 use ArtisanPackUI\Ecommerce\Http\Middleware\RequestIdMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Middleware\ServiceSignatureMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
+use ArtisanPackUI\Ecommerce\Kanban\KanbanCardTags;
 use ArtisanPackUI\Ecommerce\Kanban\Triggers\CreateShipmentTrigger;
 use ArtisanPackUI\Ecommerce\Kanban\Triggers\DispatchJobTrigger;
 use ArtisanPackUI\Ecommerce\Kanban\Triggers\PrintShippingLabelTrigger;
@@ -340,6 +341,7 @@ class EcommerceServiceProvider extends ServiceProvider
         // Scoped so queue workers and Octane re-read it per job / request.
         $this->app->scoped( SubStatusRegistry::class );
         $this->app->scoped( TaxRateCandidates::class );
+        $this->app->scoped( KanbanCardTags::class );
 
         $this->app->singleton( CartStorage::class, DatabaseCartStorage::class );
         $this->app->singleton( CurrencyResolver::class, SessionCurrencyResolver::class );

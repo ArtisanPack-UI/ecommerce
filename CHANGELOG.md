@@ -6,6 +6,21 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Manual card order on kanban boards (#198). `ecommerce_order_board_assignments` gains a `position` (existing cards are numbered in the order they reached their column). `KanbanBoardService::move()` takes an optional `Kanban\KanbanCardPlacement` (`top()`, `bottom()`, `before( $orderId )`, `after( $orderId )`); a same-column move with a placement reorders the card without a status change, WIP check, or automations, and fires `ap.ecommerce.kanban.cardReordered` and `Events\KanbanCardReordered`. `ap.ecommerce.kanban.cardMoving` receives the placement as `placement` and may change it.
+- `artisanpack.ecommerce.kanban.new_card_position` (`bottom` / `top`, env `ECOMMERCE_KANBAN_NEW_CARD_POSITION`): where cards that join a board land in their column (#198).
+- REST `POST kanban/cards/{order}/move` accepts `position` (`top` / `bottom`), `before_order_id`, or `after_order_id`; card resources expose `position` (#198).
+- `Kanban\KanbanCardQuery` and `Kanban\KanbanCardFilters`: a board's cards filtered by search (order number, email, billing / shipping / customer name), customer, tags (any / all), products (and their variants), placed date range, stale cards, and payment and fulfillment status, in manual order, cursor-paginated, with filtered and total counts per column. Satellites add filters through `ap.ecommerce.kanban.cardQuery` (#199).
+- `Kanban\KanbanCardTags::forBoard()`: the distinct tags on a board's cards, for a filter bar's options (#199).
+- `Order::kanbanCardRelations()` (filterable through `ap.ecommerce.kanban.cardRelations`): what card widgets read, eager-loaded with the cards (#199).
+- REST `GET kanban/boards/{board}/cards` accepts the card filters as `filter[...]`; `GET kanban/boards/{board}` adds `filtered_card_count` to each column when they are passed (#199).
+
+### Changed
+
+- REST `GET kanban/boards/{board}/cards` lists cards in their manual order (position, then when they joined the board) by default; pass `sort=assigned_at` for the old order (#198).
+- `KanbanBoardService` and `KanbanRoutingService` take a `Kanban\KanbanCardPositions` constructor argument, and `KanbanBoardService::filteredTarget()` returns the target column and placement as a pair. Card moves now lock the source and target columns before the card (#198).
+
 ## [1.1.0] - 2026-10-12
 
 Storefront listings, carts, and variable product pages now price and stock

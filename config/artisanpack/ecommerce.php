@@ -933,6 +933,8 @@ return [
     | `stale_after_days`     — The `days-in-column` widget turns `warning`
     |                          after this many days and `danger` after twice
     |                          as many.
+    | `new_card_position`    — Where cards that join a board land in their
+    |                          column: `bottom` (default) or `top`.
     | `dispatchable_jobs`    — Job classes the `dispatch-job` automation may
     |                          queue. Automations are admin data, so only
     |                          listed classes can be instantiated.
@@ -944,6 +946,7 @@ return [
         'broadcast'            => (bool) env( 'ECOMMERCE_KANBAN_BROADCAST', false ),
         'default_card_widgets' => [ 'total', 'item-count', 'customer' ],
         'stale_after_days'     => (int) env( 'ECOMMERCE_KANBAN_STALE_AFTER_DAYS', 3 ),
+        'new_card_position'    => env( 'ECOMMERCE_KANBAN_NEW_CARD_POSITION', 'bottom' ),
         'dispatchable_jobs'    => [],
     ],
 
