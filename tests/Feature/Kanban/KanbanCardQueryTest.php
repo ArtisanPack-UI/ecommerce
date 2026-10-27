@@ -263,3 +263,25 @@ it( 'renders a column of 50 cards in the same number of queries as a column of 5
 
     expect( $queries( 50 ) )->toBe( $queries( 5 ) );
 } );
+
+it( 'wraps every column through the grammar so a table prefix applies', function (): void {
+    $board    = queryBoard();
+    $printing = kanbanColumn( $board, 'Printing' );
+    $query    = KanbanCardQuery::for( $board )->filter( KanbanCardFilters::fromArray( [ 'search' => 'jane', 'tags' => 'rush' ] ) );
+    $columns  = $board->columns()->get();
+
+    DB::connection()->setTablePrefix( 'shop_' );
+
+    try {
+        $sql = collect( DB::pretend( function () use ( $query, $columns, $printing ): void {
+            $query->countsByColumn( $columns );
+            $query->column( $printing )->get( 10 );
+        } ) )->pluck( 'query' )->implode( "\n" );
+    } finally {
+        DB::connection()->setTablePrefix( '' );
+    }
+
+    expect( $sql )->toContain( '"shop_ecommerce_order_board_assignments"."substatus_id"' )
+        ->and( $sql )->toContain( '"shop_ecommerce_customers"."first_name"' )
+        ->and( $sql )->not->toMatch( '/[^_]"ecommerce_[a-z_]+"\./' );
+} );

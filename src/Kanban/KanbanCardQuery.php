@@ -356,7 +356,8 @@ final class KanbanCardQuery
     /**
      * Every word of `$search` must appear (case-insensitively) in the order
      * number, the email, a billing or shipping first / last name, or the
-     * customer's name or email.
+     * customer's name or email. Raw expressions wrap their columns with the
+     * connection grammar, so a table prefix applies.
      *
      * @since 1.2.0
      *
@@ -387,10 +388,10 @@ final class KanbanCardQuery
                     $match->orWhereRaw( 'LOWER(' . $grammar->wrap( $column ) . ") LIKE ? ESCAPE '!'", [ $like ] );
                 }
 
-                $match->orWhereHas( 'customer', static function ( Builder $customers ) use ( $like ): void {
-                    $customers->where( static function ( Builder $names ) use ( $like ): void {
+                $match->orWhereHas( 'customer', static function ( Builder $customers ) use ( $grammar, $like ): void {
+                    $customers->where( static function ( Builder $names ) use ( $grammar, $like ): void {
                         foreach ( [ 'first_name', 'last_name', 'email' ] as $column ) {
-                            $names->orWhereRaw( 'LOWER(' . $names->qualifyColumn( $column ) . ") LIKE ? ESCAPE '!'", [ $like ] );
+                            $names->orWhereRaw( 'LOWER(' . $grammar->wrap( $names->qualifyColumn( $column ) ) . ") LIKE ? ESCAPE '!'", [ $like ] );
                         }
                     } );
                 } );
@@ -410,7 +411,8 @@ final class KanbanCardQuery
     private function bySubstatus( Builder $query ): BaseCollection
     {
         return $query->reorder()
-            ->selectRaw( $query->qualifyColumn( 'substatus_id' ) . ' as substatus_id, COUNT(*) as aggregate' )
+            ->select( $query->qualifyColumn( 'substatus_id' ) )
+            ->selectRaw( 'COUNT(*) as aggregate' )
             ->groupBy( $query->qualifyColumn( 'substatus_id' ) )
             ->toBase()
             ->pluck( 'aggregate', 'substatus_id' );
