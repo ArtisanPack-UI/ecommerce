@@ -162,7 +162,7 @@ class KanbanBoardService
             [ , $assignment, $column, $board, $placement ] = $result;
 
             AfterCommit::action( 'ap.ecommerce.kanban.cardReordered', $refreshed, $column, $board, $placement );
-            Event::dispatch( new KanbanCardReordered( $refreshed, $column, $board, $placement ) );
+            Event::dispatch( new KanbanCardReordered( $refreshed, $column, $board, $placement, $actorUserId ) );
 
             return $assignment;
         }
@@ -170,7 +170,7 @@ class KanbanBoardService
         [ , $assignment, $from, $to, $board ] = $result;
 
         AfterCommit::action( 'ap.ecommerce.kanban.cardMoved', $refreshed, $from, $to, $board );
-        Event::dispatch( new KanbanCardMoved( $refreshed, $from, $to, $board ) );
+        Event::dispatch( new KanbanCardMoved( $refreshed, $from, $to, $board, $actorUserId ) );
 
         return $assignment;
     }

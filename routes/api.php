@@ -281,6 +281,7 @@ Route::prefix( 'kanban' )
         Route::post( 'cards/{order}/move', [ KanbanCardController::class, 'move' ] )->middleware( $admin( 'kanbanCard', 'move', true ) )->name( 'cards.move' );
 
         Route::post( 'boards/{board}/columns', [ KanbanColumnController::class, 'store' ] )->middleware( $admin( 'kanbanBoard', 'update', true ) )->name( 'columns.store' );
+        Route::put( 'boards/{board}/columns/order', [ KanbanColumnController::class, 'reorder' ] )->middleware( $admin( 'kanbanBoard', 'update', true ) )->name( 'columns.reorder' );
         Route::patch( 'columns/{column}', [ KanbanColumnController::class, 'update' ] )->middleware( $admin( 'kanbanBoard', 'update', true ) )->name( 'columns.update' );
         Route::delete( 'columns/{column}', [ KanbanColumnController::class, 'destroy' ] )->middleware( $admin( 'kanbanBoard', 'update', true ) )->name( 'columns.destroy' );
 
@@ -292,6 +293,8 @@ Route::prefix( 'kanban' )
         Route::delete( 'boards/{board}/assignments/{order}', [ KanbanAssignmentController::class, 'destroy' ] )->middleware( $admin( 'kanbanCard', 'move', true ) )->name( 'assignments.destroy' );
 
         Route::get( 'widgets', [ KanbanCatalogController::class, 'widgets' ] )->middleware( $admin( 'kanbanBoard', 'viewAny' ) )->name( 'widgets.index' );
+        Route::put( 'widgets/{key}', [ KanbanCatalogController::class, 'updateWidget' ] )->middleware( $admin( 'kanbanBoard', 'create', true ) )->name( 'widgets.update' );
+        Route::delete( 'widgets/{key}', [ KanbanCatalogController::class, 'resetWidget' ] )->middleware( $admin( 'kanbanBoard', 'create', true ) )->name( 'widgets.destroy' );
         Route::get( 'triggers', [ KanbanCatalogController::class, 'triggers' ] )->middleware( $admin( 'kanbanBoard', 'viewAny' ) )->name( 'triggers.index' );
     } );
 

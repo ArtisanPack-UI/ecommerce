@@ -32,11 +32,14 @@ class KanbanBoardAssignmentRemoved implements ShouldDispatchAfterCommit
 {
     /**
      * @since 1.0.0
+     * @since 1.2.0 Carries the acting user.
      *
-     * @param  OrderBoardAssignment  $assignment  The removed assignment.
+     * @param  OrderBoardAssignment  $assignment   The removed assignment.
+     * @param  int|null              $actorUserId  Acting user; null for routing.
      */
     public function __construct(
         public readonly OrderBoardAssignment $assignment,
+        public readonly ?int $actorUserId = null,
     ) {
     }
 }

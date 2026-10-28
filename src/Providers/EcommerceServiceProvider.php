@@ -45,6 +45,8 @@ use ArtisanPackUI\Ecommerce\CurrencyRates\ConfigRateProvider;
 use ArtisanPackUI\Ecommerce\CurrencyRates\FrankfurterRateProvider;
 use ArtisanPackUI\Ecommerce\Ecommerce;
 use ArtisanPackUI\Ecommerce\Events\KanbanCardMoved;
+use ArtisanPackUI\Ecommerce\Events\OrderEdited;
+use ArtisanPackUI\Ecommerce\Events\ShipmentCreated;
 use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
 use ArtisanPackUI\Ecommerce\Exceptions\CustomerWriteException;
 use ArtisanPackUI\Ecommerce\Exceptions\OrderSubstatusWriteException;
@@ -68,6 +70,8 @@ use ArtisanPackUI\Ecommerce\Http\Middleware\RateLimitEcommerce;
 use ArtisanPackUI\Ecommerce\Http\Middleware\RequestIdMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Middleware\ServiceSignatureMiddleware;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
+use ArtisanPackUI\Ecommerce\Kanban\KanbanCardRefresher;
+use ArtisanPackUI\Ecommerce\Kanban\KanbanCardRenderer;
 use ArtisanPackUI\Ecommerce\Kanban\KanbanCardTags;
 use ArtisanPackUI\Ecommerce\Kanban\Triggers\CreateShipmentTrigger;
 use ArtisanPackUI\Ecommerce\Kanban\Triggers\DispatchJobTrigger;
@@ -84,6 +88,7 @@ use ArtisanPackUI\Ecommerce\Kanban\Widgets\ShippingMethodWidget;
 use ArtisanPackUI\Ecommerce\Kanban\Widgets\TagsWidget;
 use ArtisanPackUI\Ecommerce\Kanban\Widgets\TotalWidget;
 use ArtisanPackUI\Ecommerce\Listeners\BroadcastGraphQLSubscriptions;
+use ArtisanPackUI\Ecommerce\Listeners\BroadcastKanbanBoardEvents;
 use ArtisanPackUI\Ecommerce\Listeners\BroadcastKanbanCardMoved;
 use ArtisanPackUI\Ecommerce\Listeners\DispatchWebhooksForEvent;
 use ArtisanPackUI\Ecommerce\Listeners\IssueDigitalDeliverables;
@@ -342,6 +347,8 @@ class EcommerceServiceProvider extends ServiceProvider
         $this->app->scoped( SubStatusRegistry::class );
         $this->app->scoped( TaxRateCandidates::class );
         $this->app->scoped( KanbanCardTags::class );
+        $this->app->scoped( KanbanCardRefresher::class );
+        $this->app->scoped( KanbanCardRenderer::class );
 
         $this->app->singleton( CartStorage::class, DatabaseCartStorage::class );
         $this->app->singleton( CurrencyResolver::class, SessionCurrencyResolver::class );
@@ -1166,11 +1173,14 @@ class EcommerceServiceProvider extends ServiceProvider
      * Wires the kanban engine: automations run on every card move; with
      * `artisanpack.ecommerce.kanban.auto_route`, orders are routed onto
      * boards when placed and re-routed when edited; with
-     * `artisanpack.ecommerce.kanban.broadcast`, card moves are broadcast on
+     * `artisanpack.ecommerce.kanban.broadcast`, card moves (the GraphQL
+     * `kanbanCardMoved` shape) and every board event (`kanbanBoardEvent`,
+     * including `card-updated` refreshes) are broadcast on
      * `private-ecommerce.kanban.board.{board}`, authorized by the
      * `kanbanBoard.view` ability.
      *
      * @since 1.0.0
+     * @since 1.2.0 Broadcasts every board event and card refreshes.
      *
      * @return void
      */
@@ -1201,6 +1211,13 @@ class EcommerceServiceProvider extends ServiceProvider
         }
 
         $events->listen( KanbanCardMoved::class, BroadcastKanbanCardMoved::class );
+        $events->subscribe( BroadcastKanbanBoardEvents::class );
+
+        $refresh = fn ( object $event ) => $this->app->make( KanbanCardRefresher::class )->refresh( $event->order );
+
+        $events->listen( OrderEdited::class, $refresh );
+        $events->listen( ShipmentCreated::class, $refresh );
+        Order::updated( fn ( Order $order ) => $this->app->make( KanbanCardRefresher::class )->orderUpdated( $order ) );
 
         Broadcast::channel( BroadcastKanbanCardMoved::CHANNEL, function ( $user, $board ): bool {
             $model = KanbanBoard::query()->find( $board );

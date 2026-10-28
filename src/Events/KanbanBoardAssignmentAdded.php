@@ -33,11 +33,14 @@ class KanbanBoardAssignmentAdded implements ShouldDispatchAfterCommit
 {
     /**
      * @since 1.0.0
+     * @since 1.2.0 Carries the acting user.
      *
-     * @param  OrderBoardAssignment  $assignment  The new (or re-activated) assignment.
+     * @param  OrderBoardAssignment  $assignment   The new (or re-activated) assignment.
+     * @param  int|null              $actorUserId  Acting user; null for routing.
      */
     public function __construct(
         public readonly OrderBoardAssignment $assignment,
+        public readonly ?int $actorUserId = null,
     ) {
     }
 }

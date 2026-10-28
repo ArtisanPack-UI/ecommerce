@@ -264,7 +264,7 @@ class KanbanRoutingService
 
         if ( $changed ) {
             AfterCommit::action( 'ap.ecommerce.kanban.boardAssignmentAdded', $assignment );
-            Event::dispatch( new KanbanBoardAssignmentAdded( $assignment ) );
+            Event::dispatch( new KanbanBoardAssignmentAdded( $assignment, $actorUserId ) );
         }
 
         return $assignment;
@@ -311,7 +311,7 @@ class KanbanRoutingService
         } );
 
         AfterCommit::action( 'ap.ecommerce.kanban.boardAssignmentRemoved', $assignment );
-        Event::dispatch( new KanbanBoardAssignmentRemoved( $assignment ) );
+        Event::dispatch( new KanbanBoardAssignmentRemoved( $assignment, $actorUserId ) );
 
         return $assignment;
     }

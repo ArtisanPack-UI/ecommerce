@@ -4,8 +4,9 @@
  * DaysInColumnWidget.
  *
  * `days-in-column`: whole days the card has sat in its current column.
- * Turns `warning` after `artisanpack.ecommerce.kanban.stale_after_days`
- * and `danger` after twice that.
+ * Turns `warning` after `stale_after_days` days (per instance, else
+ * `artisanpack.ecommerce.kanban.stale_after_days`) and `danger` after
+ * twice that.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -22,6 +23,7 @@ namespace ArtisanPackUI\Ecommerce\Kanban\Widgets;
 use ArtisanPackUI\Ecommerce\Models\KanbanColumn;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderBoardAssignment;
+use ArtisanPackUI\Ecommerce\Support\ConfigField;
 use ArtisanPackUI\Ecommerce\Support\LocalizedDate;
 use Illuminate\Support\Carbon;
 
@@ -61,7 +63,25 @@ class DaysInColumnWidget extends AbstractKanbanCardWidget
     }
 
     /**
+     * `stale_after_days`: days before the card turns `warning`.
+     *
+     * @since 1.2.0
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function configSchema(): array
+    {
+        return [
+            ConfigField::make( 'stale_after_days', 'number', __( 'Stale after (days)' ), [
+                'rules' => [ 'integer', 'min:1' ],
+                'help'  => __( 'The card turns amber after this many days in the column and red after twice as many. Leave empty for the store default.' ),
+            ] ),
+        ];
+    }
+
+    /**
      * @since 1.0.0
+     * @since 1.2.0 Reads `stale_after_days` from the instance config.
      *
      * @param  Order         $order   Order.
      * @param  KanbanColumn  $column  Column.
@@ -84,7 +104,7 @@ class DaysInColumnWidget extends AbstractKanbanCardWidget
         }
 
         $days  = (int) floor( $since->diffInDays( Carbon::now(), true ) );
-        $stale = max( 1, (int) config( 'artisanpack.ecommerce.kanban.stale_after_days', 3 ) );
+        $stale = max( 1, (int) $this->config( 'stale_after_days', config( 'artisanpack.ecommerce.kanban.stale_after_days', 3 ) ) );
         $tone  = match ( true ) {
             $days >= 2 * $stale => 'danger',
             $days >= $stale     => 'warning',

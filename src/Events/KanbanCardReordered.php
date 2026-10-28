@@ -39,13 +39,15 @@ class KanbanCardReordered implements ShouldDispatchAfterCommit
      * @param  Order                $order      The order whose card moved.
      * @param  KanbanColumn         $column     The column it moved in.
      * @param  KanbanBoard          $board      The board.
-     * @param  KanbanCardPlacement  $placement  Where it was placed.
+     * @param  KanbanCardPlacement  $placement    Where it was placed.
+     * @param  int|null             $actorUserId  Acting user; null for system reorders.
      */
     public function __construct(
         public readonly Order $order,
         public readonly KanbanColumn $column,
         public readonly KanbanBoard $board,
         public readonly KanbanCardPlacement $placement,
+        public readonly ?int $actorUserId = null,
     ) {
     }
 }

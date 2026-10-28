@@ -28,6 +28,8 @@ use ArtisanPackUI\Ecommerce\Broadcasting\GraphQLSubscriptionBroadcast;
 use ArtisanPackUI\Ecommerce\Events\KanbanCardMoved;
 use ArtisanPackUI\Ecommerce\Models\OrderBoardAssignment;
 use ArtisanPackUI\Ecommerce\Webhooks\WebhookPayloadFactory;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * @package    ArtisanPack_UI
@@ -61,7 +63,10 @@ class BroadcastKanbanCardMoved
     }
 
     /**
+     * A broadcaster failure is logged and never fails the move.
+     *
      * @since 1.0.0
+     * @since 1.2.0 Logs broadcaster failures instead of throwing.
      *
      * @param  KanbanCardMoved  $event  Event.
      *
@@ -81,11 +86,21 @@ class BroadcastKanbanCardMoved
         $card->setRelation( 'order', $event->order );
         $card->setRelation( 'column', $event->to );
 
-        event( new GraphQLSubscriptionBroadcast( 'kanbanCardMoved', self::channel( (int) $event->board->id ), [
-            'card'           => ( new WebhookPayloadFactory( true ) )->serialize( $card ),
-            'from_column_id' => $event->from->exists ? (int) $event->from->id : null,
-            'to_column_id'   => (int) $event->to->id,
-            'board_id'       => (int) $event->board->id,
-        ] ) );
+        try {
+            event( new GraphQLSubscriptionBroadcast( 'kanbanCardMoved', self::channel( (int) $event->board->id ), [
+                'card'           => ( new WebhookPayloadFactory( true ) )->serialize( $card ),
+                'from_column_id' => $event->from->exists ? (int) $event->from->id : null,
+                'to_column_id'   => (int) $event->to->id,
+                'board_id'       => (int) $event->board->id,
+            ] ) );
+        } catch ( Throwable $e ) {
+            report( $e );
+
+            Log::channel( 'ecommerce' )->error( 'Kanban card move broadcast failed; the move stands.', [
+                'board_id' => (int) $event->board->id,
+                'order_id' => (int) $event->order->id,
+                'error'    => $e->getMessage(),
+            ] );
+        }
     }
 }
