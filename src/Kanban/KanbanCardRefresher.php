@@ -44,6 +44,7 @@ use ArtisanPackUI\Ecommerce\Models\KanbanColumn;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderBoardAssignment;
 use ArtisanPackUI\Ecommerce\Support\AfterCommit;
+use Illuminate\Support\Facades\DB;
 
 /**
  * @package    ArtisanPack_UI
@@ -54,12 +55,13 @@ use ArtisanPackUI\Ecommerce\Support\AfterCommit;
 class KanbanCardRefresher
 {
     /**
-     * Refreshes already queued this request, keyed `"{order}|{widget}"`
-     * (`*` for the whole card).
+     * Refreshes waiting for their transaction to commit, keyed
+     * `"{order}|{widget}"` (`*` for the whole card), with the transaction
+     * level they were queued at.
      *
      * @since 1.2.0
      *
-     * @var array<string, true>
+     * @var array<string, int>
      */
     private array $queued = [];
 
@@ -87,7 +89,7 @@ class KanbanCardRefresher
             return false;
         }
 
-        $this->queued[ $key ] = true;
+        $this->queued[ $key ] = DB::transactionLevel();
 
         AfterCommit::run( 'kanban.card-updated', function () use ( $orderId, $widgetKey, $key ): void {
             // Sent: a later change in this request (another transaction) refreshes again.
@@ -114,6 +116,22 @@ class KanbanCardRefresher
         } );
 
         return true;
+    }
+
+    /**
+     * Forgets refreshes queued inside a transaction that rolled back (their
+     * after-commit broadcast will never run), so a retry can queue them
+     * again. Called on `TransactionRolledBack`.
+     *
+     * @since 1.2.0
+     *
+     * @param  int  $level  The transaction level after the rollback.
+     *
+     * @return void
+     */
+    public function rolledBack( int $level ): void
+    {
+        $this->queued = array_filter( $this->queued, static fn ( int $queuedAt ): bool => $queuedAt <= $level );
     }
 
     /**

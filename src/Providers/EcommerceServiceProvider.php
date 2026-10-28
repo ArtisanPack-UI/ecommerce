@@ -240,6 +240,7 @@ use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Contracts\Translation\Loader;
 use Illuminate\Database\Events\MigrationsEnded;
+use Illuminate\Database\Events\TransactionRolledBack;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
@@ -1218,6 +1219,11 @@ class EcommerceServiceProvider extends ServiceProvider
         $events->listen( OrderEdited::class, $refresh );
         $events->listen( ShipmentCreated::class, $refresh );
         Order::updated( fn ( Order $order ) => $this->app->make( KanbanCardRefresher::class )->orderUpdated( $order ) );
+        $events->listen( TransactionRolledBack::class, function ( TransactionRolledBack $event ): void {
+            if ( $this->app->resolved( KanbanCardRefresher::class ) ) {
+                $this->app->make( KanbanCardRefresher::class )->rolledBack( $event->connection->transactionLevel() );
+            }
+        } );
 
         Broadcast::channel( BroadcastKanbanCardMoved::CHANNEL, function ( $user, $board ): bool {
             $model = KanbanBoard::query()->find( $board );

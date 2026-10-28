@@ -178,22 +178,30 @@ class KanbanColumnService
      * @throws ValidationException When the data breaks a column rule.
      * @throws KanbanOperationException When the sub-status changes on a column with cards (`column-not-empty`).
      *
-     * @return KanbanColumn
+     * @return KanbanColumn The column as saved (a fresh instance).
      */
     public function update( KanbanColumn $column, array $data, ?int $actorUserId = null ): KanbanColumn
     {
         $data = $this->validated( (int) $column->board_id, $column, $data );
 
-        $changes = DB::transaction( function () use ( $column, $data ): array {
-            KanbanColumn::query()->whereKey( $column->id )->lockForUpdate()->first();
+        [ $column, $changes ] = DB::transaction( function () use ( $column, $data ): array {
+            // Work on the locked row, not the caller's instance, so stale
+            // attributes or changes on it can't leak into this write.
+            $locked = KanbanColumn::query()->whereKey( $column->id )->lockForUpdate()->firstOrFail();
 
-            if ( array_key_exists( 'substatus_id', $data ) && (int) $data['substatus_id'] !== (int) $column->substatus_id && $column->cardCount() > 0 ) {
+            if ( array_key_exists( 'substatus_id', $data ) && (int) $data['substatus_id'] !== (int) $locked->substatus_id && $locked->cardCount() > 0 ) {
                 throw new KanbanOperationException( 'column-not-empty', __( 'Move the cards out of this column before changing its sub-status.' ) );
             }
 
-            $column->fill( $data )->save();
+            $locked->fill( $data );
 
-            return $column->getChanges();
+            if ( ! $locked->isDirty() ) {
+                return [ $locked, [] ];
+            }
+
+            $locked->save();
+
+            return [ $locked, $locked->getChanges() ];
         } );
 
         if ( [] !== $changes ) {

@@ -152,10 +152,23 @@ it( 'moves the cards to a named column, then deletes', function (): void {
     $order = kanbanOrder( [ 'system_status' => 'processing' ] );
     putOnBoard( $order, $from );
 
+    $deleted = [];
+    addAction( 'ap.ecommerce.kanban.columnDeleted', function ( KanbanColumn $column, ?int $actor ) use ( &$deleted ): void {
+        $deleted[] = [ $column->id, $actor ];
+    } );
+    Event::fake( [ KanbanBoardConfigChanged::class ] );
+
     app( KanbanColumnService::class )->delete( $from, $to, 3 );
 
+    $active = OrderBoardAssignment::query()->active()->where( 'order_id', $order->id )->where( 'board_id', $board->id )->get();
+
     expect( KanbanColumn::query()->find( $from->id ) )->toBeNull()
-        ->and( OrderBoardAssignment::query()->where( 'order_id', $order->id )->value( 'substatus_id' ) )->toBe( $to->substatus_id );
+        ->and( $active )->toHaveCount( 1 )
+        ->and( $active->first()->substatus_id )->toBe( $to->substatus_id )
+        ->and( $deleted )->toBe( [ [ $from->id, 3 ] ] );
+    Event::assertDispatched( KanbanBoardConfigChanged::class, fn ( KanbanBoardConfigChanged $event ): bool => KanbanBoardConfigChanged::COLUMN_DELETED === $event->change
+        && $from->id === $event->columnId
+        && 3 === $event->actorUserId );
 } );
 
 it( 'rolls the delete back when a card move is refused', function (): void {
@@ -166,7 +179,10 @@ it( 'rolls the delete back when a card move is refused', function (): void {
     putOnBoard( kanbanOrder( [ 'system_status' => 'processing' ] ), $to );
     putOnBoard( kanbanOrder( [ 'system_status' => 'processing' ] ), $from );
 
+    Event::fake( [ KanbanBoardConfigChanged::class ] );
+
     expect( fn () => app( KanbanColumnService::class )->delete( $from, $to->fresh() ) )->toThrow( KanbanOperationException::class );
+    Event::assertNotDispatched( KanbanBoardConfigChanged::class );
     expect( KanbanColumn::query()->find( $from->id ) )->not->toBeNull()
         ->and( $from->cardCount() )->toBe( 1 );
 } );
@@ -253,4 +269,34 @@ it( 'announces a board update over REST', function (): void {
     $this->patchJson( "/api/ecommerce/v1/kanban/boards/{$board->id}", [ 'name' => 'Renamed' ], idem() )->assertOk();
 
     Event::assertDispatchedTimes( KanbanBoardConfigChanged::class, 1 );
+} );
+
+it( 'does not announce a no-op update on a reused instance', function (): void {
+    $board  = kanbanBoard( [], [ [ 'processing', 'A' ] ] );
+    $column = kanbanColumn( $board, 'A' );
+    $column->update( [ 'label_override' => 'First' ] );
+
+    Event::fake( [ KanbanBoardConfigChanged::class ] );
+    app( KanbanColumnService::class )->update( $column, [ 'label_override' => 'First' ] );
+
+    Event::assertNotDispatched( KanbanBoardConfigChanged::class );
+} );
+
+it( 'uses readable attribute names in REST validation messages and guards widget overrides with kanbanBoard.update', function (): void {
+    $this->actingAs( ecommerceAdmin(), 'sanctum' );
+    $board = kanbanBoard( [], [ [ 'processing', 'A' ] ] );
+
+    $this->patchJson( '/api/ecommerce/v1/kanban/columns/' . kanbanColumn( $board, 'A' )->id, [ 'wip_limit' => 0 ], idem() )
+        ->assertStatus( 422 )
+        ->assertSee( 'WIP limit' );
+
+    $this->actingAs( ecommerceShopper(), 'sanctum' );
+    Gate::define( 'ecommerce.kanbanBoard.create', fn (): bool => true );
+    Gate::define( 'ecommerce.kanbanBoard.update', fn (): bool => false );
+
+    $this->putJson( '/api/ecommerce/v1/kanban/widgets/total', [ 'label' => 'X' ], idem() )->assertForbidden();
+
+    Gate::define( 'ecommerce.kanbanBoard.update', fn (): bool => true );
+
+    $this->putJson( '/api/ecommerce/v1/kanban/widgets/total', [ 'label' => 'X' ], idem() )->assertOk();
 } );

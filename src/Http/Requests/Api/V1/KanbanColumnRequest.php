@@ -19,7 +19,6 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
 
-use ArtisanPackUI\Ecommerce\Kanban\KanbanWidgetList;
 use ArtisanPackUI\Ecommerce\Models\KanbanBoard;
 use ArtisanPackUI\Ecommerce\Models\KanbanColumn;
 use ArtisanPackUI\Ecommerce\Services\KanbanColumnService;
@@ -54,6 +53,6 @@ class KanbanColumnRequest extends ApiFormRequest
      */
     public function attributes(): array
     {
-        return parent::attributes() + KanbanWidgetList::attributes( 'card_widgets', $this->input( 'card_widgets' ) );
+        return parent::attributes() + KanbanColumnService::attributes( $this->all() );
     }
 }

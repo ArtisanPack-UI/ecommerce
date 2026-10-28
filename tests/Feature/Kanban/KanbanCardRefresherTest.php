@@ -168,3 +168,29 @@ it( 'refreshes when a shipment is created', function (): void {
 
     expect( cardUpdates() )->toHaveCount( 1 );
 } );
+
+it( 'queues the refresh again after a rolled-back transaction is retried', function (): void {
+    enableCardRefresh();
+    Event::fake( [ KanbanBoardBroadcast::class ] );
+
+    $board = kanbanBoard( [], [ [ 'processing', 'A' ] ] );
+    $order = kanbanOrder( [ 'system_status' => 'processing' ] );
+    putOnBoard( $order, kanbanColumn( $board, 'A' ) );
+    $refresher = app( KanbanCardRefresher::class );
+
+    try {
+        DB::transaction( function () use ( $refresher, $order ): void {
+            $refresher->refresh( $order );
+
+            throw new RuntimeException( 'Retry me.' );
+        } );
+    } catch ( RuntimeException ) {
+        // The attempt rolled back.
+    }
+
+    expect( cardUpdates() )->toBe( [] );
+
+    DB::transaction( fn () => expect( $refresher->refresh( $order ) )->toBeTrue() );
+
+    expect( cardUpdates() )->toHaveCount( 1 );
+} );
