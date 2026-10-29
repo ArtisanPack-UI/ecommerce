@@ -56,7 +56,7 @@ addAction( 'ap.ecommerce.order.statusChanged', function ( Order $order, string $
 } );
 ```
 
-All hooks below are available since **1.0.0**.
+All hooks below are available since **1.0.0** unless a row says otherwise.
 
 ---
 
@@ -273,8 +273,17 @@ See [products.md](products.md).
 
 | Hook | Type | Arguments | Returns | Fired in |
 |---|---|---|---|---|
-| `ap.ecommerce.kanban.cardMoving` | filter | `array $move` (`order_id`, `board_id`, `from_column_id`, `to_column_id`, `actor_user_id`, `reason`), `OrderBoardAssignment $assignment` | `array`. A missing or non-numeric `to_column_id` rejects the move (`KanbanOperationException`). Changing it redirects the move. | `Services/KanbanBoardService` |
+| `ap.ecommerce.kanban.cardMoving` | filter | `array $move` (`order_id`, `board_id`, `from_column_id`, `to_column_id`, `actor_user_id`, `reason`, and since 1.2.0 `placement`: `[ 'mode' => 'top'\|'bottom'\|'before'\|'after', 'order_id' => ?int ]` or `null`), `OrderBoardAssignment $assignment` | `array`. A missing or non-numeric `to_column_id` rejects the move (`KanbanOperationException`). Changing it redirects the move; changing `placement` changes where the card lands. | `Services/KanbanBoardService` |
 | `ap.ecommerce.kanban.cardMoved` | action | `Order $order`, `KanbanColumn $from`, `KanbanColumn $to`, `KanbanBoard $board`. After commit. | | `Services/KanbanBoardService` |
+| `ap.ecommerce.kanban.cardReordered` | action | `Order $order`, `KanbanColumn $column`, `KanbanBoard $board`, `KanbanCardPlacement $placement`. After commit. Since 1.2.0. | | `Services/KanbanBoardService` |
+| `ap.ecommerce.kanban.cardQuery` | filter | `Builder $query` (the card query, already filtered), `KanbanCardFilters $filters` (satellite values in `$filters->extra`), `KanbanBoard $board`. Since 1.2.0. | Narrow `$query` in place; the return value is ignored. | `Kanban/KanbanCardQuery` |
+| `ap.ecommerce.kanban.cardRelations` | filter | `array<string> $relations` (defaults to `[ 'items.product' ]`). Since 1.2.0. | `array<string>`: relations eager-loaded on each card's order | `Models/Order::kanbanCardRelations()` |
+| `ap.ecommerce.kanban.columnCreated` | action | `KanbanColumn $column`, `?int $actorUserId`. After commit. Since 1.2.0. | | `Services/KanbanColumnService` |
+| `ap.ecommerce.kanban.columnUpdated` | action | `KanbanColumn $column`, `array $changes`, `?int $actorUserId`. After commit; only when something changed. Since 1.2.0. | | `Services/KanbanColumnService` |
+| `ap.ecommerce.kanban.columnReordered` | action | `KanbanBoard $board`, `array<int> $columnIds` (left to right), `?int $actorUserId`. After commit. Since 1.2.0. | | `Services/KanbanColumnService` |
+| `ap.ecommerce.kanban.columnDeleted` | action | `KanbanColumn $column`, `?int $actorUserId`. After commit. Since 1.2.0. | | `Services/KanbanColumnService` |
+| `ap.ecommerce.kanban.widgetOverrideSaved` | action | `KanbanCardWidget $override` (the stored row). After commit. Since 1.2.0. | | `Services/KanbanCardWidgetService` |
+| `ap.ecommerce.kanban.widgetOverrideReset` | action | `string $key`. After commit; only when an override was removed. Since 1.2.0. | | `Services/KanbanCardWidgetService` |
 | `ap.ecommerce.kanban.routingBoards` | filter | `array<int> $boardIds` (boards whose routing rules match), `Order $order` | `array<int>`. Non-numeric and inactive ids are dropped. | `Services/KanbanRoutingService` |
 | `ap.ecommerce.kanban.boardAssignmentAdded` | action | `OrderBoardAssignment $assignment`. After commit. | | `Services/KanbanRoutingService` |
 | `ap.ecommerce.kanban.boardAssignmentRemoved` | action | `OrderBoardAssignment $assignment`. After commit. | | `Services/KanbanRoutingService` |

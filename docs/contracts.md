@@ -33,6 +33,7 @@ the matching abstract contract-test suite.
 | [`PromotionAction`](../src/Contracts/PromotionAction.php) | `PromotionActionRegistry` | `percent-off-cart`, `fixed-off-cart`, `percent-off-product`, `fixed-off-product`, `free-shipping`, `buy-x-get-y`, `add-free-item`, `tiered-discount` | `PromotionActionContractTest` |
 | [`DescribesConfig`](../src/Contracts/DescribesConfig.php) (optional, on conditions, actions, shipping method types, kanban widgets and triggers) | The entry itself | Every core condition, action, shipping method type, widget, and trigger | Checked inside those entries' suites |
 | [`KanbanCardWidget`](../src/Contracts/KanbanCardWidget.php) | `KanbanCardWidgetRegistry` | `total`, `item-count`, `customer`, `shipping-method`, `tags`, `days-in-column`, `payment-status`, `fulfillment-status` | `KanbanCardWidgetContractTest` |
+| [`ConfigurableKanbanCardWidget`](../src/Contracts/ConfigurableKanbanCardWidget.php) (optional, since 1.2.0) | The widget itself | Every core widget, through `AbstractKanbanCardWidget` | None of its own; `KanbanCardWidgetContractTest` covers `render()` |
 | [`KanbanAutomationTrigger`](../src/Contracts/KanbanAutomationTrigger.php) | `KanbanAutomationRegistry` | `send-email`, `dispatch-job`, `webhook`, `update-order-field`, `create-shipment`, `print-shipping-label` | `KanbanAutomationTriggerContractTest` |
 | [`NotificationTemplate`](../src/Contracts/NotificationTemplate.php) | `NotificationTemplateRegistry` | The catalog in `NotificationCatalog` | `NotificationTemplateContractTest` |
 | [`SearchProvider`](../src/Contracts/SearchProvider.php) | `SearchProviderRegistry` (active: `search.provider`) | `DatabaseSearchProvider` (`default`) | `SearchProviderContractTest` |
@@ -237,6 +238,11 @@ interface KanbanCardWidget {
     public function label(): string;
     public function render( Order $order, KanbanColumn $column ): array; // render payload, never HTML
     public function refreshSubscription( Order $order ): ?string;
+}
+
+// Since 1.2.0, optional: receives the merged per-instance config (see kanban.md#card-widgets).
+interface ConfigurableKanbanCardWidget extends KanbanCardWidget {
+    public function renderWithConfig( Order $order, KanbanColumn $column, array $config ): array;
 }
 
 interface KanbanAutomationTrigger {

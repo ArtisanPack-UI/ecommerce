@@ -12,7 +12,7 @@ satellites all use that API, so none of them holds kanban logic of its own.
 | `kanban_columns` | One column per order sub-status on a board, plus display overrides, a `wip_limit`, and the column's `card_widgets`. |
 | `kanban_automations` | "When a card moves from column A (or any column) to column B and the conditions pass, run trigger X with this config." |
 | `kanban_card_widgets` | Optional per-store overrides (label, default config) for registered widget types. |
-| `order_board_assignments` | The cards. There is one row per (order, board). The row's `substatus_id` is the card's column, and `moved_at` records when the card entered that column. Removing a card sets `removed_at`; the row isn't deleted. |
+| `order_board_assignments` | The cards. There is one row per (order, board). The row's `substatus_id` is the card's column, `position` is its place in that column (since 1.2.0), and `moved_at` records when the card entered that column. Removing a card sets `removed_at`; the row isn't deleted. |
 
 An order can be on **any number of boards at once**, and each card has its own
 column. A photography order can be at "Printing" on the Production board and
@@ -81,7 +81,9 @@ Each new card starts in the board's first column for the order's current
 `system_status`. If the board has no such column, the card starts in the
 board's first column in the forward chain (see [Status roll-up](#status-roll-up)).
 If the board has no column that can hold the order at all, the board is
-skipped and the skip is logged.
+skipped and the skip is logged. The card joins the bottom of its column, or
+the top with `artisanpack.ecommerce.kanban.new_card_position` set to `top`
+(env `ECOMMERCE_KANBAN_NEW_CARD_POSITION`).
 
 When routing runs again after an edit:
 
@@ -126,21 +128,44 @@ routed. A condition fails closed when:
 
 ## Moving cards
 
-`KanbanBoardService::move( $order, $toColumn )` is the only way a card moves,
-whether the move comes from a drag, an external event, or a rule. A move:
+`KanbanBoardService::move( $order, $toColumn, $actorUserId, $reason, $placement )`
+is the only way a card moves, whether the move comes from a drag, an external
+event, or a rule. A move:
 
 1. Runs `ap.ecommerce.kanban.cardMoving`. The filter can return `null` to veto
-   the move or change `to_column_id` to redirect it.
-2. Checks the target column's `wip_limit`. The order, its card, and then the
-   target column are locked first, so two moves can't both take a column's
-   last slot.
-3. Recalculates the order's status from all of its boards and transitions the
+   the move, change `to_column_id` to redirect it, or change `placement`.
+2. Locks the order, then the source and target columns (lowest id first), then
+   the card, so positions in a column are written by one move at a time and
+   two moves can't both take a column's last slot.
+3. Checks the target column's `wip_limit`.
+4. Recalculates the order's status from all of its boards and transitions the
    order if that status changed (see below).
-4. Updates the card. This fires `ap.ecommerce.order.substatusChanged` and
-   `OrderSubstatusChanged`, with the board id.
-5. After the change is committed, fires `ap.ecommerce.kanban.cardMoved` and
+5. Updates the card and places it in the column. This fires
+   `ap.ecommerce.order.substatusChanged` and `OrderSubstatusChanged`, with the
+   board id.
+6. After the change is committed, fires `ap.ecommerce.kanban.cardMoved` and
    dispatches `KanbanCardMoved`. The board's automations then run, and the
    move is broadcast.
+
+### Card order
+
+Since 1.2.0 cards keep a manual order within their column. Pass a
+`Kanban\KanbanCardPlacement` to say where the card lands; without one it lands
+at the bottom:
+
+```php
+use ArtisanPackUI\Ecommerce\Kanban\KanbanCardPlacement;
+
+$boards->move( $order, $column, auth()->id(), null, KanbanCardPlacement::top() );
+$boards->move( $order, $column, auth()->id(), null, KanbanCardPlacement::after( $otherOrderId ) );
+// also bottom(), before( $orderId ), end( 'top'|'bottom' ), fromArray( [ 'mode' => …, 'order_id' => … ] )
+```
+
+A move into the card's **own** column with a placement is a reorder: it
+changes no status, skips the WIP check, runs no automations, and fires
+`ap.ecommerce.kanban.cardReordered` and `KanbanCardReordered` instead. A move
+into its own column without a placement does nothing. A placement whose
+`order_id` isn't in the target column falls back to the bottom.
 
 ### Status roll-up
 
@@ -190,6 +215,69 @@ To add a trigger from a satellite:
 app( KanbanAutomationRegistry::class )->register( 'slack:notify-slack', NotifySlack::class );
 ```
 
+## Reading cards
+
+`Kanban\KanbanCardQuery` reads a board's cards in their manual order (position,
+then when they joined the board), with the relations card widgets read
+(`Order::kanbanCardRelations()`) eager-loaded:
+
+```php
+use ArtisanPackUI\Ecommerce\Kanban\KanbanCardFilters;
+use ArtisanPackUI\Ecommerce\Kanban\KanbanCardQuery;
+
+$filters = KanbanCardFilters::fromArray( [ 'search' => 'jane', 'tags' => [ 'rush' ], 'stale' => true ] );
+$query   = KanbanCardQuery::for( $board )->filter( $filters );
+
+$cards  = $query->column( $column )->get( 25 );           // the first 25 in one column
+$page   = $query->cursorPaginate( 50, $cursor );          // across the board
+$counts = $query->countsByColumn( $board->columns );      // [ column id => [ 'count' => filtered, 'total' => all ] ]
+```
+
+`KanbanCardFilters::fromArray()` reads, and drops anything invalid:
+
+| Key | Matches |
+|---|---|
+| `search` | Order number, email, or billing / shipping / customer name (up to 100 characters, 5 terms) |
+| `customer_id` | One customer |
+| `tags`, `tag_match` | Cards whose order has any (default) or `all` of the tags |
+| `product_ids` | Orders containing any of the products or their variants |
+| `placed_from`, `placed_to` | Placed date range; a date-only `placed_to` covers the whole day |
+| `moved_before` / `stale` | Cards that entered their column before a date; `stale` means before `kanban.stale_after_days` ago |
+| `payment_status`, `fulfillment_status` | Any of the listed statuses |
+
+Other keys are kept as `$filters->extra` for satellite filters, which hook
+`ap.ecommerce.kanban.cardQuery` to narrow the query. `Kanban\KanbanCardTags::forBoard( $board )`
+returns the distinct tags on a board's cards, for a filter bar's options.
+Satellite widgets that read more relations add them through
+`ap.ecommerce.kanban.cardRelations`.
+
+## Columns
+
+`Services\KanbanColumnService` holds the column rules that the REST API, the
+admin, and the board satellites share:
+
+```php
+$columns = app( \ArtisanPackUI\Ecommerce\Services\KanbanColumnService::class );
+
+$column = $columns->create( $board, [ 'substatus_id' => $substatus->id, 'wip_limit' => 5 ], auth()->id() );
+$columns->update( $column, [ 'label_override' => 'On the press' ], auth()->id() );
+$columns->reorder( $board, [ $c3->id, $c1->id, $c2->id ], auth()->id() ); // every column, exactly once
+$columns->delete( $column, $moveCardsTo, auth()->id() );
+```
+
+- Invalid data throws a `ValidationException` (`KanbanColumnService::rules()`).
+  A column's sub-status can't change while it holds cards (`column-not-empty`).
+- `reorder()` runs in one transaction and is refused with
+  `invalid-column-order` unless the list names each of the board's columns once.
+- `delete()` of a column with cards is refused with
+  `Exceptions\KanbanColumnNotEmptyException` (its `$cardCount` says how many)
+  unless `$moveTo` names another column on the board. The cards then move there
+  first, through `KanbanBoardService::move()`, so status roll-up and WIP limits
+  apply; a refused move rolls the delete back. At most
+  `KanbanColumnService::MAX_CARDS_MOVED_ON_DELETE` (200) cards move this way.
+- Each write fires `ap.ecommerce.kanban.column{Created,Updated,Reordered,Deleted}`
+  after commit and dispatches `KanbanBoardConfigChanged`.
+
 ## Card widgets
 
 Widgets are the small pieces of information on a card. Each widget returns a
@@ -202,7 +290,30 @@ framework-agnostic payload that every UI satellite renders its own way:
 
 A card shows the widgets in its column's `card_widgets`. If that list is
 empty, it uses the board's `settings.card_widgets`. If that's empty too, it
-uses `artisanpack.ecommerce.kanban.default_card_widgets`.
+uses `artisanpack.ecommerce.kanban.default_card_widgets`
+(`KanbanCardRenderer::widgetSource()` says which: `column`, `board`, or
+`default`).
+
+Since 1.2.0 a list entry is a widget key or a `{ key, config }` pair
+(`Kanban\KanbanWidgetList`):
+
+```json
+[ "total", { "key": "days-in-column", "config": { "stale_after_days": 5 } }, { "key": "tags", "config": { "max_tags": 2 } } ]
+```
+
+Config is validated against the widget's `configSchema()`; undeclared keys are
+rejected, and a list holds at most 50 entries with at most 50 settings each.
+A widget receives its config when it implements
+`Contracts\ConfigurableKanbanCardWidget::renderWithConfig()`;
+`AbstractKanbanCardWidget` does, and exposes it as `$this->config( 'key' )`.
+Config merges schema defaults, then the store's `kanban_card_widgets.default_config`,
+then the entry's own config. A stored `kanban_card_widgets.label` replaces the
+widget's label.
+
+`Services\KanbanCardWidgetService` sets a board's default list
+(`setBoardWidgets()`) and the store-wide overrides (`saveOverride()`,
+`resetOverride()`, which fire `ap.ecommerce.kanban.widgetOverrideSaved` /
+`widgetOverrideReset`). Every change tells the open boards to refresh.
 
 Core widgets:
 
@@ -210,15 +321,24 @@ Core widgets:
 - `item-count`
 - `customer`
 - `shipping-method`
-- `tags` (reads `meta.tags`; filter with `ap.ecommerce.kanban.orderTags`)
+- `tags` (reads `meta.tags`; filter with `ap.ecommerce.kanban.orderTags`;
+  takes `max_tags`)
 - `days-in-column` (turns `warning` after `stale_after_days` and `danger` after
-  twice that)
+  twice that; `stale_after_days` is also an instance setting)
 - `payment-status`
 - `fulfillment-status`
 
 A widget can return a `refreshSubscription()` channel for live updates. Every
 payload runs through `ap.ecommerce.kanban.widgetRendered`. A widget that throws
 is logged and left off the card.
+
+When something a card shows changes, call
+`app( Kanban\KanbanCardRefresher::class )->refresh( $order, $widgetKey )`. After
+commit, and once per order per request, it broadcasts `card-updated` to every
+active board the order is on so the boards re-render that card. The core calls
+it when an order's payment or fulfillment status, totals, or `meta.tags`
+change, on order edits, and on new shipments; satellites call it for their own
+widgets.
 
 ## REST API
 
@@ -230,21 +350,31 @@ policy.
 |---|---|---|
 | GET | `boards` | `kanbanBoard.viewAny` |
 | POST | `boards` | `kanbanBoard.create` |
-| GET | `boards/{board}` (includes columns with `card_count` and `is_over_wip_limit`) | `kanbanBoard.view` |
+| GET | `boards/{board}` (includes columns with `card_count`, `is_over_wip_limit`, and with card filters `filtered_card_count`) | `kanbanBoard.view` |
 | PATCH | `boards/{board}` | `kanbanBoard.update` |
 | DELETE | `boards/{board}` | `kanbanBoard.delete` |
-| GET | `boards/{board}/cards?filter[column_id]=…&cursor=…` | `kanbanBoard.view` |
-| POST | `cards/{order}/move` with `{ to_column_id, reason? }` | `kanbanCard.move` |
+| GET | `boards/{board}/cards?filter[column_id]=…&filter[search]=…&cursor=…` | `kanbanBoard.view` |
+| POST | `cards/{order}/move` with `{ to_column_id, reason?, position? \| before_order_id? \| after_order_id? }` | `kanbanCard.move` |
 | POST | `boards/{board}/columns` | `kanbanBoard.update` |
+| PUT | `boards/{board}/columns/order` with `{ column_ids }` | `kanbanBoard.update` |
 | PATCH | `columns/{column}` | `kanbanBoard.update` |
-| DELETE | `columns/{column}` (only when the column is empty) | `kanbanBoard.update` |
+| DELETE | `columns/{column}` with `move_cards_to?` (which also needs `kanbanCard.move`) | `kanbanBoard.update` |
 | POST | `boards/{board}/automations` | `kanbanBoard.update` |
 | PATCH | `automations/{automation}` | `kanbanBoard.update` |
 | DELETE | `automations/{automation}` | `kanbanBoard.update` |
 | POST | `boards/{board}/assignments/{order}` with `{ column_id? }` | `kanbanCard.move` |
 | DELETE | `boards/{board}/assignments/{order}` | `kanbanCard.move` |
 | GET | `widgets` | `kanbanBoard.viewAny` |
+| PUT | `widgets/{key}` with `{ label?, default_config? }` | `kanbanBoard.update` |
+| DELETE | `widgets/{key}` (reset the override) | `kanbanBoard.update` |
 | GET | `triggers` | `kanbanBoard.viewAny` |
+
+The cards endpoint takes every [card filter](#reading-cards) as `filter[...]`
+(`filter[tags]` and the list filters take comma-separated values) and lists
+cards in manual order; pass `sort=moved_at` or `sort=assigned_at` for the
+older orders. Card resources carry `position`. Column resources keep
+`card_widgets` as a list of widget keys and add `card_widget_entries` (the
+`{ key, config }` pairs).
 
 A refused move returns `422 problem+json`. The problem `type` ends in one of:
 
@@ -254,6 +384,10 @@ A refused move returns `422 problem+json`. The problem `type` ends in one of:
 - `column-not-on-board`
 - `invalid-status-transition`
 - `incompatible-column`
+
+Deleting a column with cards and no `move_cards_to` returns `422`
+`column-not-empty` with the card count; a reorder that doesn't list every
+column returns `invalid-column-order`.
 
 Adding a card by hand (`POST boards/{board}/assignments/{order}`) is refused
 with `no-entry-column` when the board has no column that can hold the order's
@@ -267,9 +401,34 @@ keeps the stored one.
 
 ## Real-time updates
 
-Set `ECOMMERCE_KANBAN_BROADCAST=true` and configure a broadcaster. Every move
-is then broadcast on `private-ecommerce.kanban.board.{board}`. Only users with
-the `kanbanBoard.view` ability are authorized for the channel.
+Set `ECOMMERCE_KANBAN_BROADCAST=true` and configure a broadcaster. Board
+changes are then broadcast on `private-ecommerce.kanban.board.{board}`. Only
+users with the `kanbanBoard.view` ability are authorized for the channel.
+
+Since 1.2.0 every change goes out as one `kanbanBoardEvent`
+(`Broadcasting\KanbanBoardBroadcast`) with an id-only payload, so a client
+re-reads what it shows:
+
+```js
+Echo.private(`ecommerce.kanban.board.${boardId}`).listen('.kanbanBoardEvent', (event) => {
+  // { type, board_id, order_id, column_id, from_column_id, to_column_id, position, actor_user_id, occurred_at }
+});
+```
+
+| `type` | Sent when |
+|---|---|
+| `card-added`, `card-removed` | A card joins or leaves the board |
+| `card-moved`, `card-reordered` | A card changes column, or place within its column |
+| `card-updated` | Something the card shows changed (`KanbanCardRefresher`) |
+| `config-changed` | The board, its columns, or its widgets changed (`KanbanBoardConfigChanged`) |
+| `automation-fired`, `automation-failed` | An automation ran or failed for a card |
+
+Keys that don't apply are `null`. Broadcasts go out after commit, on
+`kanban.broadcast_connection` / `kanban.broadcast_queue` (env
+`ECOMMERCE_KANBAN_BROADCAST_CONNECTION` / `_QUEUE`; the defaults when unset). A
+broadcaster failure is logged and never fails the write.
+
+The 1.0 `kanbanCardMoved` broadcast is still sent on every move:
 
 ```js
 Echo.private(`ecommerce.kanban.board.${boardId}`).listen('.kanbanCardMoved', ({ data }) => {
@@ -277,7 +436,7 @@ Echo.private(`ecommerce.kanban.board.${boardId}`).listen('.kanbanCardMoved', ({ 
 });
 ```
 
-The payload has the same shape as the `kanbanCardMoved` GraphQL subscription
+Its payload has the same shape as the `kanbanCardMoved` GraphQL subscription
 field. `card` is the full `KanbanCard` resource, including its rendered
 widgets.
 

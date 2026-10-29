@@ -43,11 +43,13 @@ Event::listen( OrderRefunded::class, function ( OrderRefunded $event ): void {
   some events are re-broadcast as `GraphQLSubscriptionBroadcast` (which *is*
   `ShouldBroadcast`) on `private-ecommerce.admin`. When
   `artisanpack.ecommerce.kanban.broadcast` is on, `KanbanCardMoved` is
-  re-broadcast on `private-ecommerce.kanban.board.{board}`. See
-  [graphql.md](graphql.md) and [kanban.md](kanban.md).
+  re-broadcast on `private-ecommerce.kanban.board.{board}`, and since 1.2.0
+  every board change also goes out there as a `kanbanBoardEvent`. See
+  [graphql.md](graphql.md) and [kanban.md](kanban.md#real-time-updates).
 
-All events are available since **1.0.0** and live in the
-`ArtisanPackUI\Ecommerce\Events` namespace.
+All events live in the `ArtisanPackUI\Ecommerce\Events` namespace and are
+available since **1.0.0**, except `KanbanCardReordered`,
+`KanbanBoardConfigChanged`, and `KanbanAutomationFailed` (**1.2.0**).
 
 ## Summary
 
@@ -86,10 +88,13 @@ All events are available since **1.0.0** and live in the
 | `LicenseActivated` | `LicenseService` | | `license.activated` | |
 | `LicenseDeactivated` | `LicenseService::deactivate()` | | `license.deactivated` | |
 | `LicenseRevoked` | `LicenseService` | | `license.revoked` | |
-| `KanbanCardMoved` | `KanbanBoardService` | | `kanban.card.moved` | `kanbanCardMoved` (board channel) |
-| `KanbanAutomationTriggered` | `KanbanAutomationRunner` | | `kanban.automation.triggered` | |
-| `KanbanBoardAssignmentAdded` | `KanbanRoutingService` | | `kanban.board.assignment.added` | |
-| `KanbanBoardAssignmentRemoved` | `KanbanRoutingService` | | `kanban.board.assignment.removed` | |
+| `KanbanCardMoved` | `KanbanBoardService` | | `kanban.card.moved` | `kanbanCardMoved` and `kanbanBoardEvent` `card-moved` (board channel) |
+| `KanbanCardReordered` | `KanbanBoardService` (a move within the card's column) | | `kanban.card.reordered` | `kanbanBoardEvent` `card-reordered` |
+| `KanbanAutomationTriggered` | `KanbanAutomationRunner` | | `kanban.automation.triggered` | `kanbanBoardEvent` `automation-fired` |
+| `KanbanAutomationFailed` | `KanbanAutomationRunner` | | `kanban.automation.failed` | `kanbanBoardEvent` `automation-failed` |
+| `KanbanBoardAssignmentAdded` | `KanbanRoutingService` | | `kanban.board.assignment.added` | `kanbanBoardEvent` `card-added` |
+| `KanbanBoardAssignmentRemoved` | `KanbanRoutingService` | | `kanban.board.assignment.removed` | `kanbanBoardEvent` `card-removed` |
+| `KanbanBoardConfigChanged` | `KanbanColumnService`, `KanbanCardWidgetService`, the board endpoints | | `kanban.board.config.changed` | `kanbanBoardEvent` `config-changed` |
 | `WebhookDelivered` | `WebhookDeliveryService` | | `webhook.delivered` | |
 | `WebhookFailed` | `WebhookDeliveryService` | | `webhook.failed` | `webhookDeliveryFailed` |
 | `WebhookSubscriptionDisabled` | `WebhookDeliveryService` | | `webhook.subscription.disabled` | |
@@ -427,6 +432,7 @@ public function __construct(
     public readonly KanbanColumn $from,
     public readonly KanbanColumn $to,
     public readonly KanbanBoard $board,
+    public readonly ?int $actorUserId = null, // since 1.2.0
 )
 ```
 
@@ -434,19 +440,59 @@ The engine listens for this itself: `KanbanAutomationRunner` runs the board's
 automations, and when broadcasting is enabled `BroadcastKanbanCardMoved`
 re-broadcasts it.
 
+### `KanbanCardReordered`
+
+Since 1.2.0. A card moved to another place in its own column; no status
+changed and no automations ran.
+
+```php
+public function __construct(
+    public readonly Order $order,
+    public readonly KanbanColumn $column,
+    public readonly KanbanBoard $board,
+    public readonly KanbanCardPlacement $placement,
+    public readonly ?int $actorUserId = null,
+)
+```
+
 ### `KanbanAutomationTriggered`
 
 ```php
 public function __construct( public readonly KanbanAutomation $automation, public readonly Order $order )
 ```
 
+### `KanbanAutomationFailed`
+
+Since 1.2.0. An automation's trigger was unknown or threw; `$error` is the
+message recorded on the order timeline.
+
+```php
+public function __construct( public readonly KanbanAutomation $automation, public readonly Order $order, public readonly string $error )
+```
+
 ### `KanbanBoardAssignmentAdded` / `KanbanBoardAssignmentRemoved`
 
 ```php
-public function __construct( public readonly OrderBoardAssignment $assignment )
+public function __construct( public readonly OrderBoardAssignment $assignment, public readonly ?int $actorUserId = null ) // $actorUserId since 1.2.0
 ```
 
 Routing (or an admin) put an order on a board, or took it off one.
+
+### `KanbanBoardConfigChanged`
+
+Since 1.2.0. A board's settings, columns, or card widgets changed. `$change`
+is one of the class constants `BOARD_UPDATED`, `COLUMN_CREATED`,
+`COLUMN_UPDATED`, `COLUMNS_REORDERED`, or `COLUMN_DELETED`; `$columnId` names
+the column when one did.
+
+```php
+public function __construct(
+    public readonly KanbanBoard $board,
+    public readonly string $change,
+    public readonly ?int $columnId = null,
+    public readonly ?int $actorUserId = null,
+)
+```
 
 ## Outbound webhooks
 

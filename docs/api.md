@@ -435,14 +435,19 @@ A claim that matches no order is a 422 `claim-not-verified`. See
 |---|---|---|---|
 | `GET` / `POST` | `kanban/boards` | `kanbanBoard.viewAny` / `kanbanBoard.create` | POST |
 | `GET` / `PATCH` / `DELETE` | `kanban/boards/{board}` | `kanbanBoard.view` / `.update` / `.delete` | PATCH, DELETE |
-| `GET` | `kanban/boards/{board}/cards` | `kanbanBoard.view` | |
+| `GET` | `kanban/boards/{board}/cards` (card filters as `filter[...]`) | `kanbanBoard.view` | |
 | `POST` | `kanban/cards/{order}/move` | `kanbanCard.move` | yes |
 | `POST` | `kanban/boards/{board}/columns` | `kanbanBoard.update` | yes |
-| `PATCH` / `DELETE` | `kanban/columns/{column}` | `kanbanBoard.update` | yes |
+| `PUT` | `kanban/boards/{board}/columns/order` | `kanbanBoard.update` | yes |
+| `PATCH` / `DELETE` | `kanban/columns/{column}` (`DELETE` takes `move_cards_to`, which also needs `kanbanCard.move`) | `kanbanBoard.update` | yes |
 | `POST` | `kanban/boards/{board}/automations` | `kanbanBoard.update` | yes |
 | `PATCH` / `DELETE` | `kanban/automations/{automation}` | `kanbanBoard.update` | yes |
 | `POST` / `DELETE` | `kanban/boards/{board}/assignments/{order}` | `kanbanCard.move` | yes |
 | `GET` | `kanban/widgets`, `kanban/triggers` | `kanbanBoard.viewAny` | |
+| `PUT` / `DELETE` | `kanban/widgets/{key}` (store-wide label and default config) | `kanbanBoard.update` | yes |
+
+See [kanban.md](kanban.md#rest-api) for the request bodies, the card filters,
+and the refusal codes.
 
 ### Admin (`admin/…`, authenticated, `admin.mutate`)
 

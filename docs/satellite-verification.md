@@ -280,7 +280,7 @@ on:
 
 jobs:
   verify:
-    uses: ArtisanPack-UI/ecommerce/.github/workflows/verify-satellite.yml@v1.1.0
+    uses: ArtisanPack-UI/ecommerce/.github/workflows/verify-satellite.yml@v1.2.0
     permissions:
       contents: read
     with:
