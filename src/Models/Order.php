@@ -299,6 +299,23 @@ class Order extends Model
     }
 
     /**
+     * Relations a kanban card's core widgets read, for eager loading with
+     * the cards ({@see \ArtisanPackUI\Ecommerce\Kanban\KanbanCardQuery}).
+     * Filterable through `ap.ecommerce.kanban.cardRelations` for satellite
+     * widgets that read more.
+     *
+     * @since 1.2.0
+     *
+     * @return array<int, string>
+     */
+    public static function kanbanCardRelations(): array
+    {
+        $relations = applyFilters( 'ap.ecommerce.kanban.cardRelations', [ 'items.product' ] );
+
+        return array_values( array_filter( is_array( $relations ) ? $relations : [], 'is_string' ) );
+    }
+
+    /**
      * Stores the email trimmed and lowercased, so lookups can use the
      * index with a plain comparison.
      *

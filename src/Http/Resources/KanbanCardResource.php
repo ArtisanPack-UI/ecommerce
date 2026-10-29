@@ -56,6 +56,7 @@ class KanbanCardResource extends EcommerceResource
             'board_id'     => $this->resource->board_id,
             'substatus_id' => $this->resource->substatus_id,
             'column_id'    => $column?->id,
+            'position'     => $this->resource->position,
             'assigned_at'  => $this->resource->assigned_at,
             'moved_at'     => $this->resource->moved_at,
             'removed_at'   => $this->resource->removed_at,

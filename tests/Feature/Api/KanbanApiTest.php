@@ -214,6 +214,71 @@ it( 'moves a card through the API and maps refusals to 422 problems', function (
     $this->postJson( KANBAN_API . "/cards/{$order->id}/move", [], idem() )->assertStatus( 422 );
 } );
 
+it( 'places and reorders cards through the move endpoint', function (): void {
+    $board    = kanbanBoard( [], [ [ 'processing', 'Printing' ], [ 'processing', 'Packing' ] ] );
+    $printing = kanbanColumn( $board, 'Printing' );
+    $orders   = [];
+    $this->actingAs( ecommerceAdmin(), 'sanctum' );
+
+    foreach ( range( 0, 2 ) as $i ) {
+        $orders[] = $order = kanbanOrder( [ 'system_status' => 'processing' ] );
+        $this->postJson( KANBAN_API . "/boards/{$board->id}/assignments/{$order->id}", [ 'column_id' => $printing->id ], idem() )->assertOk();
+    }
+
+    $ids = fn (): array => $this->getJson( KANBAN_API . "/boards/{$board->id}/cards?filter[column_id]={$printing->id}" )->json( 'data.*.order_id' );
+
+    expect( $ids() )->toBe( [ $orders[0]->id, $orders[1]->id, $orders[2]->id ] );
+
+    $this->postJson( KANBAN_API . "/cards/{$orders[2]->id}/move", [ 'to_column_id' => $printing->id, 'position' => 'top' ], idem() )
+        ->assertOk()
+        ->assertJsonPath( 'data.column_id', $printing->id );
+
+    expect( $ids() )->toBe( [ $orders[2]->id, $orders[0]->id, $orders[1]->id ] );
+
+    $this->postJson( KANBAN_API . "/cards/{$orders[2]->id}/move", [ 'to_column_id' => $printing->id, 'after_order_id' => $orders[1]->id ], idem() )->assertOk();
+    $this->postJson( KANBAN_API . "/cards/{$orders[0]->id}/move", [ 'to_column_id' => $printing->id, 'before_order_id' => $orders[2]->id ], idem() )->assertOk();
+
+    expect( $ids() )->toBe( [ $orders[1]->id, $orders[0]->id, $orders[2]->id ] );
+
+    $this->postJson( KANBAN_API . "/cards/{$orders[0]->id}/move", [ 'to_column_id' => $printing->id, 'position' => 'top', 'before_order_id' => $orders[2]->id ], idem() )
+        ->assertStatus( 422 );
+    $this->postJson( KANBAN_API . "/cards/{$orders[0]->id}/move", [ 'to_column_id' => $printing->id, 'position' => 'middle' ], idem() )
+        ->assertStatus( 422 );
+} );
+
+it( 'filters cards and returns filtered column counts', function (): void {
+    $board    = kanbanBoard( [], [ [ 'processing', 'Printing' ], [ 'processing', 'Packing' ] ] );
+    $printing = kanbanColumn( $board, 'Printing' );
+    $packing  = kanbanColumn( $board, 'Packing' );
+
+    putOnBoard( kanbanOrder( [ 'system_status' => 'processing', 'order_number' => 'W-1', 'meta' => [ 'tags' => [ 'wholesale' ] ] ] ), $printing );
+    putOnBoard( kanbanOrder( [ 'system_status' => 'processing', 'order_number' => 'R-1' ] ), $printing );
+    putOnBoard( kanbanOrder( [ 'system_status' => 'processing', 'order_number' => 'W-2', 'meta' => [ 'tags' => [ 'wholesale' ] ] ] ), $packing );
+
+    $this->actingAs( ecommerceAdmin(), 'sanctum' );
+
+    $this->getJson( KANBAN_API . "/boards/{$board->id}/cards?filter[tags]=wholesale&filter[column_id]={$printing->id}" )
+        ->assertOk()
+        ->assertJsonCount( 1, 'data' )
+        ->assertJsonPath( 'data.0.order.order_number', 'W-1' );
+
+    $this->getJson( KANBAN_API . "/boards/{$board->id}/cards?filter[search]=r-1" )
+        ->assertOk()
+        ->assertJsonCount( 1, 'data' );
+
+    $this->getJson( KANBAN_API . "/boards/{$board->id}/cards?filter[nope]=1" )->assertStatus( 400 );
+
+    $this->getJson( KANBAN_API . "/boards/{$board->id}?filter[tags]=wholesale" )
+        ->assertOk()
+        ->assertJsonPath( 'data.columns.0.card_count', 2 )
+        ->assertJsonPath( 'data.columns.0.filtered_card_count', 1 )
+        ->assertJsonPath( 'data.columns.1.filtered_card_count', 1 );
+
+    $this->getJson( KANBAN_API . "/boards/{$board->id}" )
+        ->assertOk()
+        ->assertJsonPath( 'data.columns.0.filtered_card_count', null );
+} );
+
 it( 'adds and removes board assignments', function (): void {
     $board = kanbanBoard();
     $order = kanbanOrder( [ 'system_status' => 'processing' ] );
