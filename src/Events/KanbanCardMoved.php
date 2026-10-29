@@ -35,17 +35,20 @@ class KanbanCardMoved implements ShouldDispatchAfterCommit
 {
     /**
      * @since 1.0.0
+     * @since 1.2.0 Carries the acting user.
      *
-     * @param  Order         $order  The refreshed order.
-     * @param  KanbanColumn  $from   Column the card left.
-     * @param  KanbanColumn  $to     Column the card entered.
-     * @param  KanbanBoard   $board  Board the move happened on.
+     * @param  Order         $order        The refreshed order.
+     * @param  KanbanColumn  $from         Column the card left.
+     * @param  KanbanColumn  $to           Column the card entered.
+     * @param  KanbanBoard   $board        Board the move happened on.
+     * @param  int|null      $actorUserId  Acting user; null for system moves.
      */
     public function __construct(
         public readonly Order $order,
         public readonly KanbanColumn $from,
         public readonly KanbanColumn $to,
         public readonly KanbanBoard $board,
+        public readonly ?int $actorUserId = null,
     ) {
     }
 }

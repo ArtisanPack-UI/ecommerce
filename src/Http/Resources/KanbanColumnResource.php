@@ -18,6 +18,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Resources;
 
+use ArtisanPackUI\Ecommerce\Kanban\KanbanWidgetList;
 use Illuminate\Http\Request;
 
 /**
@@ -64,7 +65,8 @@ class KanbanColumnResource extends EcommerceResource
             'card_count'          => (int) $count,
             'filtered_card_count' => null === $this->resource->getAttribute( 'filtered_card_count' ) ? null : (int) $this->resource->getAttribute( 'filtered_card_count' ),
             'is_over_wip_limit'   => null !== $this->resource->wip_limit && (int) $count > (int) $this->resource->wip_limit,
-            'card_widgets'        => array_values( (array) $this->resource->card_widgets ),
+            'card_widgets'        => KanbanWidgetList::keys( $this->resource->card_widgets ),
+            'card_widget_entries' => KanbanWidgetList::normalize( $this->resource->card_widgets ),
             'created_at'          => $this->resource->created_at,
             'updated_at'          => $this->resource->updated_at,
         ];

@@ -638,6 +638,7 @@ final class ResourceSchemas
                 'filtered_card_count' => 'Int',
                 'is_over_wip_limit'   => 'Boolean!',
                 'card_widgets'        => '[String!]!',
+                'card_widget_entries' => '[JSON!]!',
             ] + $timestamps ),
 
             'KanbanAutomation' => self::schema( Resources\KanbanAutomationResource::class, Models\KanbanAutomation::class, 'An automation fired when a card moves between columns.', [

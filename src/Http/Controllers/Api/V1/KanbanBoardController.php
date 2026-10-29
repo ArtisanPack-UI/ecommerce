@@ -19,6 +19,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Events\KanbanBoardConfigChanged;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\KanbanBoardRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\KanbanBoardResource;
 use ArtisanPackUI\Ecommerce\Kanban\KanbanCardQuery;
@@ -27,6 +28,7 @@ use ArtisanPackUI\Ecommerce\Models\KanbanColumn;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 
 /**
  * @package    ArtisanPack_UI
@@ -111,7 +113,11 @@ class KanbanBoardController extends ApiController
     }
 
     /**
+     * Updates the board; a change dispatches {@see KanbanBoardConfigChanged}
+     * so connected kanbans refresh.
+     *
      * @since 1.0.0
+     * @since 1.2.0 Dispatches KanbanBoardConfigChanged.
      *
      * @param  KanbanBoardRequest  $request  Validated request.
      * @param  KanbanBoard         $board    Board.
@@ -122,6 +128,12 @@ class KanbanBoardController extends ApiController
     public function update( KanbanBoardRequest $request, KanbanBoard $board ): JsonResponse
     {
         $board->fill( $request->validated() )->save();
+
+        if ( $board->wasChanged() ) {
+            $actor = $request->user()?->getAuthIdentifier();
+
+            Event::dispatch( new KanbanBoardConfigChanged( $board, KanbanBoardConfigChanged::BOARD_UPDATED, null, is_numeric( $actor ) ? (int) $actor : null ) );
+        }
 
         return $this->resourceResponse( $board, $request, KanbanBoardResource::class, self::INCLUDES );
     }

@@ -5,8 +5,8 @@
  *
  * Payload for `POST kanban/boards` / `PATCH kanban/boards/{board}`.
  * `routing_rules` must be a well-formed condition tree whose leaves name
- * registered conditions; `settings.card_widgets` must name registered
- * card widgets.
+ * registered conditions; `settings.card_widgets` is a widget list
+ * ({@see KanbanWidgetList}: registered keys or `{ key, config }` entries).
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -20,9 +20,9 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Kanban\KanbanWidgetList;
 use ArtisanPackUI\Ecommerce\Kanban\OrderConditionEvaluator;
 use ArtisanPackUI\Ecommerce\Models\KanbanBoard;
-use ArtisanPackUI\Ecommerce\Registries\KanbanCardWidgetRegistry;
 use Closure;
 use Illuminate\Validation\Rule;
 
@@ -36,6 +36,7 @@ class KanbanBoardRequest extends ApiFormRequest
 {
     /**
      * @since 1.0.0
+     * @since 1.2.0 Widget entries may carry config.
      *
      * @return array<string, mixed>
      */
@@ -52,9 +53,17 @@ class KanbanBoardRequest extends ApiFormRequest
             'is_active'               => [ 'boolean' ],
             'position'                => [ 'integer', 'min:0' ],
             'settings'                => [ 'array' ],
-            'settings.card_widgets'   => [ 'array' ],
-            'settings.card_widgets.*' => [ 'string', Rule::in( app( KanbanCardWidgetRegistry::class )->keys() ) ],
-        ], [ 'key', 'name' ] );
+        ], [ 'key', 'name' ] ) + KanbanWidgetList::rules( 'settings.card_widgets', $this->input( 'settings.card_widgets' ) );
+    }
+
+    /**
+     * @since 1.2.0
+     *
+     * @return array<string, string>
+     */
+    public function attributes(): array
+    {
+        return parent::attributes() + KanbanWidgetList::attributes( 'settings.card_widgets', $this->input( 'settings.card_widgets' ) );
     }
 
     /**
