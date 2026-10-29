@@ -19,14 +19,16 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
+use ArtisanPackUI\Ecommerce\Events\KanbanBoardConfigChanged;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\KanbanBoardRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\KanbanBoardResource;
+use ArtisanPackUI\Ecommerce\Kanban\KanbanCardQuery;
 use ArtisanPackUI\Ecommerce\Models\KanbanBoard;
 use ArtisanPackUI\Ecommerce\Models\KanbanColumn;
-use ArtisanPackUI\Ecommerce\Models\OrderBoardAssignment;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 
 /**
  * @package    ArtisanPack_UI
@@ -65,29 +67,33 @@ class KanbanBoardController extends ApiController
     }
 
     /**
-     * Board detail: columns (with card counts) are always included.
+     * Board detail: columns (with card counts) are always included. With the
+     * cards endpoint's `filter[...]` card filters, each column also carries
+     * `filtered_card_count`; `card_count` stays the real count, which WIP
+     * limits are checked against.
      *
      * @since 1.0.0
+     * @since 1.2.0 Card filters add `filtered_card_count`.
      *
      * @param  Request      $request  Request.
      * @param  KanbanBoard  $board    Board.
      *
      * @return JsonResponse
      */
-    #[ApiOperation( summary: 'Show a kanban board with its columns and WIP counts', resource: KanbanBoardResource::class, includes: self::INCLUDES )]
+    #[ApiOperation( summary: 'Show a kanban board with its columns and WIP counts', resource: KanbanBoardResource::class, includes: self::INCLUDES, filters: [ 'search' => 'string', 'customer_id' => 'integer', 'tags' => 'string', 'tag_match' => 'string', 'product_ids' => 'string', 'placed_from' => 'string', 'placed_to' => 'string', 'moved_before' => 'string', 'stale' => 'boolean', 'payment_status' => 'string', 'fulfillment_status' => 'string' ] )]
     public function show( Request $request, KanbanBoard $board ): JsonResponse
     {
         $board->load( 'columns.substatus' );
 
-        $counts = OrderBoardAssignment::query()
-            ->active()
-            ->where( 'board_id', $board->id )
-            ->selectRaw( 'substatus_id, COUNT(*) as aggregate' )
-            ->groupBy( 'substatus_id' )
-            ->pluck( 'aggregate', 'substatus_id' );
+        $filters = KanbanCardController::filters( $request );
+        $counts  = KanbanCardQuery::for( $board )->filter( $filters )->countsByColumn( $board->columns );
 
-        $board->columns->each( static function ( KanbanColumn $column ) use ( $counts ): void {
-            $column->setAttribute( 'card_count', (int) ( $counts[ $column->substatus_id ] ?? 0 ) );
+        $board->columns->each( static function ( KanbanColumn $column ) use ( $counts, $filters ): void {
+            $column->setAttribute( 'card_count', $counts[ $column->id ]['total'] ?? 0 );
+
+            if ( ! $filters->isEmpty() ) {
+                $column->setAttribute( 'filtered_card_count', $counts[ $column->id ]['count'] ?? 0 );
+            }
         } );
 
         return $this->resourceResponse( $board, $request, KanbanBoardResource::class, self::INCLUDES );
@@ -107,7 +113,11 @@ class KanbanBoardController extends ApiController
     }
 
     /**
+     * Updates the board; a change dispatches {@see KanbanBoardConfigChanged}
+     * so connected kanbans refresh.
+     *
      * @since 1.0.0
+     * @since 1.2.0 Dispatches KanbanBoardConfigChanged.
      *
      * @param  KanbanBoardRequest  $request  Validated request.
      * @param  KanbanBoard         $board    Board.
@@ -118,6 +128,12 @@ class KanbanBoardController extends ApiController
     public function update( KanbanBoardRequest $request, KanbanBoard $board ): JsonResponse
     {
         $board->fill( $request->validated() )->save();
+
+        if ( $board->wasChanged() ) {
+            $actor = $request->user()?->getAuthIdentifier();
+
+            Event::dispatch( new KanbanBoardConfigChanged( $board, KanbanBoardConfigChanged::BOARD_UPDATED, null, is_numeric( $actor ) ? (int) $actor : null ) );
+        }
 
         return $this->resourceResponse( $board, $request, KanbanBoardResource::class, self::INCLUDES );
     }

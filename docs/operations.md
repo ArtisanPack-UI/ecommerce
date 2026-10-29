@@ -23,6 +23,7 @@ Run a queue worker. These jobs are part of normal operation:
 | `Jobs\DeliverWebhookJob` | An outbound webhook event fires, and by the retry sweep | `webhooks.connection` / `webhooks.queue` |
 | `Jobs\ReconcilePaymentSession` | A verified payment webhook reports an outcome; it places the order if the shopper never came back | `webhooks.connection` / `webhooks.queue` |
 | `Jobs\SendKanbanAutomationWebhookJob` | A kanban automation calls a webhook | `webhooks.connection` / `webhooks.queue` |
+| Kanban board broadcasts (`Broadcasting\KanbanBoardBroadcast`) | A board changes while `kanban.broadcast` is on (since 1.2.0) | `kanban.broadcast_connection` / `kanban.broadcast_queue` |
 | Engine notifications (`EcommerceNotification`) | Order, shipment, and account emails | Laravel's default for queued notifications |
 
 Without a worker, outbound webhooks are never delivered, and a checkout the

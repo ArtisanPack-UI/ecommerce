@@ -18,6 +18,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Resources;
 
+use ArtisanPackUI\Ecommerce\Kanban\KanbanWidgetList;
 use Illuminate\Http\Request;
 
 /**
@@ -50,22 +51,24 @@ class KanbanColumnResource extends EcommerceResource
         $count     = $this->resource->getAttribute( 'card_count' ) ?? ( $this->resource->exists ? $this->resource->cardCount() : 0 );
 
         return [
-            'board_id'          => $this->resource->board_id,
-            'substatus_id'      => $this->resource->substatus_id,
-            'system_status'     => $substatus?->system_status,
-            'label'             => $this->resource->displayLabel(),
-            'label_override'    => $this->resource->label_override,
-            'color'             => $this->resource->color_override ?? $substatus?->color,
-            'color_override'    => $this->resource->color_override,
-            'icon'              => $this->resource->icon_override ?? $substatus?->icon,
-            'icon_override'     => $this->resource->icon_override,
-            'position'          => $this->resource->position,
-            'wip_limit'         => $this->resource->wip_limit,
-            'card_count'        => (int) $count,
-            'is_over_wip_limit' => null !== $this->resource->wip_limit && (int) $count > (int) $this->resource->wip_limit,
-            'card_widgets'      => array_values( (array) $this->resource->card_widgets ),
-            'created_at'        => $this->resource->created_at,
-            'updated_at'        => $this->resource->updated_at,
+            'board_id'            => $this->resource->board_id,
+            'substatus_id'        => $this->resource->substatus_id,
+            'system_status'       => $substatus?->system_status,
+            'label'               => $this->resource->displayLabel(),
+            'label_override'      => $this->resource->label_override,
+            'color'               => $this->resource->color_override ?? $substatus?->color,
+            'color_override'      => $this->resource->color_override,
+            'icon'                => $this->resource->icon_override ?? $substatus?->icon,
+            'icon_override'       => $this->resource->icon_override,
+            'position'            => $this->resource->position,
+            'wip_limit'           => $this->resource->wip_limit,
+            'card_count'          => (int) $count,
+            'filtered_card_count' => null === $this->resource->getAttribute( 'filtered_card_count' ) ? null : (int) $this->resource->getAttribute( 'filtered_card_count' ),
+            'is_over_wip_limit'   => null !== $this->resource->wip_limit && (int) $count > (int) $this->resource->wip_limit,
+            'card_widgets'        => KanbanWidgetList::keys( $this->resource->card_widgets ),
+            'card_widget_entries' => KanbanWidgetList::normalize( $this->resource->card_widgets ),
+            'created_at'          => $this->resource->created_at,
+            'updated_at'          => $this->resource->updated_at,
         ];
     }
 }

@@ -34,7 +34,7 @@ use Illuminate\Database\Eloquent\Model;
  *
  * @property int                   $id
  * @property string                $key
- * @property string                $label
+ * @property string|null           $label
  * @property array<string, mixed>  $default_config
  * @property string                $provided_by
  */

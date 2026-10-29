@@ -924,15 +924,25 @@ return [
     | `auto_route`           — Put orders on their matching boards when
     |                          `ap.ecommerce.order.placed` fires, and re-run
     |                          routing when `ap.ecommerce.order.edited` fires.
-    | `broadcast`            — Broadcast card moves on
+    | `broadcast`            — Broadcast board events (`kanbanBoardEvent`:
+    |                          cards added, removed, moved, reordered, and
+    |                          updated; config changes; automations) and
+    |                          card moves (`kanbanCardMoved`) on
     |                          `private-ecommerce.kanban.board.{board}`
-    |                          (requires a configured broadcaster). Channel
-    |                          members need the `kanbanBoard.view` ability.
+    |                          (requires a configured broadcaster, e.g.
+    |                          Reverb or Pusher). Channel members need the
+    |                          `kanbanBoard.view` ability.
+    | `broadcast_connection` — Queue connection board broadcasts are
+    | / `broadcast_queue`      queued on (the defaults when null). A
+    |                          broadcaster failure is logged and never fails
+    |                          the change.
     | `default_card_widgets` — Widgets on cards in columns (and boards) that
     |                          don't choose their own.
     | `stale_after_days`     — The `days-in-column` widget turns `warning`
     |                          after this many days and `danger` after twice
     |                          as many.
+    | `new_card_position`    — Where cards that join a board land in their
+    |                          column: `bottom` (default) or `top`.
     | `dispatchable_jobs`    — Job classes the `dispatch-job` automation may
     |                          queue. Automations are admin data, so only
     |                          listed classes can be instantiated.
@@ -942,8 +952,11 @@ return [
     'kanban' => [
         'auto_route'           => (bool) env( 'ECOMMERCE_KANBAN_AUTO_ROUTE', true ),
         'broadcast'            => (bool) env( 'ECOMMERCE_KANBAN_BROADCAST', false ),
+        'broadcast_connection' => env( 'ECOMMERCE_KANBAN_BROADCAST_CONNECTION' ),
+        'broadcast_queue'      => env( 'ECOMMERCE_KANBAN_BROADCAST_QUEUE' ),
         'default_card_widgets' => [ 'total', 'item-count', 'customer' ],
         'stale_after_days'     => (int) env( 'ECOMMERCE_KANBAN_STALE_AFTER_DAYS', 3 ),
+        'new_card_position'    => env( 'ECOMMERCE_KANBAN_NEW_CARD_POSITION', 'bottom' ),
         'dispatchable_jobs'    => [],
     ],
 

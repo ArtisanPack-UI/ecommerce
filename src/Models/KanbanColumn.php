@@ -41,7 +41,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null         $icon_override
  * @property int                 $position
  * @property int|null            $wip_limit
- * @property array<int, string>  $card_widgets
+ * @property array<int, mixed>   $card_widgets  Widget keys or `{ key, config }` entries (see KanbanWidgetList).
  * @property KanbanBoard         $board
  * @property OrderSubstatus      $substatus
  */

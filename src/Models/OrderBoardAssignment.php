@@ -8,7 +8,8 @@
  * `substatus_id` (the card's column), so an order can be at "Printing" on a
  * production board and "Awaiting label" on a shipping board at the same
  * instant. Removing an order from a board stamps `removed_at` rather than
- * deleting the row. Engine spec §3.28, parent plan §9.2.
+ * deleting the row. `position` orders the cards of one column (since 1.2.0).
+ * Engine spec §3.28, parent plan §9.2.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -41,6 +42,7 @@ use Illuminate\Support\Carbon;
  * @property int             $order_id
  * @property int             $board_id
  * @property int             $substatus_id
+ * @property int             $position
  * @property Carbon          $assigned_at
  * @property Carbon|null     $moved_at
  * @property Carbon|null     $removed_at
@@ -79,6 +81,7 @@ class OrderBoardAssignment extends Model
         'order_id',
         'board_id',
         'substatus_id',
+        'position',
         'assigned_at',
         'moved_at',
         'removed_at',
@@ -169,6 +172,7 @@ class OrderBoardAssignment extends Model
             'order_id'     => 'integer',
             'board_id'     => 'integer',
             'substatus_id' => 'integer',
+            'position'     => 'integer',
             'assigned_at'  => 'datetime',
             'moved_at'     => 'datetime',
             'removed_at'   => 'datetime',

@@ -28,6 +28,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Services;
 
+use ArtisanPackUI\Ecommerce\Events\KanbanAutomationFailed;
 use ArtisanPackUI\Ecommerce\Events\KanbanAutomationTriggered;
 use ArtisanPackUI\Ecommerce\Events\KanbanCardMoved;
 use ArtisanPackUI\Ecommerce\Kanban\OrderConditionEvaluator;
@@ -178,6 +179,7 @@ class KanbanAutomationRunner
      * Logs a failed automation and notes it on the order timeline.
      *
      * @since 1.0.0
+     * @since 1.2.0 Dispatches {@see KanbanAutomationFailed}.
      *
      * @param  KanbanAutomation  $automation  Automation.
      * @param  Order             $order       Order.
@@ -187,6 +189,7 @@ class KanbanAutomationRunner
      */
     protected function recordFailure( KanbanAutomation $automation, Order $order, string $error ): void
     {
+
         Log::channel( 'ecommerce' )->error( 'Kanban automation failed.', [
             'automation_id' => $automation->id,
             'order_id'      => $order->id,
@@ -205,5 +208,7 @@ class KanbanAutomationRunner
                 'error'         => $error,
             ],
         ] );
+
+        Event::dispatch( new KanbanAutomationFailed( $automation, $order, $error ) );
     }
 }

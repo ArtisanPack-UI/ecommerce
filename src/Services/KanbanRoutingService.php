@@ -37,6 +37,8 @@ use ArtisanPackUI\Ecommerce\Events\KanbanBoardAssignmentAdded;
 use ArtisanPackUI\Ecommerce\Events\KanbanBoardAssignmentRemoved;
 use ArtisanPackUI\Ecommerce\Exceptions\EcommerceException;
 use ArtisanPackUI\Ecommerce\Exceptions\KanbanOperationException;
+use ArtisanPackUI\Ecommerce\Kanban\KanbanCardPlacement;
+use ArtisanPackUI\Ecommerce\Kanban\KanbanCardPositions;
 use ArtisanPackUI\Ecommerce\Kanban\OrderConditionEvaluator;
 use ArtisanPackUI\Ecommerce\Models\KanbanBoard;
 use ArtisanPackUI\Ecommerce\Models\KanbanColumn;
@@ -60,13 +62,16 @@ class KanbanRoutingService
 {
     /**
      * @since 1.0.0
+     * @since 1.2.0 Takes the card position writer.
      *
      * @param  OrderConditionEvaluator  $conditions  Evaluates routing rules.
      * @param  OrderStatusMachine       $statuses    Board / order status compatibility.
+     * @param  KanbanCardPositions      $positions   Card positions within a column.
      */
     public function __construct(
         private readonly OrderConditionEvaluator $conditions,
         private readonly OrderStatusMachine $statuses,
+        private readonly KanbanCardPositions $positions,
     ) {
     }
 
@@ -193,9 +198,11 @@ class KanbanRoutingService
     /**
      * Puts `$order` on `$board`, in `$column` or the board's entry column.
      * Re-activates a previously removed assignment; an order already on the
-     * board is returned unchanged.
+     * board is returned unchanged. The card enters at the end of the column
+     * named by `artisanpack.ecommerce.kanban.new_card_position`.
      *
      * @since 1.0.0
+     * @since 1.2.0 Places the card at the configured end of the column.
      *
      * @param  Order              $order        Order.
      * @param  KanbanBoard        $board        Board.
@@ -236,8 +243,12 @@ class KanbanRoutingService
 
             $this->statuses->assertBoardAssignmentCompatible( $locked, $column->substatus );
 
+            // Positions in a column are written only under its row lock (see KanbanCardPositions).
+            KanbanColumn::query()->whereKey( $column->id )->lockForUpdate()->first();
+
             $now        = Carbon::now();
-            $attributes = [ 'substatus_id' => $column->substatus_id, 'assigned_at' => $now, 'moved_at' => $now, 'removed_at' => null ];
+            $position   = $this->positions->endPosition( (int) $board->id, (int) $column->substatus_id, (string) config( 'artisanpack.ecommerce.kanban.new_card_position', KanbanCardPlacement::BOTTOM ) );
+            $attributes = [ 'substatus_id' => $column->substatus_id, 'position' => $position, 'assigned_at' => $now, 'moved_at' => $now, 'removed_at' => null ];
             $assignment = $existing ?? new OrderBoardAssignment( [ 'order_id' => $locked->id, 'board_id' => $board->id ] );
             $assignment->fill( $attributes )->save();
 
@@ -253,7 +264,7 @@ class KanbanRoutingService
 
         if ( $changed ) {
             AfterCommit::action( 'ap.ecommerce.kanban.boardAssignmentAdded', $assignment );
-            Event::dispatch( new KanbanBoardAssignmentAdded( $assignment ) );
+            Event::dispatch( new KanbanBoardAssignmentAdded( $assignment, $actorUserId ) );
         }
 
         return $assignment;
@@ -300,7 +311,7 @@ class KanbanRoutingService
         } );
 
         AfterCommit::action( 'ap.ecommerce.kanban.boardAssignmentRemoved', $assignment );
-        Event::dispatch( new KanbanBoardAssignmentRemoved( $assignment ) );
+        Event::dispatch( new KanbanBoardAssignmentRemoved( $assignment, $actorUserId ) );
 
         return $assignment;
     }
