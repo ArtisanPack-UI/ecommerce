@@ -228,6 +228,7 @@ use ArtisanPackUI\Ecommerce\Kanban\KanbanCardQuery;
 $filters = KanbanCardFilters::fromArray( [ 'search' => 'jane', 'tags' => [ 'rush' ], 'stale' => true ] );
 $query   = KanbanCardQuery::for( $board )->filter( $filters );
 
+// filter() and column() return a narrowed copy, so $query can be reused.
 $cards  = $query->column( $column )->get( 25 );           // the first 25 in one column
 $page   = $query->cursorPaginate( 50, $cursor );          // across the board
 $counts = $query->countsByColumn( $board->columns );      // [ column id => [ 'count' => filtered, 'total' => all ] ]
@@ -308,7 +309,8 @@ A widget receives its config when it implements
 `AbstractKanbanCardWidget` does, and exposes it as `$this->config( 'key' )`.
 Config merges schema defaults, then the store's `kanban_card_widgets.default_config`,
 then the entry's own config. A stored `kanban_card_widgets.label` replaces the
-widget's label.
+widget's label; an override that holds only a default config stores no label,
+so the widget's own translated label shows.
 
 `Services\KanbanCardWidgetService` sets a board's default list
 (`setBoardWidgets()`) and the store-wide overrides (`saveOverride()`,
@@ -372,7 +374,9 @@ policy.
 The cards endpoint takes every [card filter](#reading-cards) as `filter[...]`
 (`filter[tags]` and the list filters take comma-separated values) and lists
 cards in manual order; pass `sort=moved_at` or `sort=assigned_at` for the
-older orders. Card resources carry `position`. Column resources keep
+older orders. Card resources carry `position`. Widget resources carry `label`
+(what the widget shows) and `label_override` (the stored label, or `null`); a
+`PUT kanban/widgets/{key}` with an empty `label` clears the override. Column resources keep
 `card_widgets` as a list of widget keys and add `card_widget_entries` (the
 `{ key, config }` pairs).
 

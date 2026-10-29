@@ -285,3 +285,22 @@ it( 'wraps every column through the grammar so a table prefix applies', function
         ->and( $sql )->toContain( '"shop_ecommerce_customers"."first_name"' )
         ->and( $sql )->not->toMatch( '/[^_]"ecommerce_[a-z_]+"\./' );
 } );
+
+it( 'leaves the query it narrows unchanged, so one query can be reused', function (): void {
+    $board    = queryBoard();
+    $printing = kanbanColumn( $board, 'Printing' );
+    $packing  = kanbanColumn( $board, 'Packing' );
+
+    queryCard( $printing, [ 'order_number' => 'PRINT', 'meta' => [ 'tags' => [ 'rush' ] ] ] );
+    queryCard( $packing, [ 'order_number' => 'PACK' ] );
+
+    $query   = KanbanCardQuery::for( $board );
+    $column  = $query->column( $printing );
+    $rush    = $query->filter( KanbanCardFilters::fromArray( [ 'tags' => 'rush' ] ) );
+    $numbers = static fn ( KanbanCardQuery $narrowed ): array => $narrowed->get( 10 )->map( fn ( OrderBoardAssignment $card ): string => $card->order->order_number )->sort()->values()->all();
+
+    expect( $numbers( $column ) )->toBe( [ 'PRINT' ] )
+        ->and( $numbers( $rush ) )->toBe( [ 'PRINT' ] )
+        ->and( $numbers( $query ) )->toBe( [ 'PACK', 'PRINT' ] )
+        ->and( $query->cursorPaginate( 50 )->items() )->toHaveCount( 2 );
+} );

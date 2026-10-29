@@ -40,7 +40,11 @@ class KanbanCardWidgetResource extends EcommerceResource
     public const NAME = 'kanbanCardWidget';
 
     /**
+     * `label` is what the widget shows; `label_override` is the stored
+     * label, or null when the widget's own label is used (since 1.2.0).
+     *
      * @since 1.0.0
+     * @since 1.2.0 Adds `label_override`; `label` falls back to the widget's own.
      *
      * @param  Request  $request  Request.
      *
@@ -50,11 +54,36 @@ class KanbanCardWidgetResource extends EcommerceResource
     {
         return [
             'key'            => $this->resource->key,
-            'label'          => $this->resource->label,
+            'label'          => $this->label(),
+            'label_override' => filled( $this->resource->label ) ? (string) $this->resource->label : null,
             'default_config' => (array) ( $this->resource->default_config ?? [] ),
             'provided_by'    => $this->resource->provided_by,
             'config_schema'  => $this->configSchema(),
         ];
+    }
+
+    /**
+     * The label the widget shows: the stored override, else the registered
+     * widget's own label, else its key.
+     *
+     * @since 1.2.0
+     *
+     * @return string
+     */
+    protected function label(): string
+    {
+        if ( filled( $this->resource->label ) ) {
+            return (string) $this->resource->label;
+        }
+
+        $registry = app( KanbanCardWidgetRegistry::class );
+        $key      = (string) $this->resource->key;
+
+        if ( ! $registry->has( $key ) ) {
+            return $key;
+        }
+
+        return (string) ( $registry->meta( $key )['label'] ?? $registry->get( $key )->label() );
     }
 
     /**

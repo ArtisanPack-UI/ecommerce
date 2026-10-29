@@ -278,3 +278,50 @@ it( 'tells active boards when a store-wide override changes', function (): void 
     Event::assertDispatchedTimes( KanbanBoardConfigChanged::class, 2 );
     Event::assertDispatched( KanbanBoardConfigChanged::class, fn ( KanbanBoardConfigChanged $event ): bool => $event->board->is( $active ) );
 } );
+
+it( 'stores no label for a config-only override, so the widget keeps its own translated label', function (): void {
+    $service = app( KanbanCardWidgetService::class );
+    $row     = $service->saveOverride( 'days-in-column', [ 'default_config' => [ 'stale_after_days' => 2 ] ] );
+
+    expect( $row->label )->toBeNull();
+
+    $board  = kanbanBoard( [], [ [ 'processing', 'Printing' ] ] );
+    $column = kanbanColumn( $board, 'Printing' );
+    $column->update( [ 'card_widgets' => [ 'days-in-column' ] ] );
+    $order = kanbanOrder( [ 'system_status' => 'processing' ] );
+    putOnBoard( $order, $column );
+
+    app()->setLocale( 'de' );
+    app( KanbanCardRenderer::class )->forgetOverrides();
+
+    expect( widgetPayload( $order, $column, 'days-in-column' )['label'] )->toBe( __( 'Days in column' ) );
+
+    app()->setLocale( 'en' );
+} );
+
+it( 'keeps a stored label when the label is left out, and clears it when it is emptied', function (): void {
+    $service = app( KanbanCardWidgetService::class );
+
+    $service->saveOverride( 'total', [ 'label' => 'Order value' ] );
+    $service->saveOverride( 'total', [ 'default_config' => [] ] );
+
+    expect( KanbanCardWidget::query()->where( 'key', 'total' )->value( 'label' ) )->toBe( 'Order value' );
+
+    $service->saveOverride( 'total', [ 'label' => '  ' ] );
+
+    expect( KanbanCardWidget::query()->where( 'key', 'total' )->value( 'label' ) )->toBeNull();
+} );
+
+it( 'shows the widget\'s own label over REST when no label override is stored', function (): void {
+    $this->actingAs( ecommerceAdmin(), 'sanctum' );
+
+    $this->putJson( '/api/ecommerce/v1/kanban/widgets/days-in-column', [ 'default_config' => [ 'stale_after_days' => 2 ] ], idem() )
+        ->assertOk()
+        ->assertJsonPath( 'data.label', 'Days in column' )
+        ->assertJsonPath( 'data.label_override', null );
+
+    $this->putJson( '/api/ecommerce/v1/kanban/widgets/days-in-column', [ 'label' => 'Age' ], idem() )
+        ->assertOk()
+        ->assertJsonPath( 'data.label', 'Age' )
+        ->assertJsonPath( 'data.label_override', 'Age' );
+} );

@@ -94,7 +94,8 @@ class KanbanCardWidgetService
     /**
      * Stores a widget's display label and/or default config for every
      * board, and tells active boards to refresh. Keys left out of `$data`
-     * keep their stored value.
+     * keep their stored value; a null or empty `label` removes the label
+     * override, so the widget's own label shows.
      *
      * @since 1.2.0
      *
@@ -128,13 +129,16 @@ class KanbanCardWidgetService
         Validator::make( $input, $rules, [], $attributes )->validate();
 
         $row = DB::transaction( function () use ( $key, $input, $widget ): KanbanCardWidget {
+            // No label unless one is set, so the widget's own (translated)
+            // label keeps showing; an empty label clears the override.
             $row = KanbanCardWidget::query()->createOrFirst( [ 'key' => $key ], [
-                'label'       => null !== $widget ? $widget->label() : $key,
+                'label'       => null,
                 'provided_by' => (string) ( $this->widgets->meta( $key )['provided_by'] ?? 'ecommerce' ),
             ] );
 
             if ( array_key_exists( 'label', $input ) ) {
-                $row->label = (string) ( $input['label'] ?? '' ) ?: ( null !== $widget ? $widget->label() : $key );
+                $label      = trim( (string) ( $input['label'] ?? '' ) );
+                $row->label = '' === $label ? null : $label;
             }
 
             if ( array_key_exists( 'default_config', $input ) ) {

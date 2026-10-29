@@ -109,7 +109,8 @@ final class KanbanCardQuery
     }
 
     /**
-     * Narrows the cards by `$filters`.
+     * A copy of this query narrowed by `$filters`. This query is unchanged,
+     * so it can be reused.
      *
      * @since 1.2.0
      *
@@ -119,13 +120,15 @@ final class KanbanCardQuery
      */
     public function filter( KanbanCardFilters $filters ): self
     {
-        $this->filters = $filters;
+        $copy          = clone $this;
+        $copy->filters = $filters;
 
-        return $this;
+        return $copy;
     }
 
     /**
-     * Narrows the cards to `$column` (null for the whole board).
+     * A copy of this query narrowed to `$column` (null for the whole board).
+     * This query is unchanged, so it can be reused.
      *
      * @since 1.2.0
      *
@@ -135,9 +138,10 @@ final class KanbanCardQuery
      */
     public function column( ?KanbanColumn $column ): self
     {
-        $this->column = $column;
+        $copy         = clone $this;
+        $copy->column = $column;
 
-        return $this;
+        return $copy;
     }
 
     /**

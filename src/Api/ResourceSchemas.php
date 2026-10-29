@@ -655,6 +655,7 @@ final class ResourceSchemas
             'KanbanCardWidget' => self::schema( Resources\KanbanCardWidgetResource::class, Models\KanbanCardWidget::class, 'A card widget type available to kanban columns.', [
                 'key'            => 'String!',
                 'label'          => 'String!',
+                'label_override' => 'String',
                 'default_config' => 'JSON',
                 'provided_by'    => 'String!',
                 'config_schema'  => 'JSON',
