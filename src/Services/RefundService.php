@@ -58,6 +58,7 @@ use ArtisanPackUI\Ecommerce\Models\RefundItem;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\Support\AfterCommit;
 use ArtisanPackUI\Ecommerce\ValueObjects\Currency as CurrencyVO;
+use ArtisanPackUI\Ecommerce\ValueObjects\RefundResult;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use InvalidArgumentException;
@@ -224,6 +225,130 @@ class RefundService
         } );
 
         $refund = $refund->fresh( 'items' ) ?? $refund;
+
+        AfterCommit::action( 'ap.ecommerce.payment.refunded', $result, $refreshed );
+        AfterCommit::action( 'ap.ecommerce.order.refunded', $refreshed, $refund );
+        Event::dispatch( new PaymentRefunded( $refreshed, $result ) );
+        Event::dispatch( new OrderRefunded( $refreshed, $refund ) );
+
+        return $refund;
+    }
+
+    /**
+     * Records a refund the payment provider already made, such as one issued
+     * from the provider's dashboard and reported by its webhook (#209).
+     *
+     * Nothing is sent to the gateway. Under the order's row lock, a
+     * `succeeded` amount-only refund is written with the provider's refund id
+     * as `gateway_reference` (no lines, no restock), the order's refunded
+     * total and `payment_status` are updated, and an `order.refunded`
+     * timeline entry is written with `source: provider`. The
+     * `ap.ecommerce.payment.refunded` / `ap.ecommerce.order.refunded` actions
+     * and the {@see PaymentRefunded} / {@see OrderRefunded} events fire after
+     * commit. `ap.ecommerce.payment.refunding` is not applied: the money has
+     * already moved, so there is nothing left to veto.
+     *
+     * Idempotent on `$gatewayReference`: when the order already has a refund
+     * with that reference (a redelivered webhook, or a refund the store
+     * issued itself), that refund is returned and nothing changes. Check
+     * `wasRecentlyCreated` on the result to tell the two apart.
+     *
+     * @since 1.3.0
+     *
+     * @param  Order        $order             Order the provider refunded.
+     * @param  Money        $amount            Amount refunded, in the order's currency.
+     * @param  string       $gatewayReference  The provider's refund id.
+     * @param  string|null  $reason            Reason, when the provider reported one.
+     *
+     * @throws InvalidArgumentException  When the reference is blank or the amount isn't positive.
+     * @throws RefundNotAllowedException When the order isn't refundable, the currency differs, or the amount is over the outstanding balance.
+     *
+     * @return Refund
+     */
+    public function recordProviderRefund( Order $order, Money $amount, string $gatewayReference, ?string $reason = null ): Refund
+    {
+        $gatewayReference = trim( $gatewayReference );
+
+        if ( '' === $gatewayReference ) {
+            throw new InvalidArgumentException( __( 'A provider refund needs the provider\'s refund id.' ) );
+        }
+
+        if ( ! $amount->isPositive() ) {
+            throw new InvalidArgumentException( __( 'A provider refund\'s amount must be a positive number of minor units.' ) );
+        }
+
+        $reason = null === $reason || '' === trim( $reason ) ? null : mb_substr( trim( $reason ), 0, 255 );
+
+        [ $refund, $refreshed ] = DB::transaction( function () use ( $order, $amount, $gatewayReference, $reason ): array {
+            $locked = Order::query()->lockForUpdate()->findOrFail( $order->id );
+
+            /** @var Refund|null $existing */
+            $existing = Refund::query()
+                ->where( 'order_id', $locked->id )
+                ->where( 'gateway_reference', $gatewayReference )
+                ->first();
+
+            if ( null !== $existing ) {
+                return [ $existing, null ];
+            }
+
+            $this->guardOrderRefundable( $locked );
+
+            $currency = (string) $locked->currency;
+
+            if ( $amount->getCurrency()->getCode() !== $currency ) {
+                throw new RefundNotAllowedException( __( 'The provider refunded :refunded_currency but order :order is in :currency.', [
+                    'refunded_currency' => $amount->getCurrency()->getCode(),
+                    'order'             => $locked->id,
+                    'currency'          => $currency,
+                ] ) );
+            }
+
+            $refundAmount = (int) $amount->getAmount();
+
+            $this->guardRefundBalance( $locked, $refundAmount );
+
+            $refund = Refund::query()->create( [
+                'order_id'          => $locked->id,
+                'amount'            => $refundAmount,
+                'currency'          => $currency,
+                'reason'            => $reason,
+                'gateway_reference' => $gatewayReference,
+                'issued_by_user_id' => null,
+                'status'            => Refund::STATUS_SUCCEEDED,
+            ] );
+
+            $locked->total_refunded_amount   = (int) $locked->total_refunded_amount + $refundAmount;
+            $locked->total_refunded_currency = $currency;
+            $locked->payment_status          = $locked->total_refunded_amount >= (int) $locked->total_amount
+                ? 'refunded'
+                : 'partially_refunded';
+            $locked->save();
+
+            OrderTimelineEntry::query()->create( [
+                'order_id'      => $locked->id,
+                'actor_user_id' => null,
+                'event_type'    => 'order.refunded',
+                'payload'       => [
+                    'refund_id'         => $refund->id,
+                    'amount'            => $refundAmount,
+                    'currency'          => $currency,
+                    'reason'            => $reason,
+                    'gateway'           => (string) $locked->payment_gateway_key,
+                    'gateway_reference' => $gatewayReference,
+                    'payment_status'    => $locked->payment_status,
+                    'source'            => 'provider',
+                ],
+            ] );
+
+            return [ $refund, $locked->fresh( 'items' ) ?? $locked ];
+        } );
+
+        if ( null === $refreshed ) {
+            return $refund;
+        }
+
+        $result = RefundResult::success( $amount, $gatewayReference );
 
         AfterCommit::action( 'ap.ecommerce.payment.refunded', $result, $refreshed );
         AfterCommit::action( 'ap.ecommerce.order.refunded', $refreshed, $refund );
