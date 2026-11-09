@@ -6,6 +6,16 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `Contracts\SharesWebhookEndpoint` (optional, on a `PaymentGateway`): `webhookGatewayKeys()` lists the gateway keys whose sessions a gateway's webhooks report on, so one provider endpoint (such as `webhooks/paypal`) can settle checkouts made through its sibling gateways (`paypal-card`, `paypal-apple-pay`, …). Declared keys that aren't registered in `PaymentGatewayRegistry` are dropped, and the gateway's own key is always included (#207).
+- `PaymentReconciler::webhookGatewayKeys( $gatewayKey )`: the key set a reported outcome may settle (#207).
+- `PaymentGatewayContractTest` checks that a gateway implementing `SharesWebhookEndpoint` lists its own key and that every key it lists is registered; the check is skipped for other gateways (#207).
+
+### Changed
+
+- `PaymentReconciler` (webhooks through `Jobs\ReconcilePaymentSession`, and `ecommerce:reconcile-payments`) matches carts and pending orders on that key set. When a reference matches more than one checkout, the most recently updated one is settled and a warning is logged to the `ecommerce` channel. `PaymentReconciler` takes an optional `PaymentGatewayRegistry` constructor argument. Gateways without the contract behave as before (#207).
+
 ## [1.2.0] - 2026-10-29
 
 Kanban boards keep a manual card order, read their cards through one

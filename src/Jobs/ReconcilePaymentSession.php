@@ -8,6 +8,11 @@
  * the checkout is settled by {@see PaymentReconciler} in the background
  * (#168). Dispatched after the webhook's ledger row commits.
  *
+ * `$gatewayKey` is the `{provider}` the webhook arrived on. When that
+ * gateway implements {@see \ArtisanPackUI\Ecommerce\Contracts\SharesWebhookEndpoint},
+ * the reconciler also matches checkouts made with its registered sibling
+ * keys (#207).
+ *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
  *
