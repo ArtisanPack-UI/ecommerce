@@ -464,6 +464,23 @@ The reconciler acts on the outcome:
 | `failed` | The cart's stock holds are released, the cart moves back to `payment_selection`, and `ap.ecommerce.checkout.failed` fires. A placed order is left `pending` for a retry |
 | `requires_action`, `refunded` | Nothing |
 
+The reconciler matches checkouts by the session reference and the gateway
+key. For a webhook, that key is the `{provider}` the webhook arrived on. When
+that gateway implements `Contracts\SharesWebhookEndpoint` (since 1.3.0), the
+reconciler also matches carts and pending orders made with the sibling keys
+it declares, so a card payment made through `paypal-card` is settled by a
+webhook posted to `webhooks/paypal`. Declared keys that aren't registered are
+dropped, and gateways without the contract only match their own key. See
+[contracts.md](contracts.md#contract-notes).
+
+If a reference matches more than one checkout across those keys, the most
+recently updated one is settled and a warning is logged to the `ecommerce`
+channel.
+
+`refunded` is the same for every key set: the reconciler doesn't record
+refunds. Refunds go through `RefundService`, which routes them by the order's
+own `payment_gateway_key`.
+
 Because of this, a queue worker and the scheduler are part of checkout. See
 [operations.md](operations.md).
 

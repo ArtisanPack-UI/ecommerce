@@ -15,6 +15,7 @@ the matching abstract contract-test suite.
 | [`ProvidesStorefrontOptions`](../src/Contracts/ProvidesStorefrontOptions.php) (optional, on a `ProductType`) | The product type itself | `GroupedProductType`, `BundledProductType` | none |
 | [`PaymentGateway`](../src/Contracts/PaymentGateway.php) | `PaymentGatewayRegistry` | `StripeGateway` (`stripe`, when `gateways.stripe.enabled` and `stripe/stripe-php` is installed) | `PaymentGatewayContractTest` |
 | [`RendersClientPayment`](../src/Contracts/RendersClientPayment.php) (optional, on a `PaymentGateway`) | The gateway itself | `StripeGateway` (`stripe-payment-element`) | none |
+| [`SharesWebhookEndpoint`](../src/Contracts/SharesWebhookEndpoint.php) (optional, on a `PaymentGateway`, since 1.3.0) | The gateway itself | none | Checked inside `PaymentGatewayContractTest` |
 | [`FraudProvider`](../src/Contracts/FraudProvider.php) | `FraudProviderRegistry` | `AlwaysApproveFraudProvider` (`always-approve`), `StripeRadarFraudProvider` (`stripe-radar`, with Stripe); `ChainFraudProvider` (`chain`) runs a comma-separated `fraud.provider` list | `FraudProviderContractTest` |
 | [`TaxProvider`](../src/Contracts/TaxProvider.php) | `TaxProviderRegistry` (active: `tax.provider`) | `ManualTaxProvider` (`manual`) | `TaxProviderContractTest` |
 | [`ContextAwareTaxProvider`](../src/Contracts/ContextAwareTaxProvider.php) (extends `TaxProvider`) | `TaxProviderRegistry` | `ManualTaxProvider` | `TaxProviderContractTest` |
@@ -337,6 +338,36 @@ publishable keys and client secrets scoped to one payment. Card data never
 reaches the server, because the client component sends it straight to the
 provider.
 
+**`SharesWebhookEndpoint`.** Optional on a gateway, since 1.3.0. Some
+providers offer several payment methods through one account but post every
+webhook to one URL. `ecommerce-paypal`, for example, registers `paypal`,
+`paypal-card`, `paypal-apple-pay`, and `paypal-google-pay` as separate
+checkout choices, and PayPal posts all of their events to
+`ecommerce/webhooks/paypal`. The gateway that receives the webhook implements
+`webhookGatewayKeys()` and returns the gateway keys whose sessions its
+webhooks report on, its own key included:
+
+```php
+use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
+use ArtisanPackUI\Ecommerce\Contracts\SharesWebhookEndpoint;
+
+class PayPalGateway implements PaymentGateway, SharesWebhookEndpoint
+{
+    public function webhookGatewayKeys(): array
+    {
+        return [ 'paypal', 'paypal-card', 'paypal-apple-pay', 'paypal-google-pay' ];
+    }
+}
+```
+
+The reconciler then matches carts and pending orders whose
+`payment_gateway_key` is any of those keys (see
+[checkout.md](checkout.md#reconciliation)). It always adds the gateway's own
+key and drops any declared key that isn't registered in
+`PaymentGatewayRegistry`, so a gateway can't claim sessions under a key
+nothing has registered (a sibling turned off in config simply drops out).
+Gateways without the contract only reconcile their own key.
+
 **`NotificationTemplate` (contract change).** `defaultSubject()` and
 `defaultBody()` now take `?string $locale = null`. Return the default Twig
 source in that locale, or in the current app locale when it's `null`. The
@@ -653,6 +684,9 @@ Extension points a satellite must provide:
 - `existingPaymentSession(): PaymentSession` — a session that exists at the
   gateway, usually one just created through `createPaymentSession()`.
 - Optional: override `gatewaySupportsRefunds()` to `false` to skip refund cases.
+- Optional: register the gateway and its siblings (for example in
+  `setUp()` or through your satellite's service provider) when the gateway
+  implements `SharesWebhookEndpoint`.
 
 Invariants verified:
 
@@ -667,6 +701,9 @@ Invariants verified:
   is a no-op.
 - `retrievePaymentSession()` returns the session asked for, with the amount
   it was created for and a normalized `PaymentSession::STATUSES` value.
+- A gateway that implements `SharesWebhookEndpoint` lists its own key, and
+  every key it lists is registered in `PaymentGatewayRegistry` (since 1.3.0;
+  skipped for gateways without the contract).
 
 Reference implementation: an in-memory gateway — see
 `tests/Feature/Contracts/InMemoryPaymentGatewayContractTest.php`.

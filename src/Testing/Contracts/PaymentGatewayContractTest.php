@@ -29,6 +29,10 @@
  *    an existing session's reference and amount with a normalized status,
  *    so checkout finalizes the session the shopper confirmed instead of
  *    creating (and charging) a new one.
+ * 7. **Shared webhook keys are registered.** A gateway that implements
+ *    {@see \ArtisanPackUI\Ecommerce\Contracts\SharesWebhookEndpoint} MUST
+ *    list its own key, and every key it lists MUST be registered (since
+ *    1.3.0; skipped for gateways without the contract).
  *
  * Engine spec §4.2, parent plan §15.2.
  *
@@ -45,9 +49,11 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Testing\Contracts;
 
 use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
+use ArtisanPackUI\Ecommerce\Contracts\SharesWebhookEndpoint;
 use ArtisanPackUI\Ecommerce\Exceptions\PaymentCurrencyMismatchException;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Providers\EcommerceServiceProvider;
+use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\ValueObjects\PaymentResult;
 use ArtisanPackUI\Ecommerce\ValueObjects\PaymentSession;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -269,6 +275,40 @@ abstract class PaymentGatewayContractTest extends TestCase
         $this->assertSame( $existing->reference, $retrieved->reference, 'The retrieved session must be the one asked for.' );
         $this->assertTrue( $existing->amount->equals( $retrieved->amount ), 'The retrieved session must report the amount it was created for.' );
         $this->assertContains( $retrieved->status, PaymentSession::STATUSES, 'retrievePaymentSession() must report a normalized PaymentSession::STATUS_* value.' );
+    }
+
+    /**
+     * A gateway that shares its webhook endpoint with sibling gateways MUST
+     * list its own key, and every key it lists MUST be registered: the
+     * reconciler drops unregistered keys, so a typo or a sibling the
+     * satellite forgot to register would silently leave those checkouts
+     * unreconciled. Skipped when the gateway doesn't implement
+     * {@see SharesWebhookEndpoint}.
+     *
+     * @since 1.3.0
+     *
+     * @return void
+     */
+    public function test_shared_webhook_gateway_keys_are_registered_and_include_its_own_key(): void
+    {
+        $gateway = $this->gateway();
+
+        if ( ! $gateway instanceof SharesWebhookEndpoint ) {
+            $this->markTestSkipped( 'Gateway does not share its webhook endpoint.' );
+        }
+
+        $keys     = $gateway->webhookGatewayKeys();
+        $registry = $this->app->make( PaymentGatewayRegistry::class );
+
+        $this->assertContains( $gateway->key(), $keys, 'webhookGatewayKeys() must include the gateway\'s own key.' );
+
+        foreach ( $keys as $key ) {
+            $this->assertIsString( $key, 'webhookGatewayKeys() must return gateway key strings.' );
+            $this->assertTrue(
+                $registry->has( $key ),
+                sprintf( 'Gateway key "%s" from webhookGatewayKeys() is not registered in PaymentGatewayRegistry; the reconciler would drop it.', $key ),
+            );
+        }
     }
 
     /**
