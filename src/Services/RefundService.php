@@ -248,24 +248,29 @@ class RefundService
      * commit. `ap.ecommerce.payment.refunding` is not applied: the money has
      * already moved, so there is nothing left to veto.
      *
-     * Idempotent on `$gatewayReference`: when the order already has a refund
-     * with that reference (a redelivered webhook, or a refund the store
-     * issued itself), that refund is returned and nothing changes. Check
-     * `wasRecentlyCreated` on the result to tell the two apart.
+     * Idempotent: when the order already has a refund with
+     * `$gatewayReference` (a redelivered webhook, or a refund the store
+     * issued that has settled), or the refund `$issuedRefundId` names (the
+     * engine refund id the provider echoes back, such as PayPal's
+     * `custom_id`, even while that refund is still pending in
+     * {@see self::issue()}), that refund is returned and nothing changes.
+     * Both checks run under the order's lock. Check `wasRecentlyCreated` on
+     * the result to tell a new refund from an existing one.
      *
      * @since 1.3.0
      *
      * @param  Order        $order             Order the provider refunded.
      * @param  Money        $amount            Amount refunded, in the order's currency.
      * @param  string       $gatewayReference  The provider's refund id.
-     * @param  string|null  $reason            Reason, when the provider reported one.
+     * @param  string|null      $reason            Reason, when the provider reported one.
+     * @param  int|string|null  $issuedRefundId    The engine refund id the provider echoed back, if any.
      *
-     * @throws InvalidArgumentException  When the reference is blank or the amount isn't positive.
-     * @throws RefundNotAllowedException When the order isn't refundable, the currency differs, or the amount is over the outstanding balance.
+     * @throws InvalidArgumentException  When the reference is blank.
+     * @throws RefundNotAllowedException When the amount isn't positive, the order isn't refundable, the currency differs, or the amount is over the outstanding balance.
      *
      * @return Refund
      */
-    public function recordProviderRefund( Order $order, Money $amount, string $gatewayReference, ?string $reason = null ): Refund
+    public function recordProviderRefund( Order $order, Money $amount, string $gatewayReference, ?string $reason = null, int|string|null $issuedRefundId = null ): Refund
     {
         $gatewayReference = trim( $gatewayReference );
 
@@ -274,18 +279,31 @@ class RefundService
         }
 
         if ( ! $amount->isPositive() ) {
-            throw new InvalidArgumentException( __( 'A provider refund\'s amount must be a positive number of minor units.' ) );
+            throw new RefundNotAllowedException( __( 'A provider refund\'s amount must be a positive number of minor units.' ) );
         }
+
+        $issuedRefundId = null !== $issuedRefundId && 1 === preg_match( '/^\d+$/', trim( (string) $issuedRefundId ) ) ? (int) $issuedRefundId : null;
 
         $reason = null === $reason || '' === trim( $reason ) ? null : mb_substr( trim( $reason ), 0, 255 );
 
-        [ $refund, $refreshed ] = DB::transaction( function () use ( $order, $amount, $gatewayReference, $reason ): array {
+        [ $refund, $refreshed ] = DB::transaction( function () use ( $order, $amount, $gatewayReference, $reason, $issuedRefundId ): array {
             $locked = Order::query()->lockForUpdate()->findOrFail( $order->id );
 
+            // The provider's refund id, or the id of the refund the store
+            // issued itself (which may still be pending, with no reference
+            // yet, while issue() waits on the gateway): either way it is
+            // already on the ledger, or about to be.
             /** @var Refund|null $existing */
             $existing = Refund::query()
                 ->where( 'order_id', $locked->id )
-                ->where( 'gateway_reference', $gatewayReference )
+                ->where( static function ( $query ) use ( $gatewayReference, $issuedRefundId ): void {
+                    $query->where( 'gateway_reference', $gatewayReference );
+
+                    if ( null !== $issuedRefundId ) {
+                        $query->orWhere( 'id', $issuedRefundId );
+                    }
+                } )
+                ->orderBy( 'id' )
                 ->first();
 
             if ( null !== $existing ) {

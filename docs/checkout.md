@@ -491,7 +491,11 @@ refund id as `gateway_reference`, updates the order's refunded total and
 `ap.ecommerce.payment.refunding` is skipped, because the money has already
 moved. A reference the order already has, whether recorded earlier or the id
 of a refund the store issued, returns that refund unchanged, so a redelivered
-webhook is harmless. Gateways should load the refund from the provider's API
+webhook is harmless. Pass the engine refund id the provider echoes back (such
+as PayPal's `custom_id`) as the fifth argument, `$issuedRefundId`: a refund the
+store issued is then matched even while it is still pending and has no
+provider reference yet, so a webhook that arrives mid-refund doesn't record it
+twice. Gateways should load the refund from the provider's API
 rather than trust the webhook's amount.
 
 Because of this, a queue worker and the scheduler are part of checkout. See

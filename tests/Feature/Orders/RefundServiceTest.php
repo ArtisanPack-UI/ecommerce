@@ -739,11 +739,43 @@ describe( 'recordProviderRefund()', function (): void {
             ->and( $order->fresh()->total_refunded_amount )->toBe( 0 );
     } );
 
-    it( 'refuses a blank reference or a non-positive amount', function ( string $reference, int $amount ): void {
-        $this->service->recordProviderRefund( makeRefundableOrder(), Money::USD( $amount ), $reference );
-    } )->with( [
-        'blank reference' => [ '  ', 500 ],
-        'zero amount'     => [ 'RF-ZERO', 0 ],
-        'negative amount' => [ 'RF-NEG', -5 ],
-    ] )->throws( InvalidArgumentException::class );
+    it( 'refuses a blank reference', function (): void {
+        $this->service->recordProviderRefund( makeRefundableOrder(), Money::USD( 500 ), '  ' );
+    } )->throws( InvalidArgumentException::class );
+
+    it( 'refuses a non-positive amount', function ( int $amount ): void {
+        $this->service->recordProviderRefund( makeRefundableOrder(), Money::USD( $amount ), 'RF-AMOUNT' );
+    } )->with( [ 'zero' => 0, 'negative' => -5 ] )->throws( RefundNotAllowedException::class );
+
+    it( 'returns a refund the store issued that is still pending, instead of recording it again', function (): void {
+        $order   = makeRefundableOrder( [ [ 'qty' => 3, 'unit' => 1_000 ] ] );
+        $pending = null;
+
+        // The provider's webhook lands while issue() is still waiting on the
+        // gateway: the refund is pending, with no gateway reference yet.
+        $this->gateway->onRefund = function () use ( $order, &$pending ): void {
+            $open    = Refund::query()->where( 'order_id', $order->id )->sole();
+            $pending = $this->service->recordProviderRefund( $order, Money::USD( 1_000 ), 're_fake_123', null, (string) $open->id );
+        };
+
+        $issued = $this->service->issue( $order, [ [ 'order_item_id' => $order->items->first()->id, 'quantity' => 1, 'amount' => 1_000, 'restock' => false ] ] );
+
+        expect( $pending->id )->toBe( $issued->id )
+            ->and( $pending->wasRecentlyCreated )->toBeFalse()
+            ->and( Refund::query()->where( 'order_id', $order->id )->count() )->toBe( 1 )
+            ->and( $issued->refresh()->status )->toBe( Refund::STATUS_SUCCEEDED )
+            ->and( $issued->items )->toHaveCount( 1 )
+            ->and( $order->fresh()->total_refunded_amount )->toBe( 1_000 );
+    } );
+
+    it( 'ignores an issued refund id that belongs to another order', function (): void {
+        $other  = makeRefundableOrder();
+        $issued = Refund::query()->create( [ 'order_id' => $other->id, 'amount' => 500, 'currency' => 'USD', 'status' => Refund::STATUS_PENDING ] );
+        $order  = makeRefundableOrder();
+
+        $refund = $this->service->recordProviderRefund( $order, Money::USD( 500 ), 'RF-OTHER', null, $issued->id );
+
+        expect( $refund->wasRecentlyCreated )->toBeTrue()
+            ->and( $refund->order_id )->toBe( $order->id );
+    } );
 } );
