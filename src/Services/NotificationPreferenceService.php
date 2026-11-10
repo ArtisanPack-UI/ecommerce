@@ -27,6 +27,7 @@ namespace ArtisanPackUI\Ecommerce\Services;
 use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\CustomerNotificationPreference;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Validation\ValidationException;
 
 /**
  * @package    ArtisanPack_UI
@@ -36,6 +37,15 @@ use Illuminate\Support\Facades\URL;
  */
 class NotificationPreferenceService
 {
+    /**
+     * The category that needs the customer's marketing consent.
+     *
+     * @since 1.3.0
+     *
+     * @var string
+     */
+    public const CATEGORY_MARKETING = 'marketing';
+
     /**
      * Channels customers can set preferences for.
      *
@@ -71,7 +81,7 @@ class NotificationPreferenceService
             ->where( 'category', $category )
             ->first();
 
-        return $preference?->is_enabled ?? $this->default( $customer, $category );
+        return $this->effective( $customer, $preference, $category );
     }
 
     /**
@@ -171,7 +181,7 @@ class NotificationPreferenceService
                 $rows[] = [
                     'channel'    => $channel,
                     'category'   => $category,
-                    'is_enabled' => $locked || ( $stored->get( $channel . '|' . $category )?->is_enabled ?? $this->default( $customer, $category ) ),
+                    'is_enabled' => $locked || $this->effective( $customer, $stored->get( $channel . '|' . $category ), $category ),
                     'is_locked'  => $locked,
                 ];
             }
@@ -183,15 +193,32 @@ class NotificationPreferenceService
     /**
      * Stores `$preferences` (`[ { channel, category, is_enabled } ]`).
      *
+     * Marketing notifications need the customer's marketing consent
+     * (`accepts_marketing`): turning `marketing` on for a customer who
+     * hasn't given it is refused before anything is stored. Turning it off
+     * is always allowed.
+     *
      * @since 1.0.0
      *
      * @param  Customer                                                              $customer     Customer.
      * @param  array<int, array{channel: string, category: string, is_enabled: bool}>  $preferences  Changes.
      *
+     * @throws ValidationException When a preference turns marketing on without consent.
+     *
      * @return array<int, array{channel: string, category: string, is_enabled: bool, is_locked: bool}>
      */
     public function update( Customer $customer, array $preferences ): array
     {
+        if ( ! (bool) $customer->accepts_marketing ) {
+            foreach ( $preferences as $preference ) {
+                if ( self::CATEGORY_MARKETING === ( $preference['category'] ?? null ) && (bool) ( $preference['is_enabled'] ?? false ) ) {
+                    throw ValidationException::withMessages( [
+                        'preferences' => __( 'Turn on marketing consent before turning on marketing notifications.' ),
+                    ] );
+                }
+            }
+        }
+
         foreach ( $preferences as $preference ) {
             CustomerNotificationPreference::query()->updateOrCreate(
                 [ 'customer_id' => $customer->id, 'channel' => $preference['channel'], 'category' => $preference['category'] ],
@@ -200,6 +227,50 @@ class NotificationPreferenceService
         }
 
         return $this->all( $customer );
+    }
+
+    /**
+     * Stores marketing as off on every channel for a customer who withdrew
+     * their marketing consent, as a record of the withdrawal. The consent
+     * already gates marketing ({@see self::effective()}); these rows keep it
+     * off if consent is given again later, until the customer turns it on.
+     *
+     * @since 1.3.0
+     *
+     * @param  Customer  $customer  Customer.
+     *
+     * @return void
+     */
+    public function withdrawMarketing( Customer $customer ): void
+    {
+        foreach ( $this->channels() as $channel ) {
+            CustomerNotificationPreference::query()->updateOrCreate(
+                [ 'customer_id' => $customer->id, 'channel' => $channel, 'category' => self::CATEGORY_MARKETING ],
+                [ 'is_enabled' => false ],
+            );
+        }
+    }
+
+    /**
+     * The effective value of `$category` for `$customer`, given its stored
+     * row (if any). Marketing needs the customer's consent: a stored row
+     * can turn it off but can't turn it on without `accepts_marketing`.
+     *
+     * @since 1.3.0
+     *
+     * @param  Customer                             $customer    Customer.
+     * @param  CustomerNotificationPreference|null  $preference  Stored row.
+     * @param  string                               $category    Category.
+     *
+     * @return bool
+     */
+    protected function effective( Customer $customer, ?CustomerNotificationPreference $preference, string $category ): bool
+    {
+        if ( self::CATEGORY_MARKETING === $category ) {
+            return (bool) $customer->accepts_marketing && ( $preference?->is_enabled ?? true );
+        }
+
+        return $preference?->is_enabled ?? $this->default( $customer, $category );
     }
 
     /**
@@ -214,6 +285,6 @@ class NotificationPreferenceService
      */
     protected function default( Customer $customer, string $category ): bool
     {
-        return 'marketing' === $category ? (bool) $customer->accepts_marketing : true;
+        return self::CATEGORY_MARKETING === $category ? (bool) $customer->accepts_marketing : true;
     }
 }

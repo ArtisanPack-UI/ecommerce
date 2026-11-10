@@ -136,9 +136,11 @@ class Refund extends Model
 
     /**
      * Settles a pending refund once the gateway answered — the one change a
-     * refund row allows. Only `status` (and, on success, the provider's
-     * `gateway_reference`) are written, and only while the row is still
-     * pending, so a settled refund can never be changed back.
+     * pending refund row allows. Only `status` (and, on success, the
+     * provider's `gateway_reference`) are written, and only while the row is
+     * still pending, so a settled refund can never be changed back. The one
+     * exception is {@see self::settleFailedAsSucceeded()}, for a failed
+     * refund the provider later reports it completed.
      *
      * @since 1.0.0
      *
@@ -172,6 +174,48 @@ class Refund extends Model
         }
 
         $this->forceFill( $values )->syncOriginal();
+    }
+
+    /**
+     * Settles a refund that was marked failed as succeeded, because the
+     * provider later reported that it made the refund after all (such as
+     * after a gateway timeout). This is the only change a failed refund
+     * allows: `status` becomes succeeded and, when given, the provider's
+     * `gateway_reference` is written, and only while the row is still failed.
+     *
+     * Unlike {@see self::settle()}, the change stays in the model's
+     * `changes`, so callers can tell a settled refund from an untouched one
+     * with `wasChanged( 'status' )`.
+     *
+     * @since 1.3.0
+     *
+     * @param  string|null  $gatewayReference  The provider's refund id.
+     *
+     * @throws LogicException When the row is no longer failed.
+     *
+     * @return void
+     */
+    public function settleFailedAsSucceeded( ?string $gatewayReference = null ): void
+    {
+        $values = [ 'status' => self::STATUS_SUCCEEDED, 'updated_at' => Carbon::now() ];
+
+        if ( null !== $gatewayReference ) {
+            $values['gateway_reference'] = $gatewayReference;
+        }
+
+        // The base query builder, not the append-only Eloquent one.
+        $updated = static::query()->toBase()
+            ->where( 'id', $this->getKey() )
+            ->where( 'status', self::STATUS_FAILED )
+            ->update( $values );
+
+        if ( 1 !== $updated ) {
+            throw new LogicException( sprintf( 'Refund %d is not failed and cannot be settled as succeeded.', $this->getKey() ) );
+        }
+
+        $this->forceFill( $values );
+        $this->syncChanges();
+        $this->syncOriginal();
     }
 
     /**

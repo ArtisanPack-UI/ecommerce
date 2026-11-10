@@ -73,6 +73,7 @@ use ArtisanPackUI\Ecommerce\Models\OrderTimelineEntry;
 use ArtisanPackUI\Ecommerce\Registries\FraudProviderRegistry;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\Services\Fraud\ChainFraudProvider;
+use ArtisanPackUI\Ecommerce\Support\AfterCommit;
 use ArtisanPackUI\Ecommerce\ValueObjects\Address;
 use ArtisanPackUI\Ecommerce\ValueObjects\Currency as CurrencyVO;
 use ArtisanPackUI\Ecommerce\ValueObjects\FraudDecision;
@@ -85,6 +86,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 use Money\Money;
 use RuntimeException;
 use Throwable;
@@ -201,6 +203,129 @@ class PaymentOrchestrator
     public function resume( Order $order, array $context = [] ): PaymentFinalization
     {
         return $this->run( $order, $this->cartFor( $order ), $this->addressFor( $order ), $context, true );
+    }
+
+    /**
+     * Records that the provider failed a payment the store had already
+     * counted as paid, such as a pending capture (an eCheck, or a payment
+     * held for review) that the provider later denied.
+     *
+     * Under the order's row lock, `payment_status` becomes `failed`,
+     * `meta.payment.capture_failure` records the reference, code and time,
+     * and a `payment.capture_failed` timeline entry is written with
+     * `source: provider`. After commit, `ap.ecommerce.payment.failed` fires
+     * and {@see PaymentFailed} is dispatched, as for a capture that failed
+     * at checkout. A listener that throws is reported and logged, not
+     * rethrown, so it can't break the caller's transaction or the work the
+     * caller does after it.
+     *
+     * Nothing changes, and `false` is returned, when the order isn't `paid`
+     * (already `failed` makes this idempotent; a refunded or partially
+     * refunded order is the staff's call), when anything has been refunded,
+     * or when the order recorded a different capture reference (an event
+     * for an older capture can't fail the current one).
+     *
+     * The order's `system_status`, its stock and any digital deliverables are left
+     * as they are: whether to cancel, restock or revoke is store policy, for
+     * a listener on the hook or the event to decide.
+     *
+     * @since 1.3.0
+     *
+     * @param  Order        $order             Order.
+     * @param  string       $captureReference  The provider's capture/charge id that failed.
+     * @param  string       $code              Machine code, e.g. `capture_denied`.
+     * @param  string|null  $message           Human-readable reason (already translated), if any.
+     *
+     * @throws InvalidArgumentException When the capture reference is blank.
+     *
+     * @return bool Whether the order changed.
+     */
+    public function recordProviderPaymentFailure( Order $order, string $captureReference, string $code, ?string $message = null ): bool
+    {
+        $captureReference = trim( $captureReference );
+
+        if ( '' === $captureReference ) {
+            throw new InvalidArgumentException( __( 'A provider payment failure needs the provider\'s capture id.' ) );
+        }
+
+        $changed = DB::transaction( function () use ( $order, $captureReference, $code, $message ): ?Order {
+            $locked = Order::query()->lockForUpdate()->findOrFail( $order->id );
+
+            if ( 'paid' !== (string) $locked->payment_status || (int) $locked->total_refunded_amount > 0 ) {
+                return null;
+            }
+
+            $meta     = (array) ( $locked->meta ?? [] );
+            $payment  = (array) ( $meta['payment'] ?? [] );
+            $recorded = (string) ( $payment['capture_reference'] ?? '' );
+
+            if ( '' !== $recorded && $recorded !== $captureReference ) {
+                return null;
+            }
+
+            $payment['capture_failure'] = [
+                'reference' => $captureReference,
+                'code'      => $code,
+                'at'        => Carbon::now()->toIso8601String(),
+            ];
+            $meta['payment'] = $payment;
+
+            $locked->payment_status = 'failed';
+            $locked->meta           = $meta;
+            $locked->save();
+
+            OrderTimelineEntry::query()->create( [
+                'order_id'      => $locked->id,
+                'actor_user_id' => null,
+                'event_type'    => 'payment.capture_failed',
+                'payload'       => [
+                    'gateway'   => (string) $locked->payment_gateway_key,
+                    'reference' => $captureReference,
+                    'code'      => $code,
+                    'message'   => $message,
+                    'source'    => 'provider',
+                ],
+            ] );
+
+            return $locked;
+        } );
+
+        if ( null === $changed ) {
+            return false;
+        }
+
+        // The failure is committed: a gateway that can no longer be resolved
+        // (unregistered, unbuildable, or reporting another key) skips the
+        // hook and event rather than reporting an error for work that
+        // succeeded.
+        try {
+            $gateway = $this->gateways->find( (string) $changed->payment_gateway_key );
+        } catch ( Throwable $exception ) {
+            $gateway = null;
+
+            report( $exception );
+        }
+
+        if ( null === $gateway ) {
+            Log::channel( 'ecommerce' )->warning( 'A provider failed an order\'s payment, but its gateway can\'t be resolved; the payment.failed hook and event were skipped.', [
+                'order_id' => $changed->id,
+                'gateway'  => (string) $changed->payment_gateway_key,
+                'code'     => $code,
+            ] );
+
+            return true;
+        }
+
+        $reason = new PaymentNotAllowedException( $message ?? $code );
+
+        // Both run after the caller's transaction commits, and a throwing
+        // listener is reported rather than rethrown: the failure is already
+        // recorded, and a caller such as a webhook handler still has its own
+        // after-commit work to do.
+        AfterCommit::action( 'ap.ecommerce.payment.failed', $gateway, $reason, $changed );
+        AfterCommit::run( PaymentFailed::class, static fn () => Event::dispatch( new PaymentFailed( $changed, $gateway, $reason ) ) );
+
+        return true;
     }
 
     /**

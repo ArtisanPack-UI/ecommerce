@@ -27,7 +27,12 @@ uses( RefreshDatabase::class );
  */
 function cqProduct( string $name, int $usd, array $attributes = [], ?int $compareAt = null ): Product
 {
-    $product = Product::factory()->create( [ 'name' => $name ] + $attributes );
+    // A fixed SKU and description: the factory's random ones can contain a
+    // search term (an SKU like "XMUGQ2PL" matches "mug") and flake the search test.
+    $product = Product::factory()->create( [ 'name' => $name ] + $attributes + [
+        'sku'         => 'CQ-' . bin2hex( random_bytes( 4 ) ),
+        'description' => $name . '.',
+    ] );
     ProductPrice::factory()->forPriceable( $product )->create( [ 'currency' => 'USD', 'price_amount' => $usd, 'compare_at_amount' => $compareAt ] );
 
     return $product;

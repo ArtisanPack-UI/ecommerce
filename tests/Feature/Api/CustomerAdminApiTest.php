@@ -184,3 +184,17 @@ it( 'still 404s a delete of a missing customer under a fresh key', function (): 
         ->deleteJson( '/api/ecommerce/v1/customers/999999', [], idem() )
         ->assertNotFound();
 } );
+
+it( 'stores marketing off on every channel when staff withdraw a customer\'s consent (#194)', function (): void {
+    $customer = Customer::factory()->create( [ 'accepts_marketing' => true ] );
+
+    $this->actingAs( ecommerceAdmin(), 'sanctum' )
+        ->patchJson( "/api/ecommerce/v1/customers/{$customer->id}", [ 'accepts_marketing' => false ], idem() )
+        ->assertOk();
+
+    $customer->refresh();
+
+    expect( $customer->accepts_marketing )->toBeFalse()
+        ->and( $customer->accepts_marketing_at )->toBeNull()
+        ->and( $customer->notificationPreferences()->where( 'category', 'marketing' )->pluck( 'is_enabled' )->all() )->toBe( [ false ] );
+} );
