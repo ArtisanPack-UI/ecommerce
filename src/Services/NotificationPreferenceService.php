@@ -211,7 +211,7 @@ class NotificationPreferenceService
     {
         if ( ! (bool) $customer->accepts_marketing ) {
             foreach ( $preferences as $preference ) {
-                if ( self::CATEGORY_MARKETING === $preference['category'] && (bool) $preference['is_enabled'] ) {
+                if ( self::CATEGORY_MARKETING === ( $preference['category'] ?? null ) && (bool) ( $preference['is_enabled'] ?? false ) ) {
                     throw ValidationException::withMessages( [
                         'preferences' => __( 'Turn on marketing consent before turning on marketing notifications.' ),
                     ] );

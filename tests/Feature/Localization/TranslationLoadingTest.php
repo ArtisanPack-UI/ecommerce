@@ -50,11 +50,13 @@ it( 'prefers a published catalogue in lang/vendor/ecommerce over the shipped one
     $key       = 'A product needs a name.';
     $published = app()->langPath( 'vendor/ecommerce' );
     $file      = $published . '/de.json';
-
-    expect( __( $key, [], 'de' ) )->toBe( 'Ein Produkt braucht einen Namen.' );
+    $original  = is_file( $file ) ? File::get( $file ) : null;
 
     File::ensureDirectoryExists( $published );
-    File::put( $file, json_encode( [ $key => 'Ein Produkt braucht einen Namen. (veröffentlicht)' ] ) );
+    File::put( $file, json_encode( array_merge(
+        null === $original ? [] : (array) json_decode( $original, true ),
+        [ $key => 'Ein Produkt braucht einen Namen. (veröffentlicht)' ],
+    ) ) );
 
     try {
         app( 'translator' )->setLoaded( [] );
@@ -62,9 +64,13 @@ it( 'prefers a published catalogue in lang/vendor/ecommerce over the shipped one
         expect( __( $key, [], 'de' ) )->toBe( 'Ein Produkt braucht einen Namen. (veröffentlicht)' )
             ->and( __( 'Forbidden', [], 'de' ) )->not->toBe( 'Forbidden' );
     } finally {
-        // Only what this test created: another process may be using the
-        // directories.
-        File::delete( $file );
+        // Put back a catalogue that was already there, and remove only what
+        // this test created: another process may be using the directories.
+        if ( null !== $original ) {
+            File::put( $file, $original );
+        } else {
+            File::delete( $file );
+        }
 
         foreach ( [ $published, app()->langPath( 'vendor' ) ] as $dir ) {
             if ( is_dir( $dir ) && [] === File::files( $dir ) && [] === File::directories( $dir ) ) {

@@ -86,6 +86,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 use Money\Money;
 use RuntimeException;
 use Throwable;
@@ -214,7 +215,9 @@ class PaymentOrchestrator
      * and a `payment.capture_failed` timeline entry is written with
      * `source: provider`. After commit, `ap.ecommerce.payment.failed` fires
      * and {@see PaymentFailed} is dispatched, as for a capture that failed
-     * at checkout.
+     * at checkout. A listener that throws is reported and logged, not
+     * rethrown, so it can't break the caller's transaction or the work the
+     * caller does after it.
      *
      * Nothing changes, and `false` is returned, when the order isn't `paid`
      * (already `failed` makes this idempotent; a refunded or partially
@@ -233,11 +236,17 @@ class PaymentOrchestrator
      * @param  string       $code              Machine code, e.g. `capture_denied`.
      * @param  string|null  $message           Human-readable reason (already translated), if any.
      *
+     * @throws InvalidArgumentException When the capture reference is blank.
+     *
      * @return bool Whether the order changed.
      */
     public function recordProviderPaymentFailure( Order $order, string $captureReference, string $code, ?string $message = null ): bool
     {
         $captureReference = trim( $captureReference );
+
+        if ( '' === $captureReference ) {
+            throw new InvalidArgumentException( __( 'A provider payment failure needs the provider\'s capture id.' ) );
+        }
 
         $changed = DB::transaction( function () use ( $order, $captureReference, $code, $message ): ?Order {
             $locked = Order::query()->lockForUpdate()->findOrFail( $order->id );
@@ -299,8 +308,12 @@ class PaymentOrchestrator
 
         $reason = new PaymentNotAllowedException( $message ?? $code );
 
+        // Both run after the caller's transaction commits, and a throwing
+        // listener is reported rather than rethrown: the failure is already
+        // recorded, and a caller such as a webhook handler still has its own
+        // after-commit work to do.
         AfterCommit::action( 'ap.ecommerce.payment.failed', $gateway, $reason, $changed );
-        Event::dispatch( new PaymentFailed( $changed, $gateway, $reason ) );
+        AfterCommit::run( PaymentFailed::class, static fn () => Event::dispatch( new PaymentFailed( $changed, $gateway, $reason ) ) );
 
         return true;
     }

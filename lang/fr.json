@@ -45,6 +45,7 @@
     "A product can't contain itself.": "Un produit ne peut pas se contenir lui-même.",
     "A product needs a name.": "Un produit doit avoir un nom.",
     "A promotion with this key already exists.": "Une promotion avec cette clé existe déjà.",
+    "A provider payment failure needs the provider's capture id.": "Un échec de paiement signalé par le prestataire nécessite l’identifiant de capture du prestataire.",
     "A provider refund needs the provider's refund id.": "Un remboursement du prestataire nécessite l'identifiant de remboursement du prestataire.",
     "A provider refund's amount must be a positive number of minor units.": "Le montant d'un remboursement du prestataire doit être un nombre positif d'unités mineures.",
     "A reason is required to cancel an order.": "Un motif est requis pour annuler une commande.",

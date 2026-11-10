@@ -25,6 +25,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Exceptions;
 use Money\Money;
 
 uses( RefreshDatabase::class );
@@ -872,7 +873,7 @@ it( 'refunds instead of voiding when a fraud block lands on an already captured 
 describe( 'recordProviderPaymentFailure()', function (): void {
     function orchPaidOrder( array $attributes = [] ): Order
     {
-        return Order::factory()->create( array_merge( [
+        return Order::factory()->createOne( array_merge( [
             'payment_gateway_key' => 'orch-fake',
             'system_status'       => 'processing',
             'payment_status'      => 'paid',
@@ -938,6 +939,30 @@ describe( 'recordProviderPaymentFailure()', function (): void {
         expect( $fired )->toBe( 1 );
     } );
 
+    it( 'reports a throwing PaymentFailed listener instead of breaking the caller\'s commit', function (): void {
+        Exceptions::fake();
+
+        Event::listen( PaymentFailed::class, function (): void {
+            throw new RuntimeException( 'listener broke' );
+        } );
+
+        $order = orchPaidOrder();
+        $after = false;
+
+        DB::transaction( function () use ( $order, &$after ): void {
+            app( PaymentOrchestrator::class )->recordProviderPaymentFailure( $order, 'CAP-1', 'capture_denied' );
+
+            DB::afterCommit( function () use ( &$after ): void {
+                $after = true;
+            } );
+        } );
+
+        expect( $order->fresh()->payment_status )->toBe( 'failed' )
+            ->and( $after )->toBeTrue();
+
+        Exceptions::assertReported( fn ( RuntimeException $e ) => 'listener broke' === $e->getMessage() );
+    } );
+
     it( 'is idempotent: a second call changes nothing', function (): void {
         Event::fake( [ PaymentFailed::class ] );
 
@@ -986,6 +1011,16 @@ describe( 'recordProviderPaymentFailure()', function (): void {
 
         expect( app( PaymentOrchestrator::class )->recordProviderPaymentFailure( $order, 'CAP-9', 'capture_denied' ) )->toBeTrue()
             ->and( $order->fresh()->payment_status )->toBe( 'failed' );
+    } );
+
+    it( 'refuses a blank capture reference without touching the order', function (): void {
+        $order = orchPaidOrder( [ 'meta' => [] ] );
+
+        expect( fn () => app( PaymentOrchestrator::class )->recordProviderPaymentFailure( $order, '  ', 'capture_denied' ) )
+            ->toThrow( InvalidArgumentException::class );
+
+        expect( $order->fresh()->payment_status )->toBe( 'paid' )
+            ->and( OrderTimelineEntry::query()->where( 'order_id', $order->id )->exists() )->toBeFalse();
     } );
 
     it( 'still fails the payment when the order\'s gateway is no longer registered, skipping the hook', function (): void {
