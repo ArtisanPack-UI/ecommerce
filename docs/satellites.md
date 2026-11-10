@@ -193,7 +193,7 @@ release yet are listed as unverified.
 
 | Package | Purpose | Contracts |
 |---|---|---|
-| `artisanpack-ui/ecommerce-paypal` | PayPal Checkout + webhooks. | ![unverified](https://img.shields.io/badge/contract-unverified-lightgrey) |
+| `artisanpack-ui/ecommerce-paypal` | PayPal gateway: PayPal, Pay Later, Venmo, cards, Apple Pay, Google Pay. | ![contract-verified](https://img.shields.io/badge/contract-verified-brightgreen) (v1.0.0) |
 | `artisanpack-ui/ecommerce-square` | Square payments. | ![unverified](https://img.shields.io/badge/contract-unverified-lightgrey) |
 | `artisanpack-ui/ecommerce-bnpl` | Buy now, pay later via Stripe. | ![unverified](https://img.shields.io/badge/contract-unverified-lightgrey) |
 
