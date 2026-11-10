@@ -24,9 +24,11 @@ use ArtisanPackUI\Ecommerce\Http\Resources\CustomerResource;
 use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use ArtisanPackUI\Ecommerce\Services\CustomerService;
+use ArtisanPackUI\Ecommerce\Services\NotificationPreferenceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 /**
  * @package    ArtisanPack_UI
@@ -91,7 +93,15 @@ class CustomerController extends ApiController
             $data['meta'] = array_replace_recursive( (array) ( $customer->meta ?? [] ), (array) $data['meta'] );
         }
 
-        $customer->fill( $data )->save();
+        $withdrawn = array_key_exists( 'accepts_marketing', $data ) && ! (bool) $data['accepts_marketing'] && (bool) $customer->accepts_marketing;
+
+        DB::transaction( function () use ( $customer, $data, $withdrawn ): void {
+            $customer->fill( $data )->save();
+
+            if ( $withdrawn ) {
+                app( NotificationPreferenceService::class )->withdrawMarketing( $customer );
+            }
+        } );
 
         return $this->resourceResponse( $customer, $request, CustomerResource::class, [ 'addresses' => 'addresses' ] );
     }

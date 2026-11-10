@@ -160,6 +160,15 @@ it( 'lets shoppers read and change their notification preferences', function ():
     $this->patchJson( '/api/ecommerce/v1/me/notification-preferences', [ 'preferences' => [ [ 'channel' => 'mail', 'category' => 'bogus', 'is_enabled' => false ] ] ], idem() )
         ->assertStatus( 422 );
 
+    // Marketing needs the customer's consent first (#194).
+    $this->patchJson( '/api/ecommerce/v1/me/notification-preferences', [ 'preferences' => [
+        [ 'channel' => 'mail', 'category' => 'marketing', 'is_enabled' => true ],
+    ] ], idem() )->assertStatus( 422 )->assertJsonValidationErrors( 'preferences' );
+
+    expect( $customer->notificationPreferences()->count() )->toBe( 0 );
+
+    $customer->forceFill( [ 'accepts_marketing' => true ] )->save();
+
     $updated = collect( $this->patchJson( '/api/ecommerce/v1/me/notification-preferences', [ 'preferences' => [
         [ 'channel' => 'mail', 'category' => 'marketing', 'is_enabled' => true ],
         [ 'channel' => 'mail', 'category' => 'transactional', 'is_enabled' => false ],
