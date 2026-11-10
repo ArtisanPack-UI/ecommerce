@@ -100,7 +100,7 @@ name the cart with `cart_token`.
 | `setCheckoutAddress` (returns `cart`, `shipping_rates`) | `POST checkout/{cart}/address` |
 | `setShippingMethod` | `POST checkout/{cart}/shipping-method` |
 | `setPaymentGateway` | `POST checkout/{cart}/payment-gateway` |
-| `createPaymentSession` (returns `cart`, `session { reference status amount client }`) | `POST checkout/{cart}/session` |
+| `createPaymentSession` (takes `payment_options: JSON`; returns `cart`, `session { reference status amount client }`) | `POST checkout/{cart}/session` |
 | `placeOrder` (returns `order`, `status`, `complete`, `step_up_token`) | `POST checkout/{cart}/finalize` |
 | `issueRefund` | `POST orders/{order}/refunds` |
 | `cancelOrder` | `POST orders/{order}/cancel` |

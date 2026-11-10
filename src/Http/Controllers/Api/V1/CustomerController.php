@@ -24,9 +24,11 @@ use ArtisanPackUI\Ecommerce\Http\Resources\CustomerResource;
 use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use ArtisanPackUI\Ecommerce\Services\CustomerService;
+use ArtisanPackUI\Ecommerce\Services\NotificationPreferenceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 /**
  * @package    ArtisanPack_UI
@@ -83,15 +85,28 @@ class CustomerController extends ApiController
     {
         $data = $request->validated();
 
-        if ( array_key_exists( 'accepts_marketing', $data ) && (bool) $data['accepts_marketing'] !== (bool) $customer->accepts_marketing ) {
-            $data['accepts_marketing_at'] = $data['accepts_marketing'] ? Carbon::now() : null;
-        }
+        $customer = DB::transaction( function () use ( $customer, $data ): Customer {
+            // Decide on the locked row, so a concurrent change can't make a
+            // consent withdrawal (or its re-grant) go unrecorded.
+            $locked    = Customer::query()->lockForUpdate()->findOrFail( $customer->getKey() );
+            $withdrawn = array_key_exists( 'accepts_marketing', $data ) && ! (bool) $data['accepts_marketing'] && (bool) $locked->accepts_marketing;
 
-        if ( array_key_exists( 'meta', $data ) ) {
-            $data['meta'] = array_replace_recursive( (array) ( $customer->meta ?? [] ), (array) $data['meta'] );
-        }
+            if ( array_key_exists( 'accepts_marketing', $data ) && (bool) $data['accepts_marketing'] !== (bool) $locked->accepts_marketing ) {
+                $data['accepts_marketing_at'] = $data['accepts_marketing'] ? Carbon::now() : null;
+            }
 
-        $customer->fill( $data )->save();
+            if ( array_key_exists( 'meta', $data ) ) {
+                $data['meta'] = array_replace_recursive( (array) ( $locked->meta ?? [] ), (array) $data['meta'] );
+            }
+
+            $locked->fill( $data )->save();
+
+            if ( $withdrawn ) {
+                app( NotificationPreferenceService::class )->withdrawMarketing( $locked );
+            }
+
+            return $locked;
+        } );
 
         return $this->resourceResponse( $customer, $request, CustomerResource::class, [ 'addresses' => 'addresses' ] );
     }

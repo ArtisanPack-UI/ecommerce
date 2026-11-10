@@ -20,6 +20,8 @@ use Illuminate\Support\Carbon;
 use Stripe\ApiRequestor;
 use Stripe\Exception\ApiConnectionException;
 use Stripe\HttpClient\ClientInterface;
+use Tests\Fixtures\CheckoutFakeGateway;
+use Tests\Fixtures\SharedWebhookFakeGateway;
 
 require_once __DIR__ . '/CheckoutTestHelpers.php';
 
@@ -189,5 +191,117 @@ describe( 'reconcile command', function (): void {
         $this->artisan( 'ecommerce:reconcile-payments' )->assertSuccessful();
 
         expect( $order->refresh()->payment_status )->toBe( 'paid' );
+    } );
+} );
+
+/**
+ * A ready cart paid through `$gatewayKey` whose session the shopper
+ * confirmed (or whose reference is forced to `$reference`).
+ */
+function reconcileSiblingCart( $product, string $gatewayKey, ?string $reference = null ): Cart
+{
+    $cart = readyCart( $product );
+    app( CheckoutService::class )->setPaymentGateway( $cart, $gatewayKey );
+
+    if ( null === $reference ) {
+        $session = app( CheckoutService::class )->createPaymentSession( $cart->refresh() );
+        app( PaymentGatewayRegistry::class )->get( $gatewayKey )->confirm( $session->reference );
+    } else {
+        $cart->forceFill( [ 'payment_reference' => $reference, 'checkout_state' => CheckoutState::PAYMENT_PENDING ] )->save();
+    }
+
+    return $cart->refresh();
+}
+
+describe( 'shared webhook endpoints', function (): void {
+    beforeEach( function (): void {
+        $this->card   = new CheckoutFakeGateway( 'fake-card' );
+        $this->shared = new SharedWebhookFakeGateway( 'fake-shared', [ 'fake-shared', 'fake-card', 'fake-ghost', 42 ] );
+
+        app( PaymentGatewayRegistry::class )->register( 'fake-card', $this->card );
+        app( PaymentGatewayRegistry::class )->register( 'fake-shared', $this->shared );
+    } );
+
+    it( 'finalizes a sibling gateway\'s checkout from the shared gateway\'s webhook', function (): void {
+        $cart = reconcileSiblingCart( $this->product, 'fake-card' );
+
+        expect( $cart->payment_gateway_key )->toBe( 'fake-card' )
+            ->and( app( PaymentReconciler::class )->reconcile( 'fake-shared', (string) $cart->payment_reference, WebhookResult::OUTCOME_SUCCEEDED ) )->toBe( PaymentReconciler::FINALIZED );
+
+        $order = Order::query()->sole();
+
+        expect( $order->payment_status )->toBe( 'paid' )
+            ->and( $order->payment_gateway_key )->toBe( 'fake-card' )
+            ->and( $cart->refresh()->completed_order_id )->toBe( $order->id );
+    } );
+
+    it( 'releases a sibling gateway\'s checkout when the shared gateway reports a failure', function (): void {
+        $cart = reconcileSiblingCart( $this->product, 'fake-card', 'ref_failed' );
+
+        expect( app( PaymentReconciler::class )->reconcile( 'fake-shared', 'ref_failed', WebhookResult::OUTCOME_FAILED ) )->toBe( PaymentReconciler::FAILED )
+            ->and( $cart->refresh()->checkout_state )->toBe( CheckoutState::PAYMENT_SELECTION );
+    } );
+
+    it( 'resumes a sibling gateway\'s pending order from the shared gateway\'s webhook', function (): void {
+        $cart     = readyCart( $this->product );
+        $checkout = app( CheckoutService::class );
+        $checkout->setPaymentGateway( $cart, 'fake-card' );
+        $session = $checkout->createPaymentSession( $cart->refresh() );
+        $this->card->confirm( $session->reference, PaymentSession::STATUS_REQUIRES_ACTION );
+
+        $order = $checkout->finalize( $cart->refresh(), $session->reference )->order;
+        $this->card->confirm( $session->reference );
+
+        expect( $order->payment_status )->toBe( 'pending' )
+            ->and( app( PaymentReconciler::class )->reconcile( 'fake-shared', $session->reference, WebhookResult::OUTCOME_SUCCEEDED ) )->toBe( PaymentReconciler::FINALIZED )
+            ->and( $order->refresh()->payment_status )->toBe( 'paid' );
+    } );
+
+    it( 'only lets a gateway claim declared keys that are registered', function (): void {
+        $ghost = reconcileSiblingCart( $this->product, 'fake-card', 'ref_ghost' );
+        $ghost->forceFill( [ 'payment_gateway_key' => 'fake-ghost' ] )->save();
+
+        expect( app( PaymentReconciler::class )->webhookGatewayKeys( 'fake-shared' ) )->toBe( [ 'fake-shared', 'fake-card' ] )
+            ->and( app( PaymentReconciler::class )->reconcile( 'fake-shared', 'ref_ghost', WebhookResult::OUTCOME_FAILED ) )->toBe( PaymentReconciler::SKIPPED )
+            ->and( $ghost->refresh()->checkout_state )->toBe( CheckoutState::PAYMENT_PENDING );
+    } );
+
+    it( 'always includes the gateway\'s own key, even when it leaves it out', function (): void {
+        app( PaymentGatewayRegistry::class )->register( 'fake-forgetful', new SharedWebhookFakeGateway( 'fake-forgetful', [ 'fake-card' ] ) );
+
+        expect( app( PaymentReconciler::class )->webhookGatewayKeys( 'fake-forgetful' ) )->toBe( [ 'fake-forgetful', 'fake-card' ] );
+    } );
+
+    it( 'leaves gateways without the contract matching only their own key', function (): void {
+        $cart = reconcileSiblingCart( $this->product, 'fake-card', 'ref_own' );
+
+        expect( app( PaymentReconciler::class )->webhookGatewayKeys( 'fake' ) )->toBe( [ 'fake' ] )
+            ->and( app( PaymentReconciler::class )->webhookGatewayKeys( 'not-registered' ) )->toBe( [ 'not-registered' ] )
+            ->and( app( PaymentReconciler::class )->reconcile( 'fake', 'ref_own', WebhookResult::OUTCOME_FAILED ) )->toBe( PaymentReconciler::SKIPPED )
+            ->and( $cart->refresh()->checkout_state )->toBe( CheckoutState::PAYMENT_PENDING )
+            ->and( app( PaymentReconciler::class )->reconcile( 'fake-card', 'ref_own', WebhookResult::OUTCOME_FAILED ) )->toBe( PaymentReconciler::FAILED );
+    } );
+
+    it( 'leaves a refunded outcome to the refund flow, for sibling keys too', function (): void {
+        $cart = reconcileSiblingCart( $this->product, 'fake-card', 'ref_refunded' );
+
+        expect( app( PaymentReconciler::class )->reconcile( 'fake-shared', 'ref_refunded', WebhookResult::OUTCOME_REFUNDED ) )->toBe( PaymentReconciler::SKIPPED )
+            ->and( $cart->refresh()->checkout_state )->toBe( CheckoutState::PAYMENT_PENDING )
+            ->and( Order::query()->count() )->toBe( 0 );
+    } );
+
+    it( 'settles the most recent checkout and warns when a reference matches several across the keys', function (): void {
+        $older = reconcileSiblingCart( $this->product, 'fake-card', 'ref_shared' );
+        $newer = reconcileSiblingCart( $this->product, 'fake-shared', 'ref_shared' );
+        Cart::query()->whereKey( $older->id )->update( [ 'updated_at' => Carbon::now()->subMinutes( 10 ) ] );
+
+        $logger = Mockery::spy();
+        Illuminate\Support\Facades\Log::shouldReceive( 'channel' )->with( 'ecommerce' )->andReturn( $logger );
+
+        expect( app( PaymentReconciler::class )->reconcile( 'fake-shared', 'ref_shared', WebhookResult::OUTCOME_FAILED ) )->toBe( PaymentReconciler::FAILED )
+            ->and( $newer->refresh()->checkout_state )->toBe( CheckoutState::PAYMENT_SELECTION )
+            ->and( $older->refresh()->checkout_state )->toBe( CheckoutState::PAYMENT_PENDING );
+
+        $logger->shouldHaveReceived( 'warning' )->once()->withArgs( fn ( string $message, array $context ): bool => str_contains( $message, 'more than one checkout' ) && $newer->id === $context['id'] && 'ref_shared' === $context['reference'] && [ 'fake-shared', 'fake-card' ] === $context['gateway_keys'] );
     } );
 } );

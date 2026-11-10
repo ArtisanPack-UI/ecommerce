@@ -626,3 +626,251 @@ it( 'stores the tax part of each refund line', function (): void {
     expect( $half->items->first()->tax_amount )->toBe( 400 )
         ->and( $half->items->first()->tax_amount + $rest->items->first()->tax_amount )->toBe( 800 );
 } );
+
+describe( 'recordProviderRefund()', function (): void {
+    it( 'records a provider refund without calling the gateway, and dispatches the refund hooks and events', function (): void {
+        Event::fake( [ OrderRefunded::class, PaymentRefunded::class ] );
+
+        $actions = [];
+        addAction( 'ap.ecommerce.payment.refunded', function ( RefundResult $result ) use ( &$actions ): void {
+            $actions[] = [ 'payment.refunded', $result->gatewayReference ];
+        } );
+        addAction( 'ap.ecommerce.order.refunded', function ( Order $order, Refund $refund ) use ( &$actions ): void {
+            $actions[] = [ 'order.refunded', $refund->id ];
+        } );
+
+        $order = makeRefundableOrder( [ [ 'qty' => 3, 'unit' => 1_000 ] ] );
+
+        $refund = $this->service->recordProviderRefund( $order, Money::USD( 1_200 ), 'PROVIDER-RF-1', '  Refunded in the dashboard.  ' );
+
+        expect( $refund->wasRecentlyCreated )->toBeTrue()
+            ->and( $refund->status )->toBe( Refund::STATUS_SUCCEEDED )
+            ->and( $refund->amount )->toBe( 1_200 )
+            ->and( $refund->currency )->toBe( 'USD' )
+            ->and( $refund->gateway_reference )->toBe( 'PROVIDER-RF-1' )
+            ->and( $refund->reason )->toBe( 'Refunded in the dashboard.' )
+            ->and( $refund->issued_by_user_id )->toBeNull()
+            ->and( RefundItem::query()->where( 'refund_id', $refund->id )->count() )->toBe( 0 )
+            ->and( $this->gateway->calls )->toBe( [] );
+
+        $fresh = $order->fresh();
+        expect( $fresh->total_refunded_amount )->toBe( 1_200 )
+            ->and( $fresh->payment_status )->toBe( 'partially_refunded' );
+
+        $timeline = OrderTimelineEntry::query()->where( 'order_id', $order->id )->sole();
+        expect( $timeline->event_type )->toBe( 'order.refunded' )
+            ->and( $timeline->payload['source'] )->toBe( 'provider' )
+            ->and( $timeline->payload['gateway_reference'] )->toBe( 'PROVIDER-RF-1' )
+            ->and( $timeline->payload['gateway'] )->toBe( 'fake' );
+
+        expect( $actions )->toBe( [ [ 'payment.refunded', 'PROVIDER-RF-1' ], [ 'order.refunded', $refund->id ] ] );
+        Event::assertDispatched( OrderRefunded::class, fn ( OrderRefunded $e ) => $e->refund->id === $refund->id );
+        Event::assertDispatched( PaymentRefunded::class, fn ( PaymentRefunded $e ) => 'PROVIDER-RF-1' === $e->result->gatewayReference );
+    } );
+
+    it( 'marks the order refunded when the provider refunded the whole balance', function (): void {
+        $order = makeRefundableOrder( [ [ 'qty' => 2, 'unit' => 1_000 ] ] );
+
+        $this->service->recordProviderRefund( $order, Money::USD( 500 ), 'RF-A' );
+        $this->service->recordProviderRefund( $order, Money::USD( 1_500 ), 'RF-B' );
+
+        expect( $order->fresh()->payment_status )->toBe( 'refunded' )
+            ->and( $order->fresh()->total_refunded_amount )->toBe( 2_000 );
+    } );
+
+    it( 'returns the existing refund for a reference it already recorded, changing nothing', function (): void {
+        Event::fake( [ OrderRefunded::class, PaymentRefunded::class ] );
+
+        $order = makeRefundableOrder( [ [ 'qty' => 3, 'unit' => 1_000 ] ] );
+        $first = $this->service->recordProviderRefund( $order, Money::USD( 1_000 ), 'RF-DUP' );
+
+        Event::fake( [ OrderRefunded::class, PaymentRefunded::class ] );
+
+        $again = $this->service->recordProviderRefund( $order, Money::USD( 1_000 ), 'RF-DUP' );
+
+        expect( $again->id )->toBe( $first->id )
+            ->and( $again->wasRecentlyCreated )->toBeFalse()
+            ->and( Refund::query()->where( 'order_id', $order->id )->count() )->toBe( 1 )
+            ->and( $order->fresh()->total_refunded_amount )->toBe( 1_000 )
+            ->and( OrderTimelineEntry::query()->where( 'order_id', $order->id )->count() )->toBe( 1 );
+
+        Event::assertNotDispatched( OrderRefunded::class );
+        Event::assertNotDispatched( PaymentRefunded::class );
+    } );
+
+    it( 'does not duplicate a refund the store issued through the gateway', function (): void {
+        $order  = makeRefundableOrder( [ [ 'qty' => 3, 'unit' => 1_000 ] ] );
+        $issued = $this->service->issue( $order, [ [ 'order_item_id' => $order->items->first()->id, 'quantity' => 0, 'amount' => 1_000 ] ] );
+
+        $recorded = $this->service->recordProviderRefund( $order, Money::USD( 1_000 ), 're_fake_123' );
+
+        expect( $recorded->id )->toBe( $issued->id )
+            ->and( $order->fresh()->total_refunded_amount )->toBe( 1_000 );
+    } );
+
+    it( 'skips the payment.refunding filter', function (): void {
+        addFilter( 'ap.ecommerce.payment.refunding', fn () => null );
+
+        $order = makeRefundableOrder();
+
+        expect( $this->service->recordProviderRefund( $order, Money::USD( 1_000 ), 'RF-FILTER' )->status )->toBe( Refund::STATUS_SUCCEEDED );
+    } );
+
+    it( 'refuses an order that is not paid or partially refunded', function (): void {
+        $order = makeRefundableOrder();
+        $order->forceFill( [ 'payment_status' => 'pending' ] )->save();
+
+        $this->service->recordProviderRefund( $order, Money::USD( 1_000 ), 'RF-PENDING' );
+    } )->throws( RefundNotAllowedException::class );
+
+    it( 'refuses a refund in another currency', function (): void {
+        $this->service->recordProviderRefund( makeRefundableOrder(), Money::EUR( 1_000 ), 'RF-EUR' );
+    } )->throws( RefundNotAllowedException::class );
+
+    it( 'refuses an amount over the outstanding balance, counting refunds still pending', function (): void {
+        $order = makeRefundableOrder( [ [ 'qty' => 1, 'unit' => 1_000 ] ] );
+
+        Refund::query()->create( [ 'order_id' => $order->id, 'amount' => 600, 'currency' => 'USD', 'status' => Refund::STATUS_PENDING ] );
+
+        expect( fn () => $this->service->recordProviderRefund( $order, Money::USD( 500 ), 'RF-OVER' ) )
+            ->toThrow( RefundNotAllowedException::class );
+
+        expect( Refund::query()->where( 'gateway_reference', 'RF-OVER' )->exists() )->toBeFalse()
+            ->and( $order->fresh()->total_refunded_amount )->toBe( 0 );
+    } );
+
+    it( 'refuses a blank reference', function (): void {
+        $this->service->recordProviderRefund( makeRefundableOrder(), Money::USD( 500 ), '  ' );
+    } )->throws( InvalidArgumentException::class );
+
+    it( 'refuses a non-positive amount', function ( int $amount ): void {
+        $this->service->recordProviderRefund( makeRefundableOrder(), Money::USD( $amount ), 'RF-AMOUNT' );
+    } )->with( [ 'zero' => 0, 'negative' => -5 ] )->throws( RefundNotAllowedException::class );
+
+    it( 'returns a refund the store issued that is still pending, instead of recording it again', function (): void {
+        $order   = makeRefundableOrder( [ [ 'qty' => 3, 'unit' => 1_000 ] ] );
+        $pending = null;
+
+        // The provider's webhook lands while issue() is still waiting on the
+        // gateway: the refund is pending, with no gateway reference yet.
+        $this->gateway->onRefund = function () use ( $order, &$pending ): void {
+            $open    = Refund::query()->where( 'order_id', $order->id )->sole();
+            $pending = $this->service->recordProviderRefund( $order, Money::USD( 1_000 ), 're_fake_123', null, (string) $open->id );
+        };
+
+        $issued = $this->service->issue( $order, [ [ 'order_item_id' => $order->items->first()->id, 'quantity' => 1, 'amount' => 1_000, 'restock' => false ] ] );
+
+        expect( $pending->id )->toBe( $issued->id )
+            ->and( $pending->wasRecentlyCreated )->toBeFalse()
+            ->and( Refund::query()->where( 'order_id', $order->id )->count() )->toBe( 1 )
+            ->and( $issued->refresh()->status )->toBe( Refund::STATUS_SUCCEEDED )
+            ->and( $issued->items )->toHaveCount( 1 )
+            ->and( $order->fresh()->total_refunded_amount )->toBe( 1_000 );
+    } );
+
+    it( 'settles an issued refund that failed when the provider reports it completed', function (): void {
+        $product   = Product::factory()->create();
+        $order     = makeRefundableOrder( [ [ 'qty' => 2, 'unit' => 1_000, 'product' => $product ] ] );
+        $inventory = InventoryItem::factory()->create( [
+            'stockable_type'   => ( new Product() )->getMorphClass(),
+            'stockable_id'     => $product->id,
+            'quantity_on_hand' => 5,
+        ] );
+
+        $this->gateway->onRefund = function (): void {
+            throw new RuntimeException( 'Gateway timed out.' );
+        };
+
+        expect( fn () => $this->service->issue( $order, [ [ 'order_item_id' => $order->items->first()->id, 'quantity' => 1, 'amount' => 1_000, 'restock' => true ] ] ) )
+            ->toThrow( RefundNotAllowedException::class );
+
+        $failed = Refund::query()->where( 'order_id', $order->id )->sole();
+        expect( $failed->status )->toBe( Refund::STATUS_FAILED )
+            ->and( $inventory->fresh()->quantity_on_hand )->toBe( 5 );
+
+        Event::fake( [ OrderRefunded::class, PaymentRefunded::class ] );
+
+        $settled = $this->service->recordProviderRefund( $order, Money::USD( 1_000 ), 'RF-X', null, $failed->id );
+
+        expect( $settled->id )->toBe( $failed->id )
+            ->and( $settled->wasRecentlyCreated )->toBeFalse()
+            ->and( $settled->wasChanged( 'status' ) )->toBeTrue()
+            ->and( $settled->status )->toBe( Refund::STATUS_SUCCEEDED )
+            ->and( $settled->gateway_reference )->toBe( 'RF-X' )
+            ->and( $failed->fresh()->status )->toBe( Refund::STATUS_SUCCEEDED )
+            ->and( Refund::query()->where( 'order_id', $order->id )->count() )->toBe( 1 )
+            ->and( $inventory->fresh()->quantity_on_hand )->toBe( 6 );
+
+        $fresh = $order->fresh();
+        expect( $fresh->total_refunded_amount )->toBe( 1_000 )
+            ->and( $fresh->payment_status )->toBe( 'partially_refunded' );
+
+        $entry = OrderTimelineEntry::query()->where( 'order_id', $order->id )->where( 'event_type', 'order.refunded' )->sole();
+        expect( $entry->payload['source'] )->toBe( 'provider' )
+            ->and( $entry->payload['settled_failed_refund'] )->toBeTrue()
+            ->and( $entry->payload['refund_id'] )->toBe( $failed->id );
+
+        Event::assertDispatched( OrderRefunded::class, fn ( OrderRefunded $e ) => $e->refund->id === $failed->id );
+        Event::assertDispatched( PaymentRefunded::class, fn ( PaymentRefunded $e ) => 'RF-X' === $e->result->gatewayReference );
+
+        // A redelivery changes nothing more.
+        $again = $this->service->recordProviderRefund( $order, Money::USD( 1_000 ), 'RF-X', null, $failed->id );
+
+        expect( $again->wasChanged( 'status' ) )->toBeFalse()
+            ->and( $order->fresh()->total_refunded_amount )->toBe( 1_000 )
+            ->and( $inventory->fresh()->quantity_on_hand )->toBe( 6 );
+    } );
+
+    it( 'refuses to settle a failed refund for a different amount, and leaves it failed', function (): void {
+        $order = makeRefundableOrder( [ [ 'qty' => 3, 'unit' => 1_000 ] ] );
+
+        $this->gateway->nextResult = RefundResult::failure( Money::USD( 1_000 ), 'declined', 'Declined.' );
+
+        expect( fn () => $this->service->issue( $order, [ [ 'order_item_id' => $order->items->first()->id, 'quantity' => 0, 'amount' => 1_000 ] ] ) )
+            ->toThrow( RefundNotAllowedException::class );
+
+        $failed = Refund::query()->where( 'order_id', $order->id )->sole();
+
+        expect( fn () => $this->service->recordProviderRefund( $order, Money::USD( 900 ), 'RF-Y', null, $failed->id ) )
+            ->toThrow( RefundNotAllowedException::class );
+
+        $mismatch = OrderTimelineEntry::query()->where( 'order_id', $order->id )->where( 'event_type', 'refund.amount_mismatch' )->sole();
+
+        expect( $failed->fresh()->status )->toBe( Refund::STATUS_FAILED )
+            ->and( $failed->fresh()->gateway_reference )->toBeNull()
+            ->and( $mismatch->payload['refund_id'] )->toBe( $failed->id )
+            ->and( $mismatch->payload['requested'] )->toBe( '1000' )
+            ->and( $mismatch->payload['refunded'] )->toBe( '900' )
+            ->and( $mismatch->payload['source'] )->toBe( 'provider' )
+            ->and( $order->fresh()->total_refunded_amount )->toBe( 0 );
+    } );
+
+    it( 'does not touch a failed refund that only matches by a different provider reference', function (): void {
+        $order  = makeRefundableOrder( [ [ 'qty' => 3, 'unit' => 1_000 ] ] );
+        $failed = Refund::query()->create( [ 'order_id' => $order->id, 'amount' => 1_000, 'currency' => 'USD', 'status' => Refund::STATUS_PENDING ] );
+        $failed->settle( Refund::STATUS_FAILED, 'RF-OLD' );
+
+        $returned = $this->service->recordProviderRefund( $order, Money::USD( 1_000 ), 'RF-OLD' );
+
+        expect( $returned->id )->toBe( $failed->id )
+            ->and( $returned->fresh()->status )->toBe( Refund::STATUS_FAILED )
+            ->and( $order->fresh()->total_refunded_amount )->toBe( 0 );
+
+        $other = $this->service->recordProviderRefund( $order, Money::USD( 1_000 ), 'RF-NEW', null, $failed->id );
+
+        expect( $other->id )->toBe( $failed->id )
+            ->and( $failed->fresh()->status )->toBe( Refund::STATUS_FAILED )
+            ->and( $order->fresh()->total_refunded_amount )->toBe( 0 );
+    } );
+
+    it( 'ignores an issued refund id that belongs to another order', function (): void {
+        $other  = makeRefundableOrder();
+        $issued = Refund::query()->create( [ 'order_id' => $other->id, 'amount' => 500, 'currency' => 'USD', 'status' => Refund::STATUS_PENDING ] );
+        $order  = makeRefundableOrder();
+
+        $refund = $this->service->recordProviderRefund( $order, Money::USD( 500 ), 'RF-OTHER', null, $issued->id );
+
+        expect( $refund->wasRecentlyCreated )->toBeTrue()
+            ->and( $refund->order_id )->toBe( $order->id );
+    } );
+} );

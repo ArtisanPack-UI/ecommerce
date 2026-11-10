@@ -21,7 +21,7 @@ use RuntimeException;
  * In-memory reference {@see PaymentGateway} used only to prove the shared
  * {@see PaymentGatewayContractTest} suite runs green — no provider I/O.
  */
-final class InMemoryPaymentGateway implements PaymentGateway
+class InMemoryPaymentGateway implements PaymentGateway
 {
     public const WEBHOOK_SECRET   = 'test-shared-secret';
     public const SIGNATURE_HEADER = 'X-InMemory-Signature';
@@ -136,7 +136,7 @@ final class InMemoryPaymentGateway implements PaymentGateway
  *
  * @since 1.0.0
  */
-final class InMemoryPaymentGatewayContractTest extends PaymentGatewayContractTest
+class InMemoryPaymentGatewayContractTest extends PaymentGatewayContractTest
 {
     protected function gateway(): PaymentGateway
     {

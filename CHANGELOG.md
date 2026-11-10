@@ -6,6 +6,34 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-10
+
+Payment gateways that share one provider webhook endpoint can settle their
+siblings' checkouts, providers can record refunds and payment failures they
+made on their own, and API storefronts can pass gateway payment options when
+they open a payment session. Marketing notifications now need the
+customer's marketing consent.
+
+### Added
+
+- `Contracts\SharesWebhookEndpoint` (optional, on a `PaymentGateway`): `webhookGatewayKeys()` lists the gateway keys whose sessions a gateway's webhooks report on, so one provider endpoint (such as `webhooks/paypal`) can settle checkouts made through its sibling gateways (`paypal-card`, `paypal-apple-pay`, …). Declared keys that aren't registered in `PaymentGatewayRegistry` are dropped, and the gateway's own key is always included (#207).
+- `PaymentReconciler::webhookGatewayKeys( $gatewayKey )`: the key set a reported outcome may settle (#207).
+- `RefundService::recordProviderRefund( $order, $amount, $gatewayReference, $reason, $issuedRefundId )` records a refund the payment provider already made, such as a dashboard refund reported by webhook, without calling the gateway. It writes a `succeeded` amount-only refund, updates the order's refunded total and `payment_status`, writes an `order.refunded` timeline entry with `source: provider`, and fires `ap.ecommerce.payment.refunded` / `ap.ecommerce.order.refunded` and the `PaymentRefunded` / `OrderRefunded` events. It is idempotent on `gateway_reference`, and on `$issuedRefundId` (the engine refund id the provider echoes back), which also matches a refund the store issued that is still pending (#209). A refund the store issued that was marked `failed` (the gateway call errored or timed out) is settled when the provider reports it completed and echoes back its id: the same guards apply, its restock lines are restocked, and the order's totals, `payment_status` and timeline (`settled_failed_refund: true`) are updated as for a refund that succeeded the first time. When the provider's amount differs, a `refund.amount_mismatch` entry is written and `RefundNotAllowedException` is thrown.
+- `PaymentGatewayContractTest` checks that a gateway implementing `SharesWebhookEndpoint` lists its own key and that every key it lists is registered; the check is skipped for other gateways (#207).
+- `Contracts\AcceptsPaymentOptions` (optional, on a `PaymentGateway`): `paymentOptionRules( $cart )` and `paymentOptionsChanged( $cart, $session, $options )` let API storefronts send gateway-specific choices, such as saving a payment method or paying with a saved one, when they create a payment session. `POST checkout/{cart}/session` and the GraphQL `createPaymentSession` mutation accept `payment_options`. `CheckoutService::createPaymentSession()` validates them against the gateway's rules, refuses unknown keys and invalid values (`payment-options-invalid`, 422), passes the validated keys to the gateway as `$context['payment_options']`, and reuses the cart's session only while the gateway says it matches them. `PaymentGatewayContractTest` checks the rules of gateways that implement the contract (#211).
+- `PaymentOrchestrator::recordProviderPaymentFailure( $order, $captureReference, $code, $message )` records that the provider failed a payment the store already counted as paid, such as a pending capture it later denied. A `paid` order with nothing refunded moves to `payment_status = failed`, `meta.payment.capture_failure` records the reference, code and time, a `payment.capture_failed` timeline entry is written with `source: provider`, and `ap.ecommerce.payment.failed` and `PaymentFailed` fire after commit (a throwing listener is reported, not rethrown). It does nothing for a refunded order or a different capture reference, and leaves the order's status, stock and deliverables to store policy.
+- `Refund::settleFailedAsSucceeded( $gatewayReference )`: the one change a failed refund allows, used when the provider reports it completed.
+- `NotificationPreferenceService::withdrawMarketing( $customer )` and `NotificationPreferenceService::CATEGORY_MARKETING`.
+- `PaymentGatewayContractTest::paymentOptionsCart()`: satellites whose gateway only returns payment-option rules for some carts (a signed-in owner's, say) override it so their rules are checked.
+
+### Changed
+
+- `PaymentReconciler` (webhooks through `Jobs\ReconcilePaymentSession`, and `ecommerce:reconcile-payments`) matches carts and pending orders on that key set. When a reference matches more than one checkout, the most recently updated one is settled and a warning is logged to the `ecommerce` channel. `PaymentReconciler` takes an optional `PaymentGatewayRegistry` constructor argument. Gateways without the contract behave as before (#207).
+
+### Fixed
+
+- Marketing notifications need the customer's marketing consent (#194). A stored preference can turn marketing off but no longer on without `accepts_marketing`; `NotificationPreferenceService::update()` refuses to turn marketing on without consent (`PATCH me/notification-preferences` answers 422), and withdrawing consent (through `PATCH me` or the admin `PATCH customers/{id}`) stores marketing off on every channel.
+
 ## [1.2.0] - 2026-10-29
 
 Kanban boards keep a manual card order, read their cards through one

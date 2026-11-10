@@ -78,7 +78,7 @@ contract-test suite. The registries satellites use most:
 | Registry | What a satellite registers | Docs |
 |---|---|---|
 | `ProductTypeRegistry` | Product types, optionally with `ExpandsInventory` and `ProvidesStorefrontOptions` | [contracts.md](contracts.md#contract-reference) |
-| `PaymentGatewayRegistry` | Payment gateways, optionally with `RendersClientPayment` | [contracts.md](contracts.md#contract-notes) |
+| `PaymentGatewayRegistry` | Payment gateways, optionally with `RendersClientPayment`, `SharesWebhookEndpoint`, or `AcceptsPaymentOptions` | [contracts.md](contracts.md#contract-notes) |
 | `TaxProviderRegistry`, `ShippingRateProviderRegistry`, `ShippingMethodTypeRegistry`, `ShippingLabelProviderRegistry`, `FraudProviderRegistry`, `CurrencyRateProviderRegistry`, `FulfillmentAllocationStrategyRegistry` | Providers and strategies | [contracts.md](contracts.md#contract-reference) |
 | `PromotionConditionRegistry`, `PromotionActionRegistry` | Promotion rules, with a config schema | [contracts.md](contracts.md#config-schemas-describesconfig) |
 | `KanbanCardWidgetRegistry`, `KanbanAutomationRegistry` | Kanban card widgets and automation triggers | [kanban.md](kanban.md) |

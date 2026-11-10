@@ -49,6 +49,7 @@ namespace ArtisanPackUI\Ecommerce\Services;
 
 use ArtisanPackUI\Ecommerce\Checkout\CheckoutReservations;
 use ArtisanPackUI\Ecommerce\Checkout\CheckoutState;
+use ArtisanPackUI\Ecommerce\Contracts\AcceptsPaymentOptions;
 use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
 use ArtisanPackUI\Ecommerce\Exceptions\CheckoutException;
 use ArtisanPackUI\Ecommerce\Exceptions\OrderPlacementException;
@@ -70,6 +71,7 @@ use ArtisanPackUI\Ecommerce\ValueObjects\ShippingRate;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 use RuntimeException;
 use Throwable;
 
@@ -107,6 +109,17 @@ class CheckoutService
      * @var string
      */
     public const GUESTS_DISABLED = 'disabled';
+
+    /**
+     * The context key holding the shopper's gateway options (saving a
+     * payment method, paying with a saved one, …), validated against the
+     * gateway's {@see AcceptsPaymentOptions::paymentOptionRules()}.
+     *
+     * @since 1.3.0
+     *
+     * @var string
+     */
+    public const PAYMENT_OPTIONS = 'payment_options';
 
     /**
      * @since 1.0.0
@@ -376,12 +389,20 @@ class CheckoutService
      * adjust the cart). Fires `ap.ecommerce.checkout.paymentInitiated` for a
      * new session.
      *
+     * `$context['payment_options']` ({@see self::PAYMENT_OPTIONS}) carries
+     * the shopper's gateway choices. They are validated against the
+     * gateway's rules ({@see AcceptsPaymentOptions}) and only the validated
+     * keys reach it. When they're sent, the current session is reused only
+     * while the gateway says it was made with the same options. Leaving them
+     * out keeps the current session's choices.
+     *
      * @since 1.0.0
+     * @since 1.3.0 Accepts `payment_options`.
      *
      * @param  Cart                  $cart     Cart.
-     * @param  array<string, mixed>  $context  Provider hints (return URL, idempotency key, …). Admin-only keys are stripped.
+     * @param  array<string, mixed>  $context  Provider hints (return URL, idempotency key, payment options, …). Admin-only keys are stripped.
      *
-     * @throws CheckoutException When the cart isn't ready to pay or needs no payment.
+     * @throws CheckoutException When the cart isn't ready to pay, needs no payment, or the payment options are invalid.
      *
      * @return PaymentSession
      */
@@ -405,7 +426,8 @@ class CheckoutService
             $this->reservations->hold( $locked, false );
 
             $gateway = $this->gateway( $locked );
-            $reused  = $this->reusableSession( $locked, $gateway );
+            $context = $this->withPaymentOptions( $locked, $gateway, $context );
+            $reused  = $this->reusableSession( $locked, $gateway, $context[ self::PAYMENT_OPTIONS ] ?? null );
 
             if ( null !== $reused ) {
                 $this->advance( $locked, CheckoutState::PAYMENT_PENDING );
@@ -895,14 +917,20 @@ class CheckoutService
      * currency and current total, and not cancelled. A session the provider
      * can't load is not reused.
      *
-     * @since 1.0.0
+     * When payment options were sent, a gateway implementing
+     * {@see AcceptsPaymentOptions} must also confirm the session was made
+     * with the same options.
      *
-     * @param  Cart            $cart     Locked cart.
-     * @param  PaymentGateway  $gateway  Cart's gateway.
+     * @since 1.0.0
+     * @since 1.3.0 Takes the validated payment options.
+     *
+     * @param  Cart                       $cart     Locked cart.
+     * @param  PaymentGateway             $gateway  Cart's gateway.
+     * @param  array<string, mixed>|null  $options  Validated payment options, or null when none were sent.
      *
      * @return PaymentSession|null
      */
-    protected function reusableSession( Cart $cart, PaymentGateway $gateway ): ?PaymentSession
+    protected function reusableSession( Cart $cart, PaymentGateway $gateway, ?array $options = null ): ?PaymentSession
     {
         $reference = (string) ( $cart->payment_reference ?? '' );
 
@@ -920,7 +948,58 @@ class CheckoutService
             && (int) $session->amount->getAmount() === (int) $cart->total_amount
             && strtoupper( $session->amount->getCurrency()->getCode() ) === strtoupper( (string) $cart->currency );
 
+        if ( $matches && null !== $options && $gateway instanceof AcceptsPaymentOptions ) {
+            $matches = ! $gateway->paymentOptionsChanged( $cart, $session, $options );
+        }
+
         return $matches ? $session : null;
+    }
+
+    /**
+     * `$context` with its payment options ({@see self::PAYMENT_OPTIONS})
+     * validated against `$gateway`'s rules, keeping only validated keys.
+     * Context without the key is returned unchanged.
+     *
+     * @since 1.3.0
+     *
+     * @param  Cart                  $cart     Locked cart.
+     * @param  PaymentGateway        $gateway  Cart's gateway.
+     * @param  array<string, mixed>  $context  Context.
+     *
+     * @throws CheckoutException When the options aren't an object, the gateway takes none, a key is unknown, or a value is invalid (`payment-options-invalid`).
+     *
+     * @return array<string, mixed>
+     */
+    protected function withPaymentOptions( Cart $cart, PaymentGateway $gateway, array $context ): array
+    {
+        if ( ! array_key_exists( self::PAYMENT_OPTIONS, $context ) ) {
+            return $context;
+        }
+
+        $options = $context[ self::PAYMENT_OPTIONS ] ?? [];
+
+        if ( ! is_array( $options ) || ( [] !== $options && array_is_list( $options ) ) ) {
+            throw new CheckoutException( self::PAYMENT_OPTIONS, 'payment-options-invalid', __( 'The payment options must be an object.' ) );
+        }
+
+        $rules = $gateway instanceof AcceptsPaymentOptions ? $gateway->paymentOptionRules( $cart ) : [];
+        $known = array_unique( array_map( static fn ( string $key ): string => explode( '.', $key )[0], array_keys( $rules ) ) );
+
+        foreach ( array_keys( $options ) as $key ) {
+            if ( ! in_array( (string) $key, $known, true ) ) {
+                throw new CheckoutException( self::PAYMENT_OPTIONS, 'payment-options-invalid', __( 'This payment method doesn\'t accept the ":option" option.', [ 'option' => (string) $key ] ) );
+            }
+        }
+
+        $validator = Validator::make( $options, $rules );
+
+        if ( $validator->fails() ) {
+            throw new CheckoutException( self::PAYMENT_OPTIONS, 'payment-options-invalid', (string) $validator->errors()->first() );
+        }
+
+        $context[ self::PAYMENT_OPTIONS ] = $validator->validated();
+
+        return $context;
     }
 
     /**

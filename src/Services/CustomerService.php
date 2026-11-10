@@ -306,6 +306,10 @@ class CustomerService
                 if ( $accepts !== (bool) $locked->accepts_marketing ) {
                     $locked->accepts_marketing    = $accepts;
                     $locked->accepts_marketing_at = $accepts ? Carbon::now() : null;
+
+                    if ( ! $accepts ) {
+                        app( NotificationPreferenceService::class )->withdrawMarketing( $locked );
+                    }
                 }
             }
 

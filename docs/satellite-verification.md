@@ -164,7 +164,7 @@ Add `.ecommerce-verify-report.json` and `verify-report.sig` to your
 {
     "schema": 1,
     "package": "acme/ecommerce-shippo",
-    "version": "v1.2.0",
+    "version": "v1.3.0",
     "engine_version": "1.0.0",
     "generated_at": "2026-09-29T12:00:00Z",
     "php_version": "8.4.3",
@@ -280,7 +280,7 @@ on:
 
 jobs:
   verify:
-    uses: ArtisanPack-UI/ecommerce/.github/workflows/verify-satellite.yml@v1.2.0
+    uses: ArtisanPack-UI/ecommerce/.github/workflows/verify-satellite.yml@v1.3.0
     permissions:
       contents: read
     with:

@@ -19,6 +19,12 @@
  * - `requires_action` and `refunded` need nothing here (refunds are recorded
  *   through the refund flow).
  *
+ * Checkouts are matched on `payment_gateway_key` against the key set from
+ * {@see self::webhookGatewayKeys()}: the gateway's own key, plus the
+ * registered sibling keys it declares through {@see SharesWebhookEndpoint}
+ * (#207). When a reference matches more than one checkout across those
+ * keys, the most recently updated one wins and a warning is logged.
+ *
  * Outcomes come from verified gateway webhooks ({@see ReconcilePaymentSession})
  * and from `ecommerce:reconcile-payments`, which polls sessions that went
  * quiet.
@@ -36,11 +42,15 @@ declare( strict_types=1 );
 namespace ArtisanPackUI\Ecommerce\Services;
 
 use ArtisanPackUI\Ecommerce\Checkout\CheckoutState;
+use ArtisanPackUI\Ecommerce\Contracts\SharesWebhookEndpoint;
 use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\Order;
+use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\ValueObjects\PaymentSession;
 use ArtisanPackUI\Ecommerce\ValueObjects\WebhookResult;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -83,13 +93,16 @@ class PaymentReconciler
 
     /**
      * @since 1.0.0
+     * @since 1.3.0 Takes the payment gateway registry.
      *
-     * @param  CheckoutService   $checkout   Finalize.
-     * @param  InventoryService  $inventory  Releases holds.
+     * @param  CheckoutService              $checkout   Finalize.
+     * @param  InventoryService             $inventory  Releases holds.
+     * @param  PaymentGatewayRegistry|null  $gateways   Resolves the gateway behind a key (the container's registry when omitted).
      */
     public function __construct(
         protected CheckoutService $checkout,
         protected InventoryService $inventory,
+        protected ?PaymentGatewayRegistry $gateways = null,
     ) {
     }
 
@@ -134,6 +147,42 @@ class PaymentReconciler
             $session->isCanceled()                                                                                      => WebhookResult::OUTCOME_FAILED,
             default                                                                                                     => null,
         };
+    }
+
+    /**
+     * The gateway keys whose checkouts an outcome reported for `$gatewayKey`
+     * may settle.
+     *
+     * Always `$gatewayKey` itself. When the gateway registered under it
+     * implements {@see SharesWebhookEndpoint}, the keys it declares are
+     * added, minus any that aren't registered in {@see PaymentGatewayRegistry}:
+     * a gateway can never claim sessions under a key nothing has registered.
+     * An unregistered `$gatewayKey` yields just itself.
+     *
+     * @since 1.3.0
+     *
+     * @param  string  $gatewayKey  Key of the gateway that reported the outcome.
+     *
+     * @return array<int, string>
+     */
+    public function webhookGatewayKeys( string $gatewayKey ): array
+    {
+        $registry = $this->gateways ?? app( PaymentGatewayRegistry::class );
+        $gateway  = $registry->find( $gatewayKey );
+
+        if ( ! $gateway instanceof SharesWebhookEndpoint ) {
+            return [ $gatewayKey ];
+        }
+
+        $keys = [ $gatewayKey ];
+
+        foreach ( $gateway->webhookGatewayKeys() as $key ) {
+            if ( is_string( $key ) && $registry->has( $key ) && ! in_array( $key, $keys, true ) ) {
+                $keys[] = $key;
+            }
+        }
+
+        return $keys;
     }
 
     /**
@@ -188,13 +237,19 @@ class PaymentReconciler
      */
     protected function failed( string $gatewayKey, string $reference ): string
     {
-        $cart = DB::transaction( function () use ( $gatewayKey, $reference ): ?Cart {
-            $cart = Cart::query()
-                ->where( 'payment_gateway_key', $gatewayKey )
-                ->where( 'payment_reference', $reference )
-                ->whereNull( 'completed_order_id' )
-                ->lockForUpdate()
-                ->first();
+        $keys = $this->webhookGatewayKeys( $gatewayKey );
+
+        $cart = DB::transaction( function () use ( $keys, $reference ): ?Cart {
+            /** @var Cart|null $cart */
+            $cart = $this->mostRecent(
+                Cart::query()
+                    ->whereIn( 'payment_gateway_key', $keys )
+                    ->where( 'payment_reference', $reference )
+                    ->whereNull( 'completed_order_id' )
+                    ->lockForUpdate(),
+                $keys,
+                $reference,
+            );
 
             if ( null === $cart ) {
                 return null;
@@ -228,11 +283,17 @@ class PaymentReconciler
      */
     protected function cartFor( string $gatewayKey, string $reference ): ?Cart
     {
-        return Cart::query()
-            ->where( 'payment_gateway_key', $gatewayKey )
-            ->where( 'payment_reference', $reference )
-            ->whereNull( 'completed_order_id' )
-            ->first();
+        $keys = $this->webhookGatewayKeys( $gatewayKey );
+
+        /** @var Cart|null */
+        return $this->mostRecent(
+            Cart::query()
+                ->whereIn( 'payment_gateway_key', $keys )
+                ->where( 'payment_reference', $reference )
+                ->whereNull( 'completed_order_id' ),
+            $keys,
+            $reference,
+        );
     }
 
     /**
@@ -248,12 +309,50 @@ class PaymentReconciler
      */
     protected function cartForOrderWith( string $gatewayKey, string $reference ): ?Cart
     {
-        $order = Order::query()
-            ->where( 'payment_gateway_key', $gatewayKey )
-            ->where( 'payment_reference', $reference )
-            ->where( 'payment_status', 'pending' )
-            ->first();
+        $keys = $this->webhookGatewayKeys( $gatewayKey );
+
+        $order = $this->mostRecent(
+            Order::query()
+                ->whereIn( 'payment_gateway_key', $keys )
+                ->where( 'payment_reference', $reference )
+                ->where( 'payment_status', 'pending' ),
+            $keys,
+            $reference,
+        );
 
         return null === $order ? null : Cart::query()->where( 'completed_order_id', $order->id )->first();
+    }
+
+    /**
+     * The most recently updated row `$query` matches, logging a warning when
+     * the reference matched more than one (two checkouts across sibling
+     * gateway keys holding the same provider reference).
+     *
+     * @since 1.3.0
+     *
+     * @param  Builder<Cart>|Builder<Order>  $query      Matching query.
+     * @param  array<int, string>            $keys       Gateway keys matched.
+     * @param  string                        $reference  Session reference.
+     *
+     * @return Model|null
+     */
+    protected function mostRecent( Builder $query, array $keys, string $reference ): ?Model
+    {
+        $matches = $query
+            ->orderByDesc( 'updated_at' )
+            ->orderByDesc( 'id' )
+            ->limit( 2 )
+            ->get();
+
+        if ( $matches->count() > 1 ) {
+            Log::channel( 'ecommerce' )->warning( 'A payment reference matched more than one checkout; reconciling the most recent one.', [
+                'model'        => class_basename( $query->getModel() ),
+                'id'           => $matches->first()->getKey(),
+                'reference'    => $reference,
+                'gateway_keys' => $keys,
+            ] );
+        }
+
+        return $matches->first();
     }
 }

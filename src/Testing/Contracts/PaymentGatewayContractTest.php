@@ -29,6 +29,14 @@
  *    an existing session's reference and amount with a normalized status,
  *    so checkout finalizes the session the shopper confirmed instead of
  *    creating (and charging) a new one.
+ * 7. **Shared webhook keys are registered.** A gateway that implements
+ *    {@see \ArtisanPackUI\Ecommerce\Contracts\SharesWebhookEndpoint} MUST
+ *    list its own key, and every key it lists MUST be registered (since
+ *    1.3.0; skipped for gateways without the contract).
+ * 8. **Payment option rules are usable.** A gateway that implements
+ *    {@see \ArtisanPackUI\Ecommerce\Contracts\AcceptsPaymentOptions} MUST
+ *    return validation rules keyed by option name that Laravel's validator
+ *    accepts (since 1.3.0; skipped for gateways without the contract).
  *
  * Engine spec §4.2, parent plan §15.2.
  *
@@ -44,14 +52,19 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Testing\Contracts;
 
+use ArtisanPackUI\Ecommerce\Contracts\AcceptsPaymentOptions;
 use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
+use ArtisanPackUI\Ecommerce\Contracts\SharesWebhookEndpoint;
 use ArtisanPackUI\Ecommerce\Exceptions\PaymentCurrencyMismatchException;
+use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Providers\EcommerceServiceProvider;
+use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\ValueObjects\PaymentResult;
 use ArtisanPackUI\Ecommerce\ValueObjects\PaymentSession;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Validator;
 use Money\Money;
 use Orchestra\Testbench\TestCase;
 use Throwable;
@@ -272,6 +285,74 @@ abstract class PaymentGatewayContractTest extends TestCase
     }
 
     /**
+     * A gateway that shares its webhook endpoint with sibling gateways MUST
+     * list its own key, and every key it lists MUST be registered: the
+     * reconciler drops unregistered keys, so a typo or a sibling the
+     * satellite forgot to register would silently leave those checkouts
+     * unreconciled. Skipped when the gateway doesn't implement
+     * {@see SharesWebhookEndpoint}.
+     *
+     * @since 1.3.0
+     *
+     * @return void
+     */
+    public function test_shared_webhook_gateway_keys_are_registered_and_include_its_own_key(): void
+    {
+        $gateway = $this->gateway();
+
+        if ( ! $gateway instanceof SharesWebhookEndpoint ) {
+            $this->markTestSkipped( 'Gateway does not share its webhook endpoint.' );
+        }
+
+        $keys     = $gateway->webhookGatewayKeys();
+        $registry = $this->app->make( PaymentGatewayRegistry::class );
+
+        $this->assertContains( $gateway->key(), $keys, 'webhookGatewayKeys() must include the gateway\'s own key.' );
+
+        foreach ( $keys as $key ) {
+            $this->assertIsString( $key, 'webhookGatewayKeys() must return gateway key strings.' );
+            $this->assertTrue(
+                $registry->has( $key ),
+                sprintf( 'Gateway key "%s" from webhookGatewayKeys() is not registered in PaymentGatewayRegistry; the reconciler would drop it.', $key ),
+            );
+        }
+    }
+
+    /**
+     * A gateway that accepts payment options MUST describe them as Laravel
+     * validation rules keyed by option name: the checkout validates the
+     * shopper's options with them and refuses any key they don't name.
+     * Skipped when the gateway doesn't implement {@see AcceptsPaymentOptions}.
+     *
+     * @since 1.3.0
+     *
+     * @return void
+     */
+    public function test_payment_option_rules_are_keyed_validation_rules(): void
+    {
+        $gateway = $this->gateway();
+
+        if ( ! $gateway instanceof AcceptsPaymentOptions ) {
+            $this->markTestSkipped( 'Gateway does not accept payment options.' );
+        }
+
+        $rules = $gateway->paymentOptionRules( $this->paymentOptionsCart() );
+
+        foreach ( array_keys( $rules ) as $option ) {
+            $this->assertIsString( $option, 'paymentOptionRules() must be keyed by option name.' );
+            $this->assertNotSame( '', $option, 'paymentOptionRules() must not use an empty option name.' );
+        }
+
+        // Running every rule against a probe value surfaces malformed or
+        // unknown rules (Laravel skips the rules of an absent key).
+        $probe = array_fill_keys( array_unique( array_map( static fn ( string $option ): string => explode( '.', $option )[0], array_keys( $rules ) ) ), 'probe' );
+
+        Validator::make( $probe, $rules )->passes();
+
+        $this->addToAssertionCount( 1 );
+    }
+
+    /**
      * The gateway under test.
      *
      * @since 1.0.0
@@ -362,6 +443,21 @@ abstract class PaymentGatewayContractTest extends TestCase
      * @return PaymentSession
      */
     abstract protected function existingPaymentSession(): PaymentSession;
+
+    /**
+     * The cart {@see self::test_payment_option_rules_are_keyed_validation_rules()}
+     * asks the gateway for its payment-option rules. Defaults to a new,
+     * unsaved cart; a satellite whose gateway only returns rules for some
+     * carts (a signed-in owner's, say) overrides it so its rules are checked.
+     *
+     * @since 1.3.0
+     *
+     * @return Cart
+     */
+    protected function paymentOptionsCart(): Cart
+    {
+        return new Cart();
+    }
 
     /**
      * Whether the gateway under test supports refunds. Defaults to `true`;

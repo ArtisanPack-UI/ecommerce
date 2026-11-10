@@ -15,6 +15,8 @@ the matching abstract contract-test suite.
 | [`ProvidesStorefrontOptions`](../src/Contracts/ProvidesStorefrontOptions.php) (optional, on a `ProductType`) | The product type itself | `GroupedProductType`, `BundledProductType` | none |
 | [`PaymentGateway`](../src/Contracts/PaymentGateway.php) | `PaymentGatewayRegistry` | `StripeGateway` (`stripe`, when `gateways.stripe.enabled` and `stripe/stripe-php` is installed) | `PaymentGatewayContractTest` |
 | [`RendersClientPayment`](../src/Contracts/RendersClientPayment.php) (optional, on a `PaymentGateway`) | The gateway itself | `StripeGateway` (`stripe-payment-element`) | none |
+| [`SharesWebhookEndpoint`](../src/Contracts/SharesWebhookEndpoint.php) (optional, on a `PaymentGateway`, since 1.3.0) | The gateway itself | none | Checked inside `PaymentGatewayContractTest` |
+| [`AcceptsPaymentOptions`](../src/Contracts/AcceptsPaymentOptions.php) (optional, on a `PaymentGateway`, since 1.3.0) | The gateway itself | none | Checked inside `PaymentGatewayContractTest` |
 | [`FraudProvider`](../src/Contracts/FraudProvider.php) | `FraudProviderRegistry` | `AlwaysApproveFraudProvider` (`always-approve`), `StripeRadarFraudProvider` (`stripe-radar`, with Stripe); `ChainFraudProvider` (`chain`) runs a comma-separated `fraud.provider` list | `FraudProviderContractTest` |
 | [`TaxProvider`](../src/Contracts/TaxProvider.php) | `TaxProviderRegistry` (active: `tax.provider`) | `ManualTaxProvider` (`manual`) | `TaxProviderContractTest` |
 | [`ContextAwareTaxProvider`](../src/Contracts/ContextAwareTaxProvider.php) (extends `TaxProvider`) | `TaxProviderRegistry` | `ManualTaxProvider` | `TaxProviderContractTest` |
@@ -315,6 +317,12 @@ and a normalized status, and must not create, confirm, or capture anything.
   `WebhookResult::unverified()` when it fails. For payment events, a verified
   result should carry the normalized `outcome` and the session reference, so
   the engine can finalize or fail the matching checkout.
+- Provider-side changes reported by webhook are recorded through the engine,
+  not by writing the order directly: a refund made at the provider with
+  `RefundService::recordProviderRefund()`, and a payment the provider failed
+  after it was counted paid (a denied pending capture) with
+  `PaymentOrchestrator::recordProviderPaymentFailure()` (since 1.3.0). See
+  [checkout.md](checkout.md#payments-the-provider-fails-later).
 
 **`RendersClientPayment`.** Optional on a gateway. `clientConfig()` describes
 the client-side payment step as
@@ -336,6 +344,75 @@ PCI: the array may only hold values the provider means to be public, such as
 publishable keys and client secrets scoped to one payment. Card data never
 reaches the server, because the client component sends it straight to the
 provider.
+
+**`SharesWebhookEndpoint`.** Optional on a gateway, since 1.3.0. Some
+providers offer several payment methods through one account but post every
+webhook to one URL. `ecommerce-paypal`, for example, registers `paypal`,
+`paypal-card`, `paypal-apple-pay`, and `paypal-google-pay` as separate
+checkout choices, and PayPal posts all of their events to
+`ecommerce/webhooks/paypal`. The gateway that receives the webhook implements
+`webhookGatewayKeys()` and returns the gateway keys whose sessions its
+webhooks report on, its own key included:
+
+```php
+use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
+use ArtisanPackUI\Ecommerce\Contracts\SharesWebhookEndpoint;
+
+class PayPalGateway implements PaymentGateway, SharesWebhookEndpoint
+{
+    public function webhookGatewayKeys(): array
+    {
+        return [ 'paypal', 'paypal-card', 'paypal-apple-pay', 'paypal-google-pay' ];
+    }
+}
+```
+
+The reconciler then matches carts and pending orders whose
+`payment_gateway_key` is any of those keys (see
+[checkout.md](checkout.md#reconciliation)). It always adds the gateway's own
+key and drops any declared key that isn't registered in
+`PaymentGatewayRegistry`, so a gateway can't claim sessions under a key
+nothing has registered (a sibling turned off in config simply drops out).
+Gateways without the contract only reconcile their own key.
+
+**`AcceptsPaymentOptions`.** Optional on a gateway, since 1.3.0. Some shopper
+choices are specific to a gateway, such as "save this payment method" or "pay
+with my saved card". Livewire drivers can pass them as gateway context
+themselves, but API storefronts only reach the gateway through
+`CheckoutService::createPaymentSession()`. They send the choices as
+`payment_options` (see [checkout.md](checkout.md#payment-options)). The gateway
+describes the options it accepts as Laravel validation rules, and says when the
+cart's current session was made for different options:
+
+```php
+use ArtisanPackUI\Ecommerce\Contracts\AcceptsPaymentOptions;
+use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
+
+class PayPalCardGateway implements PaymentGateway, AcceptsPaymentOptions
+{
+    public function paymentOptionRules( Cart $cart ): array
+    {
+        return [
+            'save_payment_method'  => [ 'sometimes', 'boolean' ],
+            'saved_payment_method' => [ 'sometimes', 'integer', 'min:1' ],
+        ];
+    }
+
+    public function paymentOptionsChanged( Cart $cart, PaymentSession $session, array $options ): bool
+    {
+        // True when $session was created for other options, so it can't be reused.
+    }
+}
+```
+
+The checkout validates the options against those rules and passes only the
+validated keys to the gateway, as `$context['payment_options']`. Unknown keys
+are refused (`payment-options-invalid`, 422), and so are any options sent to a
+gateway without the contract. Return no rules when no option applies to the
+cart (a guest can't save a card, for example), and every option is refused.
+The rules only check shape. The gateway still has to check anything that
+depends on who is paying, such as whether a saved method belongs to the cart's
+customer.
 
 **`NotificationTemplate` (contract change).** `defaultSubject()` and
 `defaultBody()` now take `?string $locale = null`. Return the default Twig
@@ -653,6 +730,13 @@ Extension points a satellite must provide:
 - `existingPaymentSession(): PaymentSession` — a session that exists at the
   gateway, usually one just created through `createPaymentSession()`.
 - Optional: override `gatewaySupportsRefunds()` to `false` to skip refund cases.
+- Optional: register the gateway and its siblings (for example in
+  `setUp()` or through your satellite's service provider) when the gateway
+  implements `SharesWebhookEndpoint`.
+- Optional (since 1.3.0): override `paymentOptionsCart(): Cart` when the
+  gateway implements `AcceptsPaymentOptions` but only returns rules for some
+  carts, such as a signed-in owner's. It defaults to a new, unsaved cart, so
+  without the override such a gateway's rules are never checked.
 
 Invariants verified:
 
@@ -667,6 +751,12 @@ Invariants verified:
   is a no-op.
 - `retrievePaymentSession()` returns the session asked for, with the amount
   it was created for and a normalized `PaymentSession::STATUSES` value.
+- A gateway that implements `SharesWebhookEndpoint` lists its own key, and
+  every key it lists is registered in `PaymentGatewayRegistry` (since 1.3.0;
+  skipped for gateways without the contract).
+- A gateway that implements `AcceptsPaymentOptions` returns validation rules
+  keyed by option name, and every rule runs against a probe value without
+  error (since 1.3.0; skipped for gateways without the contract).
 
 Reference implementation: an in-memory gateway — see
 `tests/Feature/Contracts/InMemoryPaymentGatewayContractTest.php`.

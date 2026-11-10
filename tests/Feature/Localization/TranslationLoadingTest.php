@@ -45,22 +45,39 @@ it( 'lets a regional catalogue override its base language key by key', function 
 } );
 
 it( 'prefers a published catalogue in lang/vendor/ecommerce over the shipped one', function (): void {
+    // A key no other test asserts in German: the published file lives in the
+    // shared testbench app, so a parallel run's other tests can see it.
+    $key       = 'A product needs a name.';
     $published = app()->langPath( 'vendor/ecommerce' );
-    $created   = ! is_dir( $published );
+    $file      = $published . '/de.json';
+    $original  = is_file( $file ) ? File::get( $file ) : null;
 
     File::ensureDirectoryExists( $published );
-    File::put( $published . '/de.json', json_encode( [ 'Tax' => 'MwSt. (published)' ] ) );
+    File::put( $file, json_encode( array_merge(
+        null === $original ? [] : (array) json_decode( $original, true ),
+        [ $key => 'Ein Produkt braucht einen Namen. (veröffentlicht)' ],
+    ) ) );
 
     try {
         app( 'translator' )->setLoaded( [] );
 
-        expect( __( 'Tax', [], 'de' ) )->toBe( 'MwSt. (published)' )
+        expect( __( $key, [], 'de' ) )->toBe( 'Ein Produkt braucht einen Namen. (veröffentlicht)' )
             ->and( __( 'Forbidden', [], 'de' ) )->not->toBe( 'Forbidden' );
     } finally {
-        File::delete( $published . '/de.json' );
-
-        if ( $created ) {
-            File::deleteDirectory( app()->langPath( 'vendor' ) );
+        // Put back a catalogue that was already there, and remove only what
+        // this test created: another process may be using the directories.
+        if ( null !== $original ) {
+            File::put( $file, $original );
+        } else {
+            File::delete( $file );
         }
+
+        foreach ( [ $published, app()->langPath( 'vendor' ) ] as $dir ) {
+            if ( is_dir( $dir ) && [] === File::files( $dir ) && [] === File::directories( $dir ) ) {
+                @rmdir( $dir );
+            }
+        }
+
+        app( 'translator' )->setLoaded( [] );
     }
 } );

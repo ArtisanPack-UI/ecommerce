@@ -23,6 +23,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Validation\ValidationException;
 
 uses( RefreshDatabase::class );
 
@@ -240,9 +241,11 @@ it( 'defaults marketing to the customer\'s marketing consent', function (): void
         ->and( $preferences->allows( $silent, 'mail', 'marketing' ) )->toBeFalse()
         ->and( $preferences->allows( $silent, 'mail', 'review-requests' ) )->toBeTrue();
 
-    $preferences->update( $silent, [ [ 'channel' => 'mail', 'category' => 'marketing', 'is_enabled' => true ] ] );
+    // A preference can't turn marketing on without consent (#194).
+    expect( fn () => $preferences->update( $silent, [ [ 'channel' => 'mail', 'category' => 'marketing', 'is_enabled' => true ] ] ) )
+        ->toThrow( ValidationException::class );
 
-    expect( $preferences->allows( $silent, 'mail', 'marketing' ) )->toBeTrue();
+    expect( $preferences->allows( $silent, 'mail', 'marketing' ) )->toBeFalse();
 } );
 
 it( 'filters template variables and fires the sending hooks on delivery', function (): void {

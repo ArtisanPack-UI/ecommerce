@@ -283,6 +283,29 @@ session is created.
 The REST response's `checkout.payment` holds `reference`, `status`, `amount`,
 and `client`. `client` tells the storefront how to render the payment step.
 
+### Payment options
+
+Since 1.3.0, a storefront can send gateway-specific choices with the session as
+`payment_options`, an object, over REST (`POST checkout/{cart}/session`) or
+GraphQL (`createPaymentSession(input: { payment_options: … })`). For example, a
+PayPal checkout that saves the card:
+
+```http
+POST /checkout/Qm3x…/session
+{ "return_url": "https://shop.test/checkout/return", "payment_options": { "save_payment_method": true } }
+```
+
+Only gateways that implement `Contracts\AcceptsPaymentOptions` take options,
+and each gateway documents which ones. The checkout validates them against the
+gateway's rules, refuses unknown keys or invalid values with
+`payment-options-invalid` (422), and passes only the validated keys on.
+
+When `payment_options` is sent, the cart's session is reused only while the
+gateway says it was created with the same options. Changing them (unticking
+"save", choosing another saved card) creates a new session, and
+`paymentInitiated` fires again. Leave the field out (or send `null`) to keep
+the current session's choices. Send `{}` to create the session with no options.
+
 ### Client rendering
 
 Gateways whose payment step runs in the browser implement
@@ -463,6 +486,74 @@ The reconciler acts on the outcome:
 | `succeeded` | The cart is finalized through `CheckoutService::finalize()`, the same idempotent path the storefront uses. A finalize already running elsewhere is left alone |
 | `failed` | The cart's stock holds are released, the cart moves back to `payment_selection`, and `ap.ecommerce.checkout.failed` fires. A placed order is left `pending` for a retry |
 | `requires_action`, `refunded` | Nothing |
+
+The reconciler matches checkouts by the session reference and the gateway
+key. For a webhook, that key is the `{provider}` the webhook arrived on. When
+that gateway implements `Contracts\SharesWebhookEndpoint` (since 1.3.0), the
+reconciler also matches carts and pending orders made with the sibling keys
+it declares, so a card payment made through `paypal-card` is settled by a
+webhook posted to `webhooks/paypal`. Declared keys that aren't registered are
+dropped, and gateways without the contract only match their own key. See
+[contracts.md](contracts.md#contract-notes).
+
+If a reference matches more than one checkout across those keys, the most
+recently updated one is settled and a warning is logged to the `ecommerce`
+channel.
+
+`refunded` is the same for every key set: the reconciler doesn't record
+refunds. Refunds go through `RefundService`, which routes them by the order's
+own `payment_gateway_key`.
+
+A refund made at the provider, such as one issued from its dashboard, is
+recorded by the gateway with `RefundService::recordProviderRefund( $order,
+$amount, $providerRefundId, $reason )`. It doesn't call the gateway. It writes
+a `succeeded` amount-only refund (no lines, no restock) with the provider's
+refund id as `gateway_reference`, updates the order's refunded total and
+`payment_status`, writes an `order.refunded` timeline entry with
+`source: provider`, and fires the usual refund hooks and events.
+`ap.ecommerce.payment.refunding` is skipped, because the money has already
+moved. A reference the order already has, whether recorded earlier or the id
+of a refund the store issued, returns that refund unchanged, so a redelivered
+webhook is harmless. Pass the engine refund id the provider echoes back (such
+as PayPal's `custom_id`) as the fifth argument, `$issuedRefundId`: a refund the
+store issued is then matched even while it is still pending and has no
+provider reference yet, so a webhook that arrives mid-refund doesn't record it
+twice. Gateways should load the refund from the provider's API
+rather than trust the webhook's amount.
+
+A refund the store issued that was marked `failed`, because the gateway call
+errored or timed out, may still have gone through at the provider. When the
+provider reports it completed and echoes back its id as `$issuedRefundId`,
+that refund is settled rather than returned: it becomes `succeeded` with the
+provider's reference, its restock lines are restocked, and the order's totals,
+`payment_status` and timeline (`settled_failed_refund: true`) are updated as
+for a refund that succeeded the first time. The refund hooks and events fire.
+If the provider's amount differs from the refund's, nothing is settled: a
+`refund.amount_mismatch` timeline entry is written and
+`RefundNotAllowedException` is thrown for staff to reconcile. Check
+`wasChanged( 'status' )` on the returned refund to tell a settled refund from
+an untouched one.
+
+### Payments the provider fails later
+
+A pending capture, such as an eCheck or a payment held for review, is reported
+as a success, so the order is `paid`. If the provider later denies it, the
+gateway calls `PaymentOrchestrator::recordProviderPaymentFailure( $order,
+$captureReference, $code, $message )`:
+
+- `payment_status` becomes `failed`, and `meta.payment.capture_failure`
+  records the reference, code and time.
+- A `payment.capture_failed` timeline entry is written with `source: provider`.
+- After commit, `ap.ecommerce.payment.failed` fires and `PaymentFailed` is
+  dispatched, as for a capture that failed at checkout. A listener that throws
+  is reported, not rethrown.
+
+It returns `false` and changes nothing when the order isn't `paid` (so a
+redelivered webhook is harmless), when anything has been refunded (that's
+for staff to decide), or when the order recorded a different capture reference.
+A blank reference throws `InvalidArgumentException`. The order's status, its
+stock and any digital deliverables are left alone: cancelling, restocking or
+revoking is store policy, for a listener on the hook or the event.
 
 Because of this, a queue worker and the scheduler are part of checkout. See
 [operations.md](operations.md).
