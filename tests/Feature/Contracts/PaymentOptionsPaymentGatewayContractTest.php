@@ -8,6 +8,7 @@ use ArtisanPackUI\Ecommerce\Contracts\AcceptsPaymentOptions;
 use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\ValueObjects\PaymentSession;
+use BadMethodCallException;
 use Throwable;
 
 require_once __DIR__ . '/InMemoryPaymentGatewayContractTest.php';
@@ -70,7 +71,7 @@ final class PaymentOptionsPaymentGatewayContractTest extends InMemoryPaymentGate
     {
         PaymentOptionsInMemoryPaymentGateway::$rules = [ 'save' => [ 'not_a_real_rule' ] ];
 
-        $this->expectException( Throwable::class );
+        $this->expectException( BadMethodCallException::class );
 
         $this->test_payment_option_rules_are_keyed_validation_rules();
     }

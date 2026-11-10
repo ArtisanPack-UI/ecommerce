@@ -303,8 +303,8 @@ gateway's rules, refuses unknown keys or invalid values with
 When `payment_options` is sent, the cart's session is reused only while the
 gateway says it was created with the same options. Changing them (unticking
 "save", choosing another saved card) creates a new session, and
-`paymentInitiated` fires again. Leave the field out to keep the current
-session's choices. Send `{}` to create the session with no options.
+`paymentInitiated` fires again. Leave the field out (or send `null`) to keep
+the current session's choices. Send `{}` to create the session with no options.
 
 ### Client rendering
 

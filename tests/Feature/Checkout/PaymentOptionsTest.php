@@ -168,6 +168,17 @@ describe( 'REST', function (): void {
 
         expect( $this->gateway->inner->contexts[0] )->not->toHaveKey( CheckoutService::PAYMENT_OPTIONS );
     } );
+
+    it( 'treats a null payment_options like a left-out field', function (): void {
+        $url   = "/api/ecommerce/v1/checkout/{$this->cart->token}/session";
+        $first = $this->postJson( $url, [ 'payment_options' => [ 'save' => true ] ], idem() )->assertOk()->json( 'checkout.payment.reference' );
+
+        $this->postJson( $url, [ 'payment_options' => null ], idem() )
+            ->assertOk()
+            ->assertJsonPath( 'checkout.payment.reference', $first );
+
+        expect( $this->gateway->inner->contexts )->toHaveCount( 1 );
+    } );
 } );
 
 describe( 'GraphQL', function (): void {
@@ -185,5 +196,16 @@ describe( 'GraphQL', function (): void {
     it( 'answers invalid payment options with their code', function (): void {
         gql( $this, 'mutation ($t: String!, $o: JSON) { createPaymentSession(input: { cart_token: $t, payment_options: $o }) { session { reference } errors { code } } }', [ 't' => $this->cart->token, 'o' => [ 'colour' => 'red' ] ] )
             ->assertJsonPath( 'data.createPaymentSession.errors.0.code', 'payment-options-invalid' );
+    } );
+
+    it( 'treats a null payment_options variable like a left-out field', function (): void {
+        $mutation = 'mutation ($t: String!, $o: JSON) { createPaymentSession(input: { cart_token: $t, payment_options: $o }) { session { reference } errors { code } } }';
+        $first    = gql( $this, $mutation, [ 't' => $this->cart->token, 'o' => [ 'save' => true ] ] )->json( 'data.createPaymentSession.session.reference' );
+
+        gql( $this, $mutation, [ 't' => $this->cart->token, 'o' => null ] )
+            ->assertJsonPath( 'data.createPaymentSession.errors', [] )
+            ->assertJsonPath( 'data.createPaymentSession.session.reference', $first );
+
+        expect( $this->gateway->inner->contexts )->toHaveCount( 1 );
     } );
 } );

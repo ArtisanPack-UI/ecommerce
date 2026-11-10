@@ -528,8 +528,10 @@ class Mutations
                     'idempotency_key' => request()->header( 'Idempotency-Key' ),
                 ], static fn ( mixed $value ): bool => null !== $value && '' !== $value );
 
-                if ( array_key_exists( CheckoutService::PAYMENT_OPTIONS, $input ) ) {
-                    $context[ CheckoutService::PAYMENT_OPTIONS ] = (array) ( $input[ CheckoutService::PAYMENT_OPTIONS ] ?? [] );
+                // GraphQL clients send null for an unset variable: treat it
+                // as an absent field, which keeps the session's options.
+                if ( is_array( $input[ CheckoutService::PAYMENT_OPTIONS ] ?? null ) ) {
+                    $context[ CheckoutService::PAYMENT_OPTIONS ] = $input[ CheckoutService::PAYMENT_OPTIONS ];
                 }
 
                 $session = $this->checkout()->createPaymentSession( $cart, $context );

@@ -172,7 +172,8 @@ class CheckoutController extends ApiController
      * Creates (or reuses) the payment session. `checkout.payment` carries the
      * session reference and status, and `checkout.payment.client` what the
      * storefront needs to render the provider's payment UI. `payment_options`
-     * passes the shopper's gateway choices (see `AcceptsPaymentOptions`).
+     * passes the shopper's gateway choices (see `AcceptsPaymentOptions`);
+     * `null` counts as leaving it out.
      *
      * @since 1.0.0
      * @since 1.3.0 Accepts `payment_options`.
@@ -197,8 +198,12 @@ class CheckoutController extends ApiController
             'idempotency_key' => $request->header( 'Idempotency-Key' ),
         ], static fn ( mixed $value ): bool => null !== $value && '' !== $value );
 
-        if ( $request->has( CheckoutService::PAYMENT_OPTIONS ) ) {
-            $context[ CheckoutService::PAYMENT_OPTIONS ] = (array) $request->validated( CheckoutService::PAYMENT_OPTIONS, [] );
+        // A null value is treated as an absent field: it keeps the current
+        // session's options rather than clearing them (`{}` clears them).
+        $options = $request->validated( CheckoutService::PAYMENT_OPTIONS );
+
+        if ( is_array( $options ) ) {
+            $context[ CheckoutService::PAYMENT_OPTIONS ] = $options;
         }
 
         $session = $this->checkout->createPaymentSession( $model, $context );

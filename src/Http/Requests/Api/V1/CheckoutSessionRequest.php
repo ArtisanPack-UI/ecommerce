@@ -40,7 +40,7 @@ class CheckoutSessionRequest extends ApiFormRequest
     {
         return [
             'return_url'      => [ 'nullable', 'string', 'url', 'max:2000' ],
-            'payment_options' => [ 'sometimes', 'array' ],
+            'payment_options' => [ 'nullable', 'array' ],
         ];
     }
 
