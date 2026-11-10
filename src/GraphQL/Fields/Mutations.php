@@ -201,7 +201,7 @@ class Mutations
             'SetPaymentGatewayInput'        => $input( [ 'cart_token' => 'String!', 'gateway' => 'String!' ] ),
             'SetPaymentGatewayPayload'      => $output( [ 'cart' => 'Cart' ] ),
             'CheckoutPaymentSession'        => [ 'fields' => [ 'reference' => 'String!', 'status' => 'String', 'amount' => 'Money!', 'client' => 'JSON' ] ],
-            'CreatePaymentSessionInput'     => $input( [ 'cart_token' => 'String!', 'return_url' => 'String' ] ),
+            'CreatePaymentSessionInput'     => $input( [ 'cart_token' => 'String!', 'return_url' => 'String', 'payment_options' => 'JSON' ] ),
             'CreatePaymentSessionPayload'   => $output( [ 'cart' => 'Cart', 'session' => 'CheckoutPaymentSession' ] ),
             'PlaceOrderInput'               => $input( [ 'cart_token' => 'String!', 'payment_reference' => 'String', 'customer_note' => 'String' ] ),
             'PlaceOrderPayload'             => $output( [ 'order' => 'Order', 'status' => 'String', 'complete' => 'Boolean', 'step_up_token' => 'String' ] ),
@@ -523,10 +523,16 @@ class Mutations
                     throw new CheckoutException( 'return_url', 'return-url-invalid', __( 'The return URL must be on this site.' ) );
                 }
 
-                $session = $this->checkout()->createPaymentSession( $cart, array_filter( [
+                $context = array_filter( [
                     'return_url'      => $returnUrl,
                     'idempotency_key' => request()->header( 'Idempotency-Key' ),
-                ], static fn ( mixed $value ): bool => null !== $value && '' !== $value ) );
+                ], static fn ( mixed $value ): bool => null !== $value && '' !== $value );
+
+                if ( array_key_exists( CheckoutService::PAYMENT_OPTIONS, $input ) ) {
+                    $context[ CheckoutService::PAYMENT_OPTIONS ] = (array) ( $input[ CheckoutService::PAYMENT_OPTIONS ] ?? [] );
+                }
+
+                $session = $this->checkout()->createPaymentSession( $cart, $context );
                 $gateway = $this->checkout()->availableGateways( $cart )[ (string) $cart->refresh()->payment_gateway_key ] ?? null;
 
                 return [

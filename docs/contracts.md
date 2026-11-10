@@ -16,6 +16,7 @@ the matching abstract contract-test suite.
 | [`PaymentGateway`](../src/Contracts/PaymentGateway.php) | `PaymentGatewayRegistry` | `StripeGateway` (`stripe`, when `gateways.stripe.enabled` and `stripe/stripe-php` is installed) | `PaymentGatewayContractTest` |
 | [`RendersClientPayment`](../src/Contracts/RendersClientPayment.php) (optional, on a `PaymentGateway`) | The gateway itself | `StripeGateway` (`stripe-payment-element`) | none |
 | [`SharesWebhookEndpoint`](../src/Contracts/SharesWebhookEndpoint.php) (optional, on a `PaymentGateway`, since 1.3.0) | The gateway itself | none | Checked inside `PaymentGatewayContractTest` |
+| [`AcceptsPaymentOptions`](../src/Contracts/AcceptsPaymentOptions.php) (optional, on a `PaymentGateway`, since 1.3.0) | The gateway itself | none | Checked inside `PaymentGatewayContractTest` |
 | [`FraudProvider`](../src/Contracts/FraudProvider.php) | `FraudProviderRegistry` | `AlwaysApproveFraudProvider` (`always-approve`), `StripeRadarFraudProvider` (`stripe-radar`, with Stripe); `ChainFraudProvider` (`chain`) runs a comma-separated `fraud.provider` list | `FraudProviderContractTest` |
 | [`TaxProvider`](../src/Contracts/TaxProvider.php) | `TaxProviderRegistry` (active: `tax.provider`) | `ManualTaxProvider` (`manual`) | `TaxProviderContractTest` |
 | [`ContextAwareTaxProvider`](../src/Contracts/ContextAwareTaxProvider.php) (extends `TaxProvider`) | `TaxProviderRegistry` | `ManualTaxProvider` | `TaxProviderContractTest` |
@@ -368,6 +369,45 @@ key and drops any declared key that isn't registered in
 nothing has registered (a sibling turned off in config simply drops out).
 Gateways without the contract only reconcile their own key.
 
+**`AcceptsPaymentOptions`.** Optional on a gateway, since 1.3.0. Some shopper
+choices are specific to a gateway, such as "save this payment method" or "pay
+with my saved card". Livewire drivers can pass them as gateway context
+themselves, but API storefronts only reach the gateway through
+`CheckoutService::createPaymentSession()`. They send the choices as
+`payment_options` (see [checkout.md](checkout.md#payment-options)). The gateway
+describes the options it accepts as Laravel validation rules, and says when the
+cart's current session was made for different options:
+
+```php
+use ArtisanPackUI\Ecommerce\Contracts\AcceptsPaymentOptions;
+use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
+
+class PayPalCardGateway implements PaymentGateway, AcceptsPaymentOptions
+{
+    public function paymentOptionRules( Cart $cart ): array
+    {
+        return [
+            'save_payment_method'  => [ 'sometimes', 'boolean' ],
+            'saved_payment_method' => [ 'sometimes', 'integer', 'min:1' ],
+        ];
+    }
+
+    public function paymentOptionsChanged( Cart $cart, PaymentSession $session, array $options ): bool
+    {
+        // True when $session was created for other options, so it can't be reused.
+    }
+}
+```
+
+The checkout validates the options against those rules and passes only the
+validated keys to the gateway, as `$context['payment_options']`. Unknown keys
+are refused (`payment-options-invalid`, 422), and so are any options sent to a
+gateway without the contract. Return no rules when no option applies to the
+cart (a guest can't save a card, for example), and every option is refused.
+The rules only check shape. The gateway still has to check anything that
+depends on who is paying, such as whether a saved method belongs to the cart's
+customer.
+
 **`NotificationTemplate` (contract change).** `defaultSubject()` and
 `defaultBody()` now take `?string $locale = null`. Return the default Twig
 source in that locale, or in the current app locale when it's `null`. The
@@ -704,6 +744,9 @@ Invariants verified:
 - A gateway that implements `SharesWebhookEndpoint` lists its own key, and
   every key it lists is registered in `PaymentGatewayRegistry` (since 1.3.0;
   skipped for gateways without the contract).
+- A gateway that implements `AcceptsPaymentOptions` returns validation rules
+  keyed by option name, and every rule runs against a probe value without
+  error (since 1.3.0; skipped for gateways without the contract).
 
 Reference implementation: an in-memory gateway — see
 `tests/Feature/Contracts/InMemoryPaymentGatewayContractTest.php`.

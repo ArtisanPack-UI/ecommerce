@@ -171,9 +171,11 @@ class CheckoutController extends ApiController
     /**
      * Creates (or reuses) the payment session. `checkout.payment` carries the
      * session reference and status, and `checkout.payment.client` what the
-     * storefront needs to render the provider's payment UI.
+     * storefront needs to render the provider's payment UI. `payment_options`
+     * passes the shopper's gateway choices (see `AcceptsPaymentOptions`).
      *
      * @since 1.0.0
+     * @since 1.3.0 Accepts `payment_options`.
      *
      * @param  CheckoutSessionRequest  $request  Validated request.
      * @param  string                  $cart     Cart token.
@@ -190,10 +192,16 @@ class CheckoutController extends ApiController
             throw new CheckoutException( 'return_url', 'return-url-invalid', __( 'The return URL must be on this site.' ) );
         }
 
-        $session = $this->checkout->createPaymentSession( $model, array_filter( [
+        $context = array_filter( [
             'return_url'      => $returnUrl,
             'idempotency_key' => $request->header( 'Idempotency-Key' ),
-        ], static fn ( mixed $value ): bool => null !== $value && '' !== $value ) );
+        ], static fn ( mixed $value ): bool => null !== $value && '' !== $value );
+
+        if ( $request->has( CheckoutService::PAYMENT_OPTIONS ) ) {
+            $context[ CheckoutService::PAYMENT_OPTIONS ] = (array) $request->validated( CheckoutService::PAYMENT_OPTIONS, [] );
+        }
+
+        $session = $this->checkout->createPaymentSession( $model, $context );
 
         $gateway = $this->checkout->availableGateways( $model )[ (string) $model->payment_gateway_key ] ?? null;
 

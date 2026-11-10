@@ -283,6 +283,29 @@ session is created.
 The REST response's `checkout.payment` holds `reference`, `status`, `amount`,
 and `client`. `client` tells the storefront how to render the payment step.
 
+### Payment options
+
+Since 1.3.0, a storefront can send gateway-specific choices with the session as
+`payment_options`, an object, over REST (`POST checkout/{cart}/session`) or
+GraphQL (`createPaymentSession(input: { payment_options: … })`). For example, a
+PayPal checkout that saves the card:
+
+```http
+POST /checkout/Qm3x…/session
+{ "return_url": "https://shop.test/checkout/return", "payment_options": { "save_payment_method": true } }
+```
+
+Only gateways that implement `Contracts\AcceptsPaymentOptions` take options,
+and each gateway documents which ones. The checkout validates them against the
+gateway's rules, refuses unknown keys or invalid values with
+`payment-options-invalid` (422), and passes only the validated keys on.
+
+When `payment_options` is sent, the cart's session is reused only while the
+gateway says it was created with the same options. Changing them (unticking
+"save", choosing another saved card) creates a new session, and
+`paymentInitiated` fires again. Leave the field out to keep the current
+session's choices. Send `{}` to create the session with no options.
+
 ### Client rendering
 
 Gateways whose payment step runs in the browser implement
