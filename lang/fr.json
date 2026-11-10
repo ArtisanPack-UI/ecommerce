@@ -571,6 +571,7 @@
     "The payment was cancelled. Set up the payment again.": "Le paiement a été annulé. Configurez de nouveau le paiement.",
     "The pending payment on order :order could not be voided: :error": "Le paiement en attente de la commande :order n'a pas pu être annulé : :error",
     "The provider refunded :refunded_currency but order :order is in :currency.": "Le prestataire a remboursé en :refunded_currency, mais la commande :order est en :currency.",
+    "The provider reported refund :refund as :refunded :refunded_currency but the store asked for :requested :requested_currency; refusing to record a mismatched ledger row.": "Le prestataire a déclaré le remboursement :refund pour :refunded :refunded_currency, mais la boutique a demandé :requested :requested_currency ; refus d’enregistrer une ligne de registre incohérente.",
     "The q parameter is required and must be at most 200 characters.": "Le paramètre q est obligatoire et doit comporter au maximum 200 caractères.",
     "The quantity must be at least 1.": "La quantité doit être d’au moins 1.",
     "The query must be 1–200 characters.": "La requête doit comporter de 1 à 200 caractères.",

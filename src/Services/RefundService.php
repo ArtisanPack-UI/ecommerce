@@ -257,6 +257,18 @@ class RefundService
      * Both checks run under the order's lock. Check `wasRecentlyCreated` on
      * the result to tell a new refund from an existing one.
      *
+     * The exception is a refund the store issued that was marked `failed`
+     * (the gateway call errored or timed out) but that the provider reports
+     * it completed, matched by `$issuedRefundId`: it is settled, not
+     * returned. The same guards as for a new refund apply; its restock lines
+     * are restocked; the order's totals, `payment_status` and timeline
+     * (`settled_failed_refund: true`) are updated; and the hooks and events
+     * fire. When the provider's amount differs from the refund's, nothing is
+     * settled: a `refund.amount_mismatch` timeline entry is written and
+     * {@see RefundNotAllowedException} is thrown. Check
+     * `wasChanged( 'status' )` on the result to tell a settled refund from
+     * an untouched one.
+     *
      * @since 1.3.0
      *
      * @param  Order        $order             Order the provider refunded.
@@ -266,7 +278,7 @@ class RefundService
      * @param  int|string|null  $issuedRefundId    The engine refund id the provider echoed back, if any.
      *
      * @throws InvalidArgumentException  When the reference is blank.
-     * @throws RefundNotAllowedException When the amount isn't positive, the order isn't refundable, the currency differs, or the amount is over the outstanding balance.
+     * @throws RefundNotAllowedException When the amount isn't positive, the order isn't refundable, the currency differs, the amount is over the outstanding balance, or it differs from a failed refund being settled.
      *
      * @return Refund
      */
@@ -286,7 +298,7 @@ class RefundService
 
         $reason = null === $reason || '' === trim( $reason ) ? null : mb_substr( trim( $reason ), 0, 255 );
 
-        [ $refund, $refreshed ] = DB::transaction( function () use ( $order, $amount, $gatewayReference, $reason, $issuedRefundId ): array {
+        [ $refund, $refreshed, $mismatch ] = DB::transaction( function () use ( $order, $amount, $gatewayReference, $reason, $issuedRefundId ): array {
             $locked = Order::query()->lockForUpdate()->findOrFail( $order->id );
 
             // The provider's refund id, or the id of the refund the store
@@ -306,8 +318,8 @@ class RefundService
                 ->orderBy( 'id' )
                 ->first();
 
-            if ( null !== $existing ) {
-                return [ $existing, null ];
+            if ( null !== $existing && ! $this->settlesFailedRefund( $existing, $gatewayReference, $issuedRefundId ) ) {
+                return [ $existing, null, false ];
             }
 
             $this->guardOrderRefundable( $locked );
@@ -325,6 +337,18 @@ class RefundService
             $refundAmount = (int) $amount->getAmount();
 
             $this->guardRefundBalance( $locked, $refundAmount );
+
+            if ( null !== $existing ) {
+                // The provider moved a different amount than the store
+                // asked for: leave the failed row alone for someone to
+                // reconcile. The timeline entry is written after the
+                // transaction, so the exception doesn't roll it back.
+                if ( (int) $existing->amount !== $refundAmount ) {
+                    return [ $existing, null, true ];
+                }
+
+                return [ $existing, $this->settleFailedRefund( $locked, $existing, $refundAmount, $gatewayReference ), false ];
+            }
 
             $refund = Refund::query()->create( [
                 'order_id'          => $locked->id,
@@ -359,8 +383,33 @@ class RefundService
                 ],
             ] );
 
-            return [ $refund, $locked->fresh( 'items' ) ?? $locked ];
+            return [ $refund, $locked->fresh( 'items' ) ?? $locked, false ];
         } );
+
+        if ( $mismatch ) {
+            OrderTimelineEntry::query()->create( [
+                'order_id'      => $refund->order_id,
+                'actor_user_id' => null,
+                'event_type'    => 'refund.amount_mismatch',
+                'payload'       => [
+                    'refund_id'          => $refund->id,
+                    'requested'          => (string) $refund->amount,
+                    'refunded'           => (string) $amount->getAmount(),
+                    'requested_currency' => (string) $refund->currency,
+                    'refunded_currency'  => $amount->getCurrency()->getCode(),
+                    'gateway_reference'  => $gatewayReference,
+                    'source'             => 'provider',
+                ],
+            ] );
+
+            throw new RefundNotAllowedException( __( 'The provider reported refund :refund as :refunded :refunded_currency but the store asked for :requested :requested_currency; refusing to record a mismatched ledger row.', [
+                'refund'             => $refund->id,
+                'refunded'           => $amount->getAmount(),
+                'refunded_currency'  => $amount->getCurrency()->getCode(),
+                'requested'          => $refund->amount,
+                'requested_currency' => $refund->currency,
+            ] ) );
+        }
 
         if ( null === $refreshed ) {
             return $refund;
@@ -374,6 +423,91 @@ class RefundService
         Event::dispatch( new OrderRefunded( $refreshed, $refund ) );
 
         return $refund;
+    }
+
+    /**
+     * Whether `recordProviderRefund()` should settle `$existing` rather than
+     * return it unchanged: it is a refund the store issued that was marked
+     * failed, matched by the engine refund id the provider echoed back, and
+     * it doesn't carry another provider reference.
+     *
+     * @since 1.3.0
+     *
+     * @param  Refund    $existing          The refund the lookup found.
+     * @param  string    $gatewayReference  The provider's refund id.
+     * @param  int|null  $issuedRefundId    The engine refund id the provider echoed back, if any.
+     *
+     * @return bool
+     */
+    protected function settlesFailedRefund( Refund $existing, string $gatewayReference, ?int $issuedRefundId ): bool
+    {
+        if ( Refund::STATUS_FAILED !== $existing->status || null === $issuedRefundId || (int) $existing->id !== $issuedRefundId ) {
+            return false;
+        }
+
+        return null === $existing->gateway_reference || $gatewayReference === $existing->gateway_reference;
+    }
+
+    /**
+     * Settles a failed refund the provider reported it completed, under the
+     * order's lock: the refund becomes succeeded with the provider's
+     * reference, any restock lines it carries are restocked (they never were
+     * when it failed), and the order's refunded total, `payment_status` and
+     * timeline are updated as for a refund that succeeded the first time.
+     *
+     * @since 1.3.0
+     *
+     * @param  Order   $locked            The order, locked for update.
+     * @param  Refund  $refund            The failed refund.
+     * @param  int     $refundAmount      The amount, in minor units.
+     * @param  string  $gatewayReference  The provider's refund id.
+     *
+     * @return Order The refreshed order.
+     */
+    protected function settleFailedRefund( Order $locked, Refund $refund, int $refundAmount, string $gatewayReference ): Order
+    {
+        $refund->settleFailedAsSucceeded( $gatewayReference );
+        $refund->load( 'items' );
+        $locked->load( 'items' );
+
+        foreach ( $refund->items as $item ) {
+            if ( (bool) $item->restock ) {
+                $this->restockLine( $locked, [
+                    'order_item_id' => (int) $item->order_item_id,
+                    'quantity'      => (int) $item->quantity,
+                    'amount'        => (int) $item->amount,
+                    'restock'       => true,
+                ] );
+            }
+        }
+
+        $currency = (string) $locked->currency;
+
+        $locked->total_refunded_amount   = (int) $locked->total_refunded_amount + $refundAmount;
+        $locked->total_refunded_currency = $currency;
+        $locked->payment_status          = $locked->total_refunded_amount >= (int) $locked->total_amount
+            ? 'refunded'
+            : 'partially_refunded';
+        $locked->save();
+
+        OrderTimelineEntry::query()->create( [
+            'order_id'      => $locked->id,
+            'actor_user_id' => null,
+            'event_type'    => 'order.refunded',
+            'payload'       => [
+                'refund_id'             => $refund->id,
+                'amount'                => $refundAmount,
+                'currency'              => $currency,
+                'reason'                => $refund->reason,
+                'gateway'               => (string) $locked->payment_gateway_key,
+                'gateway_reference'     => $gatewayReference,
+                'payment_status'        => $locked->payment_status,
+                'source'                => 'provider',
+                'settled_failed_refund' => true,
+            ],
+        ] );
+
+        return $locked->fresh( 'items' ) ?? $locked;
     }
 
     /**
