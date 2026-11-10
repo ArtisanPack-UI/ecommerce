@@ -25,9 +25,20 @@ final class PaymentOptionsInMemoryPaymentGateway extends InMemoryPaymentGateway 
      */
     public static array $rules = [ 'save' => [ 'sometimes', 'boolean' ] ];
 
+    /**
+     * The cart {@see self::paymentOptionRules()} was last asked about.
+     */
+    public static ?Cart $lastCart = null;
+
+    /**
+     * Like a gateway that saves payment methods, it only has options for a
+     * signed-in owner's cart.
+     */
     public function paymentOptionRules( Cart $cart ): array
     {
-        return self::$rules;
+        self::$lastCart = $cart;
+
+        return null === $cart->getAttribute( 'customer_id' ) ? [] : self::$rules;
     }
 
     public function paymentOptionsChanged( Cart $cart, PaymentSession $session, array $options ): bool
@@ -47,7 +58,8 @@ final class PaymentOptionsPaymentGatewayContractTest extends InMemoryPaymentGate
 {
     protected function tearDown(): void
     {
-        PaymentOptionsInMemoryPaymentGateway::$rules = [ 'save' => [ 'sometimes', 'boolean' ] ];
+        PaymentOptionsInMemoryPaymentGateway::$rules    = [ 'save' => [ 'sometimes', 'boolean' ] ];
+        PaymentOptionsInMemoryPaymentGateway::$lastCart = null;
 
         parent::tearDown();
     }
@@ -76,8 +88,20 @@ final class PaymentOptionsPaymentGatewayContractTest extends InMemoryPaymentGate
         $this->test_payment_option_rules_are_keyed_validation_rules();
     }
 
+    public function test_the_payment_option_check_asks_about_the_overridden_cart(): void
+    {
+        $this->test_payment_option_rules_are_keyed_validation_rules();
+
+        $this->assertSame( 42, PaymentOptionsInMemoryPaymentGateway::$lastCart?->getAttribute( 'customer_id' ) );
+    }
+
     protected function gateway(): PaymentGateway
     {
         return new PaymentOptionsInMemoryPaymentGateway();
+    }
+
+    protected function paymentOptionsCart(): Cart
+    {
+        return ( new Cart() )->forceFill( [ 'customer_id' => 42 ] );
     }
 }

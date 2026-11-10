@@ -336,7 +336,7 @@ abstract class PaymentGatewayContractTest extends TestCase
             $this->markTestSkipped( 'Gateway does not accept payment options.' );
         }
 
-        $rules = $gateway->paymentOptionRules( new Cart() );
+        $rules = $gateway->paymentOptionRules( $this->paymentOptionsCart() );
 
         foreach ( array_keys( $rules ) as $option ) {
             $this->assertIsString( $option, 'paymentOptionRules() must be keyed by option name.' );
@@ -443,6 +443,21 @@ abstract class PaymentGatewayContractTest extends TestCase
      * @return PaymentSession
      */
     abstract protected function existingPaymentSession(): PaymentSession;
+
+    /**
+     * The cart {@see self::test_payment_option_rules_are_keyed_validation_rules()}
+     * asks the gateway for its payment-option rules. Defaults to a new,
+     * unsaved cart; a satellite whose gateway only returns rules for some
+     * carts (a signed-in owner's, say) overrides it so its rules are checked.
+     *
+     * @since 1.3.0
+     *
+     * @return Cart
+     */
+    protected function paymentOptionsCart(): Cart
+    {
+        return new Cart();
+    }
 
     /**
      * Whether the gateway under test supports refunds. Defaults to `true`;
