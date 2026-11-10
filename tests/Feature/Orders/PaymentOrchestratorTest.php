@@ -1023,6 +1023,22 @@ describe( 'recordProviderPaymentFailure()', function (): void {
             ->and( OrderTimelineEntry::query()->where( 'order_id', $order->id )->exists() )->toBeFalse();
     } );
 
+    it( 'still fails the payment, and returns normally, when the order\'s gateway can\'t be resolved', function (): void {
+        Event::fake( [ PaymentFailed::class ] );
+        Exceptions::fake();
+
+        // Registered under one key but reporting another: the registry refuses to resolve it.
+        app( PaymentGatewayRegistry::class )->register( 'orch-mismatched', new OrchestratorFakeGateway( 'orch-other' ) );
+
+        $order = orchPaidOrder( [ 'payment_gateway_key' => 'orch-mismatched' ] );
+
+        expect( app( PaymentOrchestrator::class )->recordProviderPaymentFailure( $order, 'CAP-1', 'capture_denied' ) )->toBeTrue()
+            ->and( $order->fresh()->payment_status )->toBe( 'failed' );
+
+        Event::assertNotDispatched( PaymentFailed::class );
+        Exceptions::assertReported( RuntimeException::class );
+    } );
+
     it( 'still fails the payment when the order\'s gateway is no longer registered, skipping the hook', function (): void {
         Event::fake( [ PaymentFailed::class ] );
 

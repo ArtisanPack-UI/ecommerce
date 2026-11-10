@@ -294,10 +294,20 @@ class PaymentOrchestrator
             return false;
         }
 
-        $gateway = $this->gateways->find( (string) $changed->payment_gateway_key );
+        // The failure is committed: a gateway that can no longer be resolved
+        // (unregistered, unbuildable, or reporting another key) skips the
+        // hook and event rather than reporting an error for work that
+        // succeeded.
+        try {
+            $gateway = $this->gateways->find( (string) $changed->payment_gateway_key );
+        } catch ( Throwable $exception ) {
+            $gateway = null;
+
+            report( $exception );
+        }
 
         if ( null === $gateway ) {
-            Log::channel( 'ecommerce' )->warning( 'A provider failed an order\'s payment, but its gateway is no longer registered; the payment.failed hook and event were skipped.', [
+            Log::channel( 'ecommerce' )->warning( 'A provider failed an order\'s payment, but its gateway can\'t be resolved; the payment.failed hook and event were skipped.', [
                 'order_id' => $changed->id,
                 'gateway'  => (string) $changed->payment_gateway_key,
                 'code'     => $code,
