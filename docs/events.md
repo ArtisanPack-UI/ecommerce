@@ -69,7 +69,7 @@ available since **1.0.0**, except `KanbanCardReordered`,
 | `OrderCancelled` | `OrderCancellationService::cancel()` | yes | `order.cancelled` | |
 | `OrderRefunded` | `RefundService` | yes | `order.refunded` | |
 | `PaymentSucceeded` | `PaymentOrchestrator` (capture) | yes | `payment.succeeded` | `paymentSucceeded` |
-| `PaymentFailed` | `PaymentOrchestrator` (gateway threw, capture declined or mismatched, or fraud block) | yes | `payment.failed` | |
+| `PaymentFailed` | `PaymentOrchestrator` (gateway threw, capture declined or mismatched, fraud block, or, since 1.3.0, a payment the provider failed after it was counted paid) | yes | `payment.failed` | |
 | `PaymentRefunded` | `RefundService` | yes | `payment.refunded` | |
 | `FraudBlocked` | `PaymentOrchestrator` | yes | `fraud.blocked` | |
 | `FraudChallenged` | `PaymentOrchestrator` | | `fraud.challenged` | |
@@ -333,6 +333,12 @@ public function __construct( public readonly ?Order $order, public readonly Paym
 Capture failed. The gateway threw, declined the capture, the captured amount or
 currency didn't match the order, or the fraud provider blocked the order (the
 authorization was voided).
+
+Since 1.3.0 it also fires from `PaymentOrchestrator::recordProviderPaymentFailure()`,
+when the provider fails a payment the store already counted as paid (a pending
+capture it later denied). The order's `payment_status` is then `failed`, while
+its status, stock and deliverables are left to store policy; see
+[checkout.md](checkout.md#payments-the-provider-fails-later).
 
 ### `PaymentRefunded`
 

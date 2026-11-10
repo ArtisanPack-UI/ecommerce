@@ -35,7 +35,7 @@ a 404.
 
 | Method | Path | What it does |
 |---|---|---|
-| `GET` / `PATCH` | `me` | Read or update the profile: `first_name`, `last_name`, `phone`, `locale`, `accepts_marketing` (`CustomerService::updateProfile()`). |
+| `GET` / `PATCH` | `me` | Read or update the profile: `first_name`, `last_name`, `phone`, `locale`, `accepts_marketing` (`CustomerService::updateProfile()`). Withdrawing `accepts_marketing` stores marketing notifications off on every channel; see [notifications.md](notifications.md#customer-preferences). |
 | `GET` / `POST` | `me/addresses` | List or save addresses. |
 | `PATCH` / `DELETE` | `me/addresses/{address}` | Update or delete one of them. |
 | `GET` | `me/orders` | Order history, newest first. `filter[status]` takes `open`, `completed`, `cancelled`, or a system status; includes `items`, `shipments`, `refunds`, `customer_notes`. |

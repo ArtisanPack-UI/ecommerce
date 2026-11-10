@@ -230,6 +230,16 @@ customer, channel, and category. The categories are `transactional`,
 
 - A category with no row is on, except `marketing`, which follows the
   customer's `accepts_marketing` consent.
+- **Marketing needs consent** (since 1.3.0). A stored `marketing` row can turn
+  marketing off but can't turn it on without `accepts_marketing`. Turning
+  `marketing` on for a customer without consent is refused: `PATCH
+  me/notification-preferences` answers 422 with an error on `preferences`, and
+  nothing is stored. Turning it off is always allowed, so unsubscribe links
+  keep working.
+- Withdrawing consent (through `PATCH me` or the admin `PATCH customers/{id}`)
+  stores `marketing` off on every preference channel, as a record of the
+  withdrawal. If consent is given again later, marketing stays off until the
+  customer turns it back on.
 - **Transactional notifications always send.** An opt-out row is stored for
   the audit trail and never consulted.
 - Mail to a guest order's address follows the preferences of the customer

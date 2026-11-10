@@ -521,6 +521,40 @@ provider reference yet, so a webhook that arrives mid-refund doesn't record it
 twice. Gateways should load the refund from the provider's API
 rather than trust the webhook's amount.
 
+A refund the store issued that was marked `failed`, because the gateway call
+errored or timed out, may still have gone through at the provider. When the
+provider reports it completed and echoes back its id as `$issuedRefundId`,
+that refund is settled rather than returned: it becomes `succeeded` with the
+provider's reference, its restock lines are restocked, and the order's totals,
+`payment_status` and timeline (`settled_failed_refund: true`) are updated as
+for a refund that succeeded the first time. The refund hooks and events fire.
+If the provider's amount differs from the refund's, nothing is settled: a
+`refund.amount_mismatch` timeline entry is written and
+`RefundNotAllowedException` is thrown for staff to reconcile. Check
+`wasChanged( 'status' )` on the returned refund to tell a settled refund from
+an untouched one.
+
+### Payments the provider fails later
+
+A pending capture, such as an eCheck or a payment held for review, is reported
+as a success, so the order is `paid`. If the provider later denies it, the
+gateway calls `PaymentOrchestrator::recordProviderPaymentFailure( $order,
+$captureReference, $code, $message )`:
+
+- `payment_status` becomes `failed`, and `meta.payment.capture_failure`
+  records the reference, code and time.
+- A `payment.capture_failed` timeline entry is written with `source: provider`.
+- After commit, `ap.ecommerce.payment.failed` fires and `PaymentFailed` is
+  dispatched, as for a capture that failed at checkout. A listener that throws
+  is reported, not rethrown.
+
+It returns `false` and changes nothing when the order isn't `paid` (so a
+redelivered webhook is harmless), when anything has been refunded (that's
+for staff to decide), or when the order recorded a different capture reference.
+A blank reference throws `InvalidArgumentException`. The order's status, its
+stock and any digital deliverables are left alone: cancelling, restocking or
+revoking is store policy, for a listener on the hook or the event.
+
 Because of this, a queue worker and the scheduler are part of checkout. See
 [operations.md](operations.md).
 

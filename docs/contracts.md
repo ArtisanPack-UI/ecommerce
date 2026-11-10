@@ -317,6 +317,12 @@ and a normalized status, and must not create, confirm, or capture anything.
   `WebhookResult::unverified()` when it fails. For payment events, a verified
   result should carry the normalized `outcome` and the session reference, so
   the engine can finalize or fail the matching checkout.
+- Provider-side changes reported by webhook are recorded through the engine,
+  not by writing the order directly: a refund made at the provider with
+  `RefundService::recordProviderRefund()`, and a payment the provider failed
+  after it was counted paid (a denied pending capture) with
+  `PaymentOrchestrator::recordProviderPaymentFailure()` (since 1.3.0). See
+  [checkout.md](checkout.md#payments-the-provider-fails-later).
 
 **`RendersClientPayment`.** Optional on a gateway. `clientConfig()` describes
 the client-side payment step as
@@ -727,6 +733,10 @@ Extension points a satellite must provide:
 - Optional: register the gateway and its siblings (for example in
   `setUp()` or through your satellite's service provider) when the gateway
   implements `SharesWebhookEndpoint`.
+- Optional (since 1.3.0): override `paymentOptionsCart(): Cart` when the
+  gateway implements `AcceptsPaymentOptions` but only returns rules for some
+  carts, such as a signed-in owner's. It defaults to a new, unsaved cart, so
+  without the override such a gateway's rules are never checked.
 
 Invariants verified:
 
