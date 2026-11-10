@@ -5,7 +5,9 @@
  *
  * Payload for `POST checkout/{cart}/session` (engine spec §9.2). `return_url`
  * is where the provider sends the shopper back after a redirect or 3DS
- * step; it must be on this site.
+ * step; it must be on this site. `payment_options` (since 1.3.0) carries the
+ * shopper's gateway choices; the checkout validates them against the
+ * gateway's rules (`AcceptsPaymentOptions`).
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -37,7 +39,8 @@ class CheckoutSessionRequest extends ApiFormRequest
     public static function baseRules(): array
     {
         return [
-            'return_url' => [ 'nullable', 'string', 'url', 'max:2000' ],
+            'return_url'      => [ 'nullable', 'string', 'url', 'max:2000' ],
+            'payment_options' => [ 'nullable', 'array' ],
         ];
     }
 

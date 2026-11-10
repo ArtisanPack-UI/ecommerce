@@ -367,7 +367,7 @@ All checkout routes use optional auth. Each response is the cart with a
 | `POST` | `checkout/{cart}/address` | `{ email?, shipping_address?, billing_address? }` | `cart.mutate` | yes |
 | `POST` | `checkout/{cart}/shipping-method` | `{ rate_id }` | `cart.mutate` | yes |
 | `POST` | `checkout/{cart}/payment-gateway` | `{ gateway }` | `cart.mutate` | yes |
-| `POST` | `checkout/{cart}/session` (adds `checkout.payment`) | `{ return_url? }` (must be on this site) | `checkout.finalize` | yes |
+| `POST` | `checkout/{cart}/session` (adds `checkout.payment`) | `{ return_url?, payment_options? }` (`return_url` must be on this site; `payment_options` per gateway, see [checkout.md](checkout.md#payment-options)) | `checkout.finalize` | yes |
 | `POST` | `checkout/{cart}/finalize` | `{ payment_reference?, customer_note? }` | `checkout.finalize` | yes |
 
 `finalize` returns the order with a `checkout` block of `status`, `complete`,

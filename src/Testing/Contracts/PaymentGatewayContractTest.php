@@ -33,6 +33,10 @@
  *    {@see \ArtisanPackUI\Ecommerce\Contracts\SharesWebhookEndpoint} MUST
  *    list its own key, and every key it lists MUST be registered (since
  *    1.3.0; skipped for gateways without the contract).
+ * 8. **Payment option rules are usable.** A gateway that implements
+ *    {@see \ArtisanPackUI\Ecommerce\Contracts\AcceptsPaymentOptions} MUST
+ *    return validation rules keyed by option name that Laravel's validator
+ *    accepts (since 1.3.0; skipped for gateways without the contract).
  *
  * Engine spec §4.2, parent plan §15.2.
  *
@@ -48,9 +52,11 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Testing\Contracts;
 
+use ArtisanPackUI\Ecommerce\Contracts\AcceptsPaymentOptions;
 use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
 use ArtisanPackUI\Ecommerce\Contracts\SharesWebhookEndpoint;
 use ArtisanPackUI\Ecommerce\Exceptions\PaymentCurrencyMismatchException;
+use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Providers\EcommerceServiceProvider;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
@@ -58,6 +64,7 @@ use ArtisanPackUI\Ecommerce\ValueObjects\PaymentResult;
 use ArtisanPackUI\Ecommerce\ValueObjects\PaymentSession;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Validator;
 use Money\Money;
 use Orchestra\Testbench\TestCase;
 use Throwable;
@@ -309,6 +316,40 @@ abstract class PaymentGatewayContractTest extends TestCase
                 sprintf( 'Gateway key "%s" from webhookGatewayKeys() is not registered in PaymentGatewayRegistry; the reconciler would drop it.', $key ),
             );
         }
+    }
+
+    /**
+     * A gateway that accepts payment options MUST describe them as Laravel
+     * validation rules keyed by option name: the checkout validates the
+     * shopper's options with them and refuses any key they don't name.
+     * Skipped when the gateway doesn't implement {@see AcceptsPaymentOptions}.
+     *
+     * @since 1.3.0
+     *
+     * @return void
+     */
+    public function test_payment_option_rules_are_keyed_validation_rules(): void
+    {
+        $gateway = $this->gateway();
+
+        if ( ! $gateway instanceof AcceptsPaymentOptions ) {
+            $this->markTestSkipped( 'Gateway does not accept payment options.' );
+        }
+
+        $rules = $gateway->paymentOptionRules( new Cart() );
+
+        foreach ( array_keys( $rules ) as $option ) {
+            $this->assertIsString( $option, 'paymentOptionRules() must be keyed by option name.' );
+            $this->assertNotSame( '', $option, 'paymentOptionRules() must not use an empty option name.' );
+        }
+
+        // Running every rule against a probe value surfaces malformed or
+        // unknown rules (Laravel skips the rules of an absent key).
+        $probe = array_fill_keys( array_unique( array_map( static fn ( string $option ): string => explode( '.', $option )[0], array_keys( $rules ) ) ), 'probe' );
+
+        Validator::make( $probe, $rules )->passes();
+
+        $this->addToAssertionCount( 1 );
     }
 
     /**
