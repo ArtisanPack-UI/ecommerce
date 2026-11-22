@@ -31,6 +31,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Gateways\Stripe;
 
+use ArtisanPackUI\Ecommerce\Contracts\CancelsPaymentSessions;
 use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
 use ArtisanPackUI\Ecommerce\Contracts\RendersClientPayment;
 use ArtisanPackUI\Ecommerce\Exceptions\PaymentCurrencyMismatchException;
@@ -61,7 +62,7 @@ use Stripe\StripeClient;
  *
  * @since      1.0.0
  */
-class StripeGateway implements PaymentGateway, RendersClientPayment
+class StripeGateway implements PaymentGateway, RendersClientPayment, CancelsPaymentSessions
 {
     /**
      * Registry key. Matches `orders.payment_gateway_key` for Stripe orders.
@@ -233,6 +234,60 @@ class StripeGateway implements PaymentGateway, RendersClientPayment
     public function retrievePaymentSession( string $reference ): PaymentSession
     {
         return $this->sessionFromIntent( $this->client()->paymentIntents->retrieve( $reference ) );
+    }
+
+    /**
+     * Cancels a PaymentIntent the shopper hasn't confirmed, so a checkout tab
+     * still showing it can't take a payment for an old total (#231).
+     *
+     * An intent that is already `canceled`, or that Stripe doesn't know, is
+     * a no-op. An intent that is `succeeded`, `requires_capture` or
+     * `processing` is confirmed and is never cancelled here: that throws.
+     * The cancel uses an idempotency key per intent, and throws when Stripe
+     * doesn't confirm it.
+     *
+     * @since 1.4.0
+     *
+     * @param  string  $reference  PaymentIntent id.
+     *
+     * @throws ApiErrorException When Stripe refuses the request or can't be reached.
+     * @throws RuntimeException  When the intent is confirmed, or the cancellation is unconfirmed.
+     *
+     * @return void
+     */
+    public function cancelPaymentSession( string $reference ): void
+    {
+        if ( '' === $reference ) {
+            return;
+        }
+
+        try {
+            $intent = $this->client()->paymentIntents->retrieve( $reference );
+        } catch ( InvalidRequestException $e ) {
+            if ( 'resource_missing' === $e->getStripeCode() ) {
+                return;
+            }
+
+            throw $e;
+        }
+
+        if ( 'canceled' === $intent->status ) {
+            return;
+        }
+
+        if ( in_array( $intent->status, [ 'succeeded', 'requires_capture', 'processing' ], true ) ) {
+            throw new RuntimeException( __( 'Payment :reference was already confirmed, so it can\'t be cancelled.', [ 'reference' => $reference ] ) );
+        }
+
+        $canceled = $this->client()->paymentIntents->cancel(
+            $reference,
+            [ 'cancellation_reason' => 'abandoned' ],
+            $this->requestOptions( [ 'idempotency_key' => 'ap-ec-cancel-session-' . $reference ] ),
+        );
+
+        if ( 'canceled' !== $canceled->status ) {
+            throw new RuntimeException( __( 'Stripe did not confirm that payment :reference was cancelled (status: :status).', [ 'reference' => $reference, 'status' => (string) $canceled->status ] ) );
+        }
     }
 
     /**
