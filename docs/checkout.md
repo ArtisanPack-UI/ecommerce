@@ -232,6 +232,7 @@ unless noted:
 | `payment-in-progress` | 409 | Another finalize of the same order is running |
 | `payment-not-allowed` | 409 | The order can no longer be paid |
 | `payment-amount-mismatch` | 409 | The session doesn't match the order total |
+| `payment-status-unknown` | 503 | Since 1.4.0: the provider can't say how the cart's current session stands; no new session is made and no free order placed. Retry |
 | `payment-already-confirmed` | 409 | Since 1.4.0: the cart's session is already confirmed for another total, so no new one is made. Tell the shopper not to pay again (see [Stranded payments](#stranded-payments)) |
 
 Order placement adds its own errors. The most common is `totals-changed`: the
@@ -295,8 +296,11 @@ and a session would be replaced, the old one is retrieved first:
   with the cart unchanged. Tell the shopper not to pay again. See
   [Stranded payments](#stranded-payments).
 - An unconfirmed one is cancelled at the provider when the gateway implements
-  `Contracts\CancelsPaymentSessions` (Stripe does), and kept in the history
-  as `canceled` or `superseded`.
+  `Contracts\CancelsPaymentSessions` (the bundled Stripe gateway doesn't), and
+  kept in the history as `canceled` or `superseded`.
+- When the provider can't be reached to say how the current session stands,
+  no new session is made: `payment-status-unknown` (HTTP 503) is thrown with
+  the cart unchanged, because the old session may already be paid. Retry.
 
 The REST response's `checkout.payment` holds `reference`, `status`, `amount`,
 and `client`. `client` tells the storefront how to render the payment step.
@@ -413,7 +417,7 @@ happens (env `ECOMMERCE_STRANDED_PAYMENTS`, or the store setting in the
 | Policy | Result |
 |---|---|
 | `hold` (default) | The order is placed from the cart for staff review. It stays `pending` (the engine's review hold, as for a fraud challenge), its `payment_status` is `paid` and its `payment_reference` is the session when the payment was captured, and `meta.payment_mismatch` holds `reason`, `gateway`, `reference`, `paid`, `expected`, `currency`, `captured` and `detected_at`. A `payment.stranded` timeline entry is written. When the cart had already become an order (it paid with another session), the entry is written on that order instead and no order is placed |
-| `refund` | A captured payment is refunded and an authorized one voided, through the gateway's own `refund()` / `voidPendingPayment()` with the idempotency key `ap-ec-stranded-{reference}`. A cart still pointing at the session steps back to `payment_selection`. When the gateway can't (no refund support, or the provider refuses), the payment is held instead |
+| `refund` | A captured payment is refunded and an authorized one voided, through the gateway's own `refund()` / `voidPendingPayment()` with the idempotency key `ap-ec-stranded-{reference}` and the same request every time. A cart still pointing at that session (same gateway and reference) steps back to `payment_selection`. When nothing can be sent (the gateway is gone or takes no refunds), the payment is held instead. When a refund or void was sent but not confirmed, the session stays `stranded` with `release_attempted_at` set and the same request is retried by the next webhook, finalize or `ecommerce:reconcile-payments` run, whatever the policy is by then; it is never held as paid |
 
 An authorized payment that was held isn't pinned to the order (the reconciler
 would otherwise void it as an amount mismatch); its reference is in
@@ -437,7 +441,7 @@ $stranded->rejectHold( $order, auth()->id() );
 | Action | Result |
 |---|---|
 | `acceptHold()` | An authorized session (`captured: false`) is captured through its gateway. The order becomes `paid` with the session pinned as its `payment_reference` (and `meta.payment.capture_reference`), its stock reservations are committed, it moves to `processing`, and a `payment.stranded_accepted` timeline entry is written. `ap.ecommerce.payment.succeeded`, `ap.ecommerce.order.paid` and `PaymentSucceeded` fire as for a normal capture |
-| `rejectHold()` | An authorized session is voided, a captured one refunded in full (idempotency key `ap-ec-stranded-{reference}`). As for a fraud block, the order's `payment_status` becomes `failed`, its reservations are released, it moves to `failed`, and a `payment.stranded_rejected` timeline entry is written. If the gateway refuses, nothing changes and it throws |
+| `rejectHold()` | An authorized session is voided, a captured one refunded in full (idempotency key `ap-ec-stranded-{reference}`, the same request as an automatic stranded refund, so a refund that already went through is replayed, not refused). As for a fraud block, the order's `payment_status` becomes `failed`, its reservations are released, it moves to `failed`, and a `payment.stranded_rejected` timeline entry is written. If the gateway refuses, nothing changes and it throws |
 
 Both run under the order's row lock, record `resolution` (`accepted` or
 `rejected`) and `resolved_at` in `meta.payment_mismatch`, update the session's
@@ -456,12 +460,44 @@ reports `processing` is only recorded as stranded until it settles.
 
 Each session is settled at most once. The work runs under the cart's and the
 session row's locks, and a settled row is left alone, so the storefront's
-finalize and a provider webhook can race safely.
+finalize and a provider webhook can race safely. A session an order owns (its
+`payment_gateway_key` and `payment_reference`) is never settled as stranded:
+a paid order marks the row `completed`, and a pending or `processing` order
+(a finalize in flight) defers it.
+
+The engine also settles a confirmed session when:
+
+- the cart can't become an order any more (`cart-empty`, `cart-closed`,
+  `items-unavailable`, `variant-required`) and the provider's webhook or the
+  reconcile command reports it paid (reason `cart_unplaceable`);
+- a discount brought the total to zero after the shopper paid: finalize
+  settles the session before placing the free order (under `hold` it returns
+  the held order instead). If the provider can't be reached, finalize throws
+  `payment-status-unknown` (503);
+- finalize is called with a replaced `$paymentReference`, also when the cart
+  has no current session (`payment-session-required` is still thrown).
+
+History rows outlive their cart: when `ecommerce:prune-carts` deletes a cart,
+`cart_id` becomes null and the row stays matchable. Such a session can be
+refunded or voided, but not held (there is no cart to place), and it fires no
+hook; under `hold` it is recorded as `stranded` for staff. A reference a cart
+got before 1.4.0 is recorded (with an unknown amount) before the cart lets
+go of it, through a gateway switch or a currency change.
+
+A `failed` outcome only marks a session `canceled` once the provider confirms
+it is cancelled; a declined card leaves it open and polled.
+
+The reconcile command's summary ends `Handled N stranded payment(s); M still
+need settling.`, where M counts every session still `stranded` (an
+unconfirmed refund being retried, or one staff must settle).
 
 `ap.ecommerce.checkout.paymentStranded( Cart $cart, PaymentSession $session,
-string $reason )` fires once per session, the first time it's found, after the
-policy ran when it could. `$reason` is `totals_changed`, `currency_changed`,
-`superseded`, or `replacement_refused`.
+string $reason )` fires once per session, on first detection. It does not fire
+again when the session is settled later. When `createPaymentSession()` or
+`strandedPayment()` detect it, the policy hasn't run yet and the row is
+`stranded`, even for a captured payment: check `Models\CartPaymentSession`
+later for how it ended. `$reason` is `totals_changed`, `currency_changed`,
+`superseded`, `replacement_refused`, or `cart_unplaceable`.
 
 `CheckoutService::strandedPayment( $cart )` returns the stranded session for a
 cart, if any, so a storefront can lock its checkout and tell the shopper not to

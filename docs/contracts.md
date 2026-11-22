@@ -19,7 +19,7 @@ the matching abstract contract-test suite.
 | [`RendersClientPayment`](../src/Contracts/RendersClientPayment.php) (optional, on a `PaymentGateway`) | The gateway itself | `StripeGateway` (`stripe-payment-element`) | none |
 | [`SharesWebhookEndpoint`](../src/Contracts/SharesWebhookEndpoint.php) (optional, on a `PaymentGateway`, since 1.3.0) | The gateway itself | none | Checked inside `PaymentGatewayContractTest` |
 | [`AcceptsPaymentOptions`](../src/Contracts/AcceptsPaymentOptions.php) (optional, on a `PaymentGateway`, since 1.3.0) | The gateway itself | none | Checked inside `PaymentGatewayContractTest` |
-| [`CancelsPaymentSessions`](../src/Contracts/CancelsPaymentSessions.php) (optional, on a `PaymentGateway`, since 1.4.0) | The gateway itself | `StripeGateway` | none |
+| [`CancelsPaymentSessions`](../src/Contracts/CancelsPaymentSessions.php) (optional, on a `PaymentGateway`, since 1.4.0) | The gateway itself | none (Stripe can't refuse cancelling an authorization atomically, so `StripeGateway` doesn't implement it) | none |
 | [`FraudProvider`](../src/Contracts/FraudProvider.php) | `FraudProviderRegistry` | `AlwaysApproveFraudProvider` (`always-approve`), `StripeRadarFraudProvider` (`stripe-radar`, with Stripe); `ChainFraudProvider` (`chain`) runs a comma-separated `fraud.provider` list | `FraudProviderContractTest` |
 | [`TaxProvider`](../src/Contracts/TaxProvider.php) | `TaxProviderRegistry` (active: `tax.provider`) | `ManualTaxProvider` (`manual`) | `TaxProviderContractTest` |
 | [`ContextAwareTaxProvider`](../src/Contracts/ContextAwareTaxProvider.php) (extends `TaxProvider`) | `TaxProviderRegistry` | `ManualTaxProvider` | `TaxProviderContractTest` |
@@ -448,6 +448,13 @@ class PayPalGateway implements PaymentGateway, CancelsPaymentSessions
 }
 ```
 
+Implement it only when the provider itself refuses to cancel a session that
+became confirmed after you checked it. Stripe cancels a manual-capture
+PaymentIntent in `requires_capture`, so a check-then-cancel could release an
+authorization the shopper just made; `StripeGateway` therefore doesn't
+implement the contract, and replaced Stripe sessions stay open for
+reconciliation.
+
 It must be idempotent, and it must never cancel or refund a confirmed session:
 the engine re-checks the session when the cancel throws, and treats a
 confirmed one as a stranded payment. Gateways without the contract leave the
@@ -456,11 +463,14 @@ through the cart's payment session history and applies the
 `checkout.stranded_payments` policy (see
 [checkout.md](checkout.md#stranded-payments)). That policy refunds and voids
 through the gateway's existing `refund()` and `voidPendingPayment()`, so no
-other method is needed. When the cart never became an order, the `Order`
-passed to them is unsaved: it carries the session's `payment_reference`,
-`payment_gateway_key`, `currency` and `total_amount`, and `$context` carries
-an `idempotency_key` (`ap-ec-stranded-{reference}`). Don't rely on its id.
-`StripeGateway` implements the contract.
+other method is needed. The `Order` passed to them is always unsaved: it
+carries the session's `payment_reference`, `payment_gateway_key`, `currency`
+and `total_amount`, and `$context` carries an `idempotency_key`
+(`ap-ec-stranded-{reference}`). Automatic releases and a staff rejection send
+exactly the same request, so honour the idempotency key and replay the first
+refund on a retry. Don't rely on the order's id. A `RefundResult` that isn't
+a success, or a void that throws, is treated as an unknown outcome and
+retried later; it never turns into a paid hold.
 
 **`NotificationTemplate` (contract change).** `defaultSubject()` and
 `defaultBody()` now take `?string $locale = null`. Return the default Twig
