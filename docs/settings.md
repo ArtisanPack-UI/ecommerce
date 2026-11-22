@@ -43,7 +43,7 @@ notification listeners are wired.
 | Group | Keys |
 |---|---|
 | `general` | `notifications.store_name`, `notifications.support_email`, `base_currency`, `currency.enabled`, `timezone` |
-| `checkout` | `checkout.reservation_ttl_minutes`, `checkout.guest_checkout` (`allowed`, `required_account`, `disabled`), `checkout.account_creation`, `cart.abandoned_after_minutes` |
+| `checkout` | `checkout.reservation_ttl_minutes`, `checkout.guest_checkout` (`allowed`, `required_account`, `disabled`), `checkout.account_creation`, `cart.abandoned_after_minutes`, `checkout.stranded_payments` (`hold`, `refund`; since 1.4.0) |
 | `tax` | `tax.provider`, `tax.prices_include_tax`, `tax.default_class`, `tax.shipping_tax_class`, `localization.tax_labels` |
 | `shipping` | `fulfillment.allocation_strategy` |
 | `payments` | `gateways.stripe.enabled`, `gateways.stripe.capture_method`, `fraud.provider`; secrets: Stripe secret key, publishable key, webhook signing secret |

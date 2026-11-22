@@ -19,6 +19,7 @@ the matching abstract contract-test suite.
 | [`RendersClientPayment`](../src/Contracts/RendersClientPayment.php) (optional, on a `PaymentGateway`) | The gateway itself | `StripeGateway` (`stripe-payment-element`) | none |
 | [`SharesWebhookEndpoint`](../src/Contracts/SharesWebhookEndpoint.php) (optional, on a `PaymentGateway`, since 1.3.0) | The gateway itself | none | Checked inside `PaymentGatewayContractTest` |
 | [`AcceptsPaymentOptions`](../src/Contracts/AcceptsPaymentOptions.php) (optional, on a `PaymentGateway`, since 1.3.0) | The gateway itself | none | Checked inside `PaymentGatewayContractTest` |
+| [`CancelsPaymentSessions`](../src/Contracts/CancelsPaymentSessions.php) (optional, on a `PaymentGateway`, since 1.4.0) | The gateway itself | `StripeGateway` | none |
 | [`FraudProvider`](../src/Contracts/FraudProvider.php) | `FraudProviderRegistry` | `AlwaysApproveFraudProvider` (`always-approve`), `StripeRadarFraudProvider` (`stripe-radar`, with Stripe); `ChainFraudProvider` (`chain`) runs a comma-separated `fraud.provider` list | `FraudProviderContractTest` |
 | [`TaxProvider`](../src/Contracts/TaxProvider.php) | `TaxProviderRegistry` (active: `tax.provider`) | `ManualTaxProvider` (`manual`) | `TaxProviderContractTest` |
 | [`ContextAwareTaxProvider`](../src/Contracts/ContextAwareTaxProvider.php) (extends `TaxProvider`) | `TaxProviderRegistry` | `ManualTaxProvider` | `TaxProviderContractTest` |
@@ -423,6 +424,43 @@ cart (a guest can't save a card, for example), and every option is refused.
 The rules only check shape. The gateway still has to check anything that
 depends on who is paying, such as whether a saved method belongs to the cart's
 customer.
+
+**`CancelsPaymentSessions`.** Optional on a gateway, since 1.4.0. When a
+cart's total changes after its payment session was made, the checkout replaces
+the session (or drops it at finalize). A checkout tab still showing the old
+session could otherwise take a payment for the old amount (#231). A gateway
+that can cancel a session the shopper hasn't confirmed implements
+`cancelPaymentSession( string $reference ): void`, and the engine cancels the
+old session first:
+
+```php
+use ArtisanPackUI\Ecommerce\Contracts\CancelsPaymentSessions;
+use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
+
+class PayPalGateway implements PaymentGateway, CancelsPaymentSessions
+{
+    public function cancelPaymentSession( string $reference ): void
+    {
+        // Void the provider order. Return normally when it is already
+        // cancelled, expired, or unknown. Throw when it is confirmed
+        // (authorized, captured, or processing) or the outcome is unknown.
+    }
+}
+```
+
+It must be idempotent, and it must never cancel or refund a confirmed session:
+the engine re-checks the session when the cancel throws, and treats a
+confirmed one as a stranded payment. Gateways without the contract leave the
+old session open; if it is confirmed later, the engine still matches it
+through the cart's payment session history and applies the
+`checkout.stranded_payments` policy (see
+[checkout.md](checkout.md#stranded-payments)). That policy refunds and voids
+through the gateway's existing `refund()` and `voidPendingPayment()`, so no
+other method is needed. When the cart never became an order, the `Order`
+passed to them is unsaved: it carries the session's `payment_reference`,
+`payment_gateway_key`, `currency` and `total_amount`, and `$context` carries
+an `idempotency_key` (`ap-ec-stranded-{reference}`). Don't rely on its id.
+`StripeGateway` implements the contract.
 
 **`NotificationTemplate` (contract change).** `defaultSubject()` and
 `defaultBody()` now take `?string $locale = null`. Return the default Twig
