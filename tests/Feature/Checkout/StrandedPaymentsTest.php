@@ -636,3 +636,159 @@ describe( 'reconcile command', function (): void {
         expect( strandedRow( $session->reference )->status )->toBe( CartPaymentSession::STATUS_HELD );
     } );
 } );
+
+/**
+ * A cart whose captured (or authorized) session was held for review after
+ * its total changed, with 10 units in stock. Returns the held order.
+ */
+function strandedHold( $test, string $status ): Order
+{
+    ArtisanPackUI\Ecommerce\Models\InventoryItem::factory()->create( [ 'stockable_type' => $test->product->getMorphClass(), 'stockable_id' => $test->product->id, 'quantity_on_hand' => 10 ] );
+
+    $cart    = readyCart( $test->product );
+    $session = $test->checkout->createPaymentSession( $cart );
+    strandedRaisePrice( $test->product );
+    $test->gateway->confirm( $session->reference, $status );
+
+    strandedExpectCode( fn () => $test->checkout->finalize( $cart, $session->reference ), 'totals-changed' );
+
+    return Order::query()->sole();
+}
+
+describe( 'resolving a hold', function (): void {
+    beforeEach( function (): void {
+        $this->service  = app( StrandedPaymentService::class );
+        $this->resolved = [];
+        $this->paid     = 0;
+
+        addAction( 'ap.ecommerce.checkout.strandedPaymentResolved', function ( Order $order, string $resolution ): void {
+            $this->resolved[] = [ $order->id, $resolution ];
+        } );
+        addAction( 'ap.ecommerce.order.paid', function (): void {
+            ++$this->paid;
+        } );
+    } );
+
+    it( 'accepts an authorized hold: captures, pins the payment, commits stock, marks paid', function (): void {
+        $order = strandedHold( $this, PaymentSession::STATUS_AUTHORIZED );
+        $item  = ArtisanPackUI\Ecommerce\Models\InventoryItem::query()->sole();
+
+        expect( $item->quantity_reserved )->toBe( 1 );
+
+        $accepted  = $this->service->acceptHold( $order, 7 );
+        $reference = $order->meta['payment_mismatch']['reference'];
+
+        expect( $this->gateway->calls )->toContain( 'capturePayment' )
+            ->and( $accepted )
+            ->payment_status->toBe( 'paid' )
+            ->system_status->toBe( 'processing' )
+            ->payment_reference->toBe( $reference )
+            ->and( $accepted->meta['payment_mismatch'] )->toMatchArray( [ 'captured' => true, 'resolution' => 'accepted' ] )
+            ->and( $accepted->meta['payment']['capture_reference'] )->toBe( 'ch_' . $reference )
+            ->and( $item->refresh() )->quantity_reserved->toBe( 0 )->quantity_on_hand->toBe( 9 )
+            ->and( OrderTimelineEntry::query()->where( 'event_type', 'payment.stranded_accepted' )->sole()->actor_user_id )->toBe( 7 )
+            ->and( strandedRow( $reference )->status )->toBe( CartPaymentSession::STATUS_COMPLETED )
+            ->and( $this->paid )->toBe( 1 )
+            ->and( $this->resolved )->toBe( [ [ $order->id, 'accepted' ] ] );
+    } );
+
+    it( 'accepts a captured hold without capturing again', function (): void {
+        $order = strandedHold( $this, PaymentSession::STATUS_SUCCEEDED );
+
+        $accepted = $this->service->acceptHold( $order );
+
+        expect( $this->gateway->calls )->not->toContain( 'capturePayment' )
+            ->and( $accepted )->payment_status->toBe( 'paid' )->system_status->toBe( 'processing' )
+            ->and( ArtisanPackUI\Ecommerce\Models\InventoryItem::query()->sole()->quantity_on_hand )->toBe( 9 )
+            ->and( $this->paid )->toBe( 1 );
+    } );
+
+    it( 'rejects a hold by voiding an authorization or refunding a capture', function ( string $status, string $released ): void {
+        $order     = strandedHold( $this, $status );
+        $reference = $order->meta['payment_mismatch']['reference'];
+
+        $rejected = $this->service->rejectHold( $order );
+
+        expect( $rejected )
+            ->payment_status->toBe( 'failed' )
+            ->system_status->toBe( 'failed' )
+            ->and( $rejected->meta['payment_mismatch'] )->toMatchArray( [ 'resolution' => 'rejected', 'released' => $released ] )
+            ->and( ArtisanPackUI\Ecommerce\Models\InventoryItem::query()->sole() )->quantity_reserved->toBe( 0 )->quantity_on_hand->toBe( 10 )
+            ->and( OrderTimelineEntry::query()->where( 'event_type', 'payment.stranded_rejected' )->sole()->payload['released'] )->toBe( $released )
+            ->and( strandedRow( $reference )->status )->toBe( $released )
+            ->and( $this->resolved )->toBe( [ [ $order->id, 'rejected' ] ] );
+
+        if ( CartPaymentSession::STATUS_REFUNDED === $released ) {
+            expect( $this->gateway->refunds )->toHaveCount( 1 )
+                ->and( $this->gateway->refunds[0] )->toMatchArray( [ 'reference' => $reference, 'amount' => 2_500 ] );
+        } else {
+            expect( $this->gateway->voids )->toBe( [ $reference ] );
+        }
+    } )->with( [
+        'authorized' => [ PaymentSession::STATUS_AUTHORIZED, CartPaymentSession::STATUS_VOIDED ],
+        'captured'   => [ PaymentSession::STATUS_SUCCEEDED, CartPaymentSession::STATUS_REFUNDED ],
+    ] );
+
+    it( 'is idempotent, and refuses the opposite resolution afterwards', function (): void {
+        $order = strandedHold( $this, PaymentSession::STATUS_AUTHORIZED );
+
+        $this->service->acceptHold( $order );
+        $again = $this->service->acceptHold( $order );
+
+        expect( $again->system_status )->toBe( 'processing' )
+            ->and( collect( $this->gateway->calls )->filter( fn ( string $call ): bool => 'capturePayment' === $call )->count() )->toBe( 1 )
+            ->and( $this->paid )->toBe( 1 )
+            ->and( $this->resolved )->toHaveCount( 1 )
+            ->and( fn () => $this->service->rejectHold( $order ) )->toThrow( ArtisanPackUI\Ecommerce\Exceptions\PaymentNotAllowedException::class );
+    } );
+
+    it( 'rejects only once', function (): void {
+        $order = strandedHold( $this, PaymentSession::STATUS_SUCCEEDED );
+
+        $this->service->rejectHold( $order );
+        $this->service->rejectHold( $order );
+
+        expect( $this->gateway->refunds )->toHaveCount( 1 )
+            ->and( $this->resolved )->toHaveCount( 1 )
+            ->and( fn () => $this->service->acceptHold( $order ) )->toThrow( ArtisanPackUI\Ecommerce\Exceptions\PaymentNotAllowedException::class );
+    } );
+
+    it( 'leaves the hold alone when the gateway refuses to release the money', function (): void {
+        $order                       = strandedHold( $this, PaymentSession::STATUS_SUCCEEDED );
+        $this->gateway->refundsFail  = true;
+
+        expect( fn () => $this->service->rejectHold( $order ) )->toThrow( ArtisanPackUI\Ecommerce\Exceptions\PaymentNotAllowedException::class )
+            ->and( $order->refresh() )->system_status->toBe( 'pending' )->payment_status->toBe( 'paid' )
+            ->and( $order->meta['payment_mismatch'] )->not->toHaveKey( 'resolution' )
+            ->and( $this->resolved )->toBe( [] );
+    } );
+
+    it( 'refuses an order that isn\'t a stranded hold', function (): void {
+        $plain = Order::factory()->create( [ 'system_status' => 'pending', 'payment_status' => 'paid', 'meta' => [ 'fraud_decision' => [ 'verdict' => 'challenge' ] ] ] );
+
+        expect( fn () => $this->service->acceptHold( $plain ) )->toThrow( ArtisanPackUI\Ecommerce\Exceptions\PaymentNotAllowedException::class )
+            ->and( fn () => $this->service->rejectHold( $plain ) )->toThrow( ArtisanPackUI\Ecommerce\Exceptions\PaymentNotAllowedException::class )
+            ->and( $this->service->isHold( $plain ) )->toBeFalse()
+            ->and( $plain->refresh()->payment_status )->toBe( 'paid' );
+    } );
+
+    it( 'refuses a hold staff already moved on', function (): void {
+        $order = strandedHold( $this, PaymentSession::STATUS_SUCCEEDED );
+        Order::query()->whereKey( $order->id )->update( [ 'system_status' => 'cancelled' ] );
+
+        expect( fn () => $this->service->acceptHold( $order ) )->toThrow( ArtisanPackUI\Ecommerce\Exceptions\PaymentNotAllowedException::class );
+    } );
+} );
+
+it( 'refuses API writes to meta.payment_mismatch', function (): void {
+    require_once dirname( __DIR__ ) . '/Api/ApiTestHelpers.php';
+
+    $order = Order::factory()->create( [ 'meta' => [ 'payment_mismatch' => [ 'reference' => 'ps_1', 'gateway' => 'fake' ] ] ] );
+    $this->actingAs( ecommerceAdmin(), 'sanctum' );
+
+    $this->patchJson( "/api/ecommerce/v1/orders/{$order->id}", [ 'meta' => [ 'payment_mismatch' => null ] ], idem() )
+        ->assertStatus( 422 );
+    $this->patchJson( "/api/ecommerce/v1/orders/{$order->id}", [ 'meta' => [ 'gift' => true ] ], idem() )->assertOk();
+
+    expect( $order->fresh()->meta['payment_mismatch'] )->toBe( [ 'reference' => 'ps_1', 'gateway' => 'fake' ] );
+} );
