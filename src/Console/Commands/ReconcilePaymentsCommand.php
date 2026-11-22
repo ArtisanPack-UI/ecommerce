@@ -15,7 +15,10 @@
  * cart replaced, sessions recorded as stranded, and a cart's current session
  * when the cart left `payment_pending` (its total changed) without becoming
  * an order. A confirmed one is settled by the `checkout.stranded_payments`
- * policy, so a stranded payment is settled even without webhooks.
+ * policy, so a stranded payment is settled even without webhooks. Its
+ * summary reports how many stranded payments it handled, and how many
+ * (across the store) are still `stranded` and need settling — an
+ * unconfirmed refund being retried, or one staff must settle by hand.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -146,6 +149,8 @@ class ReconcilePaymentsCommand extends Command
         CartPaymentSession::query()
             ->where( function ( Builder $query ): void {
                 $query->whereIn( 'status', [ CartPaymentSession::STATUS_SUPERSEDED, CartPaymentSession::STATUS_STRANDED ] )
+                    // A pruned cart's session is kept, and still asked about.
+                    ->orWhere( fn ( Builder $query ) => $query->where( 'status', CartPaymentSession::STATUS_ACTIVE )->whereNull( 'cart_id' ) )
                     ->orWhere( function ( Builder $query ): void {
                         $query->where( 'status', CartPaymentSession::STATUS_ACTIVE )
                             ->whereHas( 'cart', function ( Builder $cart ): void {
@@ -164,12 +169,13 @@ class ReconcilePaymentsCommand extends Command
             } );
 
         $this->info( sprintf(
-            'Finalized %d, released %d, left %d, errors %d. Settled %d stranded payment(s).',
+            'Finalized %d, released %d, left %d, errors %d. Handled %d stranded payment(s); %d still need settling.',
             $counts[ PaymentReconciler::FINALIZED ],
             $counts[ PaymentReconciler::FAILED ],
             $counts[ PaymentReconciler::SKIPPED ],
             $counts['errors'],
             $counts[ PaymentReconciler::STRANDED ],
+            CartPaymentSession::query()->where( 'status', CartPaymentSession::STATUS_STRANDED )->count(),
         ) );
 
         return 0 === $counts['errors'] ? self::SUCCESS : self::FAILURE;

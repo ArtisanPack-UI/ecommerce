@@ -10,6 +10,7 @@
  * session. A row records how the session ended: paid for an order, held
  * for review, refunded, voided, or cancelled.
  *
+ * Rows outlive their cart (`cart_id` becomes null when it is pruned).
  * Only provider references, amounts and statuses are stored, never card
  * data.
  *
@@ -37,11 +38,15 @@ return new class extends Migration {
     {
         Schema::create( 'ecommerce_cart_payment_sessions', function ( Blueprint $table ): void {
             $table->bigIncrements( 'id' );
-            $table->unsignedBigInteger( 'cart_id' );
+            // Null once the cart is pruned: the row is kept so a late
+            // provider confirmation can still be matched.
+            $table->unsignedBigInteger( 'cart_id' )->nullable();
             $table->string( 'gateway_key', 120 );
             $table->string( 'reference', 255 );
-            $table->bigInteger( 'amount' );
-            $table->char( 'currency', 3 );
+            // Null for a session recorded from a pre-1.4 cart reference,
+            // until the provider is asked about it.
+            $table->bigInteger( 'amount' )->nullable();
+            $table->char( 'currency', 3 )->nullable();
             // CartPaymentSession::STATUS_* (the engine's view of the session).
             $table->string( 'status', 30 )->default( 'active' );
             // The provider's last reported PaymentSession::STATUS_* value.
@@ -54,6 +59,9 @@ return new class extends Migration {
             $table->timestamp( 'superseded_at' )->nullable();
             $table->timestamp( 'stranded_at' )->nullable();
             $table->timestamp( 'resolved_at' )->nullable();
+            // Set when a refund or void was sent to the provider; an unknown
+            // outcome is retried with the same request, never held as paid.
+            $table->timestamp( 'release_attempted_at' )->nullable();
             $table->timestamps();
 
             $table->unique( [ 'gateway_key', 'reference' ], 'ecommerce_cart_payment_sessions_reference_uk' );
@@ -65,7 +73,7 @@ return new class extends Migration {
             $table->foreign( 'cart_id', 'ecommerce_cart_payment_sessions_cart_fk' )
                 ->references( 'id' )
                 ->on( 'ecommerce_carts' )
-                ->cascadeOnDelete();
+                ->nullOnDelete();
             $table->foreign( 'order_id', 'ecommerce_cart_payment_sessions_order_fk' )
                 ->references( 'id' )
                 ->on( 'ecommerce_orders' )

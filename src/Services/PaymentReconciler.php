@@ -51,6 +51,7 @@ use ArtisanPackUI\Ecommerce\Checkout\CheckoutState;
 use ArtisanPackUI\Ecommerce\Contracts\SharesWebhookEndpoint;
 use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
 use ArtisanPackUI\Ecommerce\Models\Cart;
+use ArtisanPackUI\Ecommerce\Models\CartPaymentSession;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\ValueObjects\PaymentSession;
@@ -60,6 +61,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
+use Throwable;
 
 /**
  * @package    ArtisanPack_UI
@@ -107,6 +109,16 @@ class PaymentReconciler
      * @var string
      */
     public const STRANDED = 'stranded';
+
+    /**
+     * Checkout refusals that mean the cart can never become an order as it
+     * stands, so a confirmed payment on it is stranded.
+     *
+     * @since 1.4.0
+     *
+     * @var array<int, string>
+     */
+    public const UNPLACEABLE_CODES = [ 'cart-empty', 'cart-closed', 'items-unavailable', 'variant-required' ];
 
     /**
      * @since 1.0.0
@@ -236,6 +248,16 @@ class PaymentReconciler
                 return self::STRANDED;
             }
 
+            // The cart can't become an order at all (emptied, expired, …)
+            // before finalize reaches the payment: settle it as stranded.
+            if ( in_array( $exception->errorCode, self::UNPLACEABLE_CODES, true ) && null === $this->checkout->placedOrder( $cart ) ) {
+                $row = $this->settleUnplaceable( $cart, $reference );
+
+                if ( true === $row?->wasStranded() ) {
+                    return self::STRANDED;
+                }
+            }
+
             // A finalize already in flight, …: the shopper (or the in-flight
             // request) settles it.
             Log::channel( 'ecommerce' )->info( 'A provider-confirmed payment could not be finalized from its webhook.', [
@@ -292,7 +314,7 @@ class PaymentReconciler
             return $cart;
         } );
 
-        $this->stranded()->markCanceled( $keys, $reference );
+        $this->markCanceledIfConfirmed( $keys, $reference );
 
         if ( null === $cart ) {
             return self::SKIPPED;
@@ -345,18 +367,90 @@ class PaymentReconciler
         // Load it from the provider rather than trust the webhook.
         $session = $gateway->retrievePaymentSession( $reference );
 
-        if ( ! $session->isConfirmed() || null === $row->cart ) {
+        if ( ! $session->isConfirmed() ) {
             return self::SKIPPED;
         }
 
+        // A pruned cart (null) can still be refunded or voided. handle()
+        // leaves a session an order owns (a finalize in flight) alone.
         $row = $this->stranded()->handle( $row->cart, $session, StrandedPaymentService::REASON_SUPERSEDED );
 
-        Log::channel( 'ecommerce' )->warning( 'A provider-confirmed payment was for a session its cart had replaced; it was settled as a stranded payment.', [
+        if ( ! $row->wasStranded() ) {
+            return self::SKIPPED;
+        }
+
+        Log::channel( 'ecommerce' )->warning( 'A provider-confirmed payment was for a session its cart had replaced; it was handled as a stranded payment.', [
             'cart_id' => $row->cart_id,
             'status'  => $row->status,
         ] );
 
         return self::STRANDED;
+    }
+
+    /**
+     * Settles a confirmed session on a cart that can't become an order.
+     *
+     * @since 1.4.0
+     *
+     * @param  Cart    $cart       Cart.
+     * @param  string  $reference  Session reference (the cart's current one).
+     *
+     * @return CartPaymentSession|null
+     */
+    protected function settleUnplaceable( Cart $cart, string $reference ): ?CartPaymentSession
+    {
+        $gateway = ( $this->gateways ?? app( PaymentGatewayRegistry::class ) )->find( (string) $cart->payment_gateway_key );
+
+        if ( null === $gateway ) {
+            return null;
+        }
+
+        $session = $gateway->retrievePaymentSession( $reference );
+
+        if ( ! $session->isConfirmed() ) {
+            return null;
+        }
+
+        $row = $this->stranded()->handle( $cart, $session, StrandedPaymentService::REASON_CART_UNPLACEABLE );
+
+        Log::channel( 'ecommerce' )->warning( 'A provider-confirmed payment was on a cart that can no longer become an order; it was handled as a stranded payment.', [
+            'cart_id' => $cart->id,
+            'status'  => $row->status,
+        ] );
+
+        return $row;
+    }
+
+    /**
+     * Marks the history cancelled only once the provider confirms the session
+     * is cancelled: a failure the shopper can retry (a declined card, with
+     * the session waiting for another payment method) stays open and polled.
+     *
+     * @since 1.4.0
+     *
+     * @param  array<int, string>  $keys       Gateway keys.
+     * @param  string              $reference  Session reference.
+     *
+     * @return void
+     */
+    protected function markCanceledIfConfirmed( array $keys, string $reference ): void
+    {
+        $row     = $this->stranded()->find( $keys, $reference );
+        $gateway = null === $row || $row->isResolved() ? null : ( $this->gateways ?? app( PaymentGatewayRegistry::class ) )->find( $row->gateway_key );
+
+        if ( null === $gateway ) {
+            return;
+        }
+
+        try {
+            $session = $gateway->retrievePaymentSession( $reference );
+        } catch ( Throwable ) {
+            return;
+        }
+
+        if ( $session->isCanceled() ) {
+            $this->stranded()->markCanceled( [ $row->gateway_key ], $reference );
+        }
     }
 
     /**

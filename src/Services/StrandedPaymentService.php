@@ -18,18 +18,22 @@
  *   `payment.stranded` timeline entry is written. When the cart already
  *   became an order, the entry is written on that order instead.
  * - `refund` — a captured session is refunded and an authorized one voided
- *   through the gateway's own `refund()` / `voidPendingPayment()`. When the
- *   gateway can't (no refund support, or the provider refuses), the session
- *   is held instead.
+ *   through the gateway's own `refund()` / `voidPendingPayment()`. When
+ *   nothing can be sent (no gateway, or no refund support) the session is
+ *   held instead. When a refund or void was sent but not confirmed, it stays
+ *   `stranded` and the same request is retried later; it is never held as
+ *   paid.
  *
  * Each session is settled at most once: the work runs under the cart's and
  * the session row's locks, and a settled row is left alone, so the
  * storefront's finalize and a provider webhook can race safely. Refunds and
- * voids use an idempotency key per session.
+ * voids use an idempotency key per session and always the same request. A
+ * session an order owns (a finalize in flight, or its paid order) is never
+ * settled here.
  *
  * `ap.ecommerce.checkout.paymentStranded( Cart $cart, PaymentSession
- * $session, string $reason )` fires once per session, the first time it is
- * found stranded (after the policy ran, when it could run).
+ * $session, string $reason )` fires once per session, on first detection,
+ * and not again when it is settled later.
  *
  * Staff resolve a hold with {@see self::acceptHold()} (capture if needed,
  * mark paid, commit stock, move to `processing`) or {@see self::rejectHold()}
@@ -133,6 +137,16 @@ class StrandedPaymentService
     public const REASON_REPLACEMENT_REFUSED = 'replacement_refused';
 
     /**
+     * Stranded because the cart can no longer become an order (emptied,
+     * expired, or its items became unsellable) after the shopper paid.
+     *
+     * @since 1.4.0
+     *
+     * @var string
+     */
+    public const REASON_CART_UNPLACEABLE = 'cart_unplaceable';
+
+    /**
      * {@see self::acceptHold()}: staff accepted a held payment.
      *
      * @since 1.4.0
@@ -158,6 +172,33 @@ class StrandedPaymentService
      * @var string
      */
     public const MISMATCH_META_KEY = 'payment_mismatch';
+
+    /**
+     * {@see self::release()}: the money was refunded or voided.
+     *
+     * @since 1.4.0
+     *
+     * @var string
+     */
+    protected const RELEASED = 'released';
+
+    /**
+     * {@see self::release()}: nothing was sent (no gateway, or no refunds).
+     *
+     * @since 1.4.0
+     *
+     * @var string
+     */
+    protected const RELEASE_UNAVAILABLE = 'unavailable';
+
+    /**
+     * {@see self::release()}: a refund or void was sent but not confirmed.
+     *
+     * @since 1.4.0
+     *
+     * @var string
+     */
+    protected const RELEASE_UNKNOWN = 'unknown';
 
     /**
      * @since 1.4.0
@@ -301,8 +342,10 @@ class StrandedPaymentService
     }
 
     /**
-     * Marks open sessions for the reference cancelled (the provider reported
-     * them cancelled or failed).
+     * Marks open sessions for the reference — stranded ones included —
+     * cancelled. Call it only once the provider confirms the session is
+     * cancelled; settled rows (held, refunded, voided, completed) are left
+     * alone.
      *
      * @since 1.4.0
      *
@@ -315,7 +358,7 @@ class StrandedPaymentService
     {
         CartPaymentSession::query()
             ->forReference( $gatewayKeys, $reference )
-            ->whereIn( 'status', [ CartPaymentSession::STATUS_ACTIVE, CartPaymentSession::STATUS_SUPERSEDED ] )
+            ->whereIn( 'status', CartPaymentSession::OPEN_STATUSES )
             ->update( [
                 'status'          => CartPaymentSession::STATUS_CANCELED,
                 'provider_status' => PaymentSession::STATUS_CANCELED,
@@ -394,11 +437,12 @@ class StrandedPaymentService
                 return [ $row, false ];
             }
 
+            $this->fillFromSession( $row, $session );
+
             $row->forceFill( [
-                'status'          => CartPaymentSession::STATUS_STRANDED,
-                'provider_status' => $session->status,
-                'reason'          => $reason,
-                'stranded_at'     => Carbon::now(),
+                'status'      => CartPaymentSession::STATUS_STRANDED,
+                'reason'      => $reason,
+                'stranded_at' => Carbon::now(),
             ] )->save();
 
             return [ $row, true ];
@@ -416,55 +460,87 @@ class StrandedPaymentService
      * at most once. A session that isn't settled at the provider yet
      * (`processing`) is only flagged ({@see self::flag()}).
      *
+     * Money safety, checked under the cart's and the row's locks:
+     *
+     * - a session an order owns (its `payment_gateway_key` and
+     *   `payment_reference`) is never settled here: a paid order marks the
+     *   row `completed`, and a pending or `processing` one (a finalize in
+     *   flight) defers it;
+     * - a refund or void whose outcome is unknown leaves the row `stranded`
+     *   with `release_attempted_at` set. It is never held as paid: the next
+     *   pass (webhook, finalize or `ecommerce:reconcile-payments`) repeats
+     *   the same request, whatever the policy is by then;
+     * - a hold is only the fallback when nothing was sent to the provider
+     *   (no gateway, or no refund support).
+     *
+     * `$cart` is null for a session whose cart was pruned: such a session
+     * can be refunded or voided, but not held, and fires no hook.
+     *
      * @since 1.4.0
      *
-     * @param  Cart            $cart     The cart the session was made for.
+     * @param  Cart|null       $cart     The cart the session was made for (null once pruned).
      * @param  PaymentSession  $session  The confirmed session, freshly retrieved.
      * @param  string          $reason   `self::REASON_*`.
      *
      * @return CartPaymentSession The session's history row, as it ended.
      */
-    public function handle( Cart $cart, PaymentSession $session, string $reason ): CartPaymentSession
+    public function handle( ?Cart $cart, PaymentSession $session, string $reason ): CartPaymentSession
     {
-        if ( ! in_array( $session->status, [ PaymentSession::STATUS_AUTHORIZED, PaymentSession::STATUS_SUCCEEDED ], true ) ) {
+        if ( null !== $cart && ! in_array( $session->status, [ PaymentSession::STATUS_AUTHORIZED, PaymentSession::STATUS_SUCCEEDED ], true ) ) {
             return $this->flag( $cart, $session, $reason );
         }
 
         [ $row, $first ] = DB::transaction( function () use ( $cart, $session, $reason ): array {
             // The cart first, then the session row: the order every other
             // writer of both takes them in.
-            Cart::query()->lockForUpdate()->find( $cart->getKey() );
+            if ( null !== $cart ) {
+                Cart::query()->lockForUpdate()->find( $cart->getKey() );
+            }
 
             $row = $this->lockedRow( $cart, $session );
 
-            if ( $row->isResolved() ) {
+            if ( $row->isResolved() || $this->ownedByOrder( $row, $session ) ) {
                 return [ $row, false ];
             }
 
             $first = ! $row->wasStranded();
 
+            $this->fillFromSession( $row, $session );
+
             $row->forceFill( [
-                'provider_status' => $session->status,
-                'reason'          => $row->reason ?? $reason,
-                'stranded_at'     => $row->stranded_at ?? Carbon::now(),
+                'reason'      => $row->reason ?? $reason,
+                'stranded_at' => $row->stranded_at ?? Carbon::now(),
             ] );
 
-            $settled = self::POLICY_REFUND === $this->policy() && $this->release( $cart, $row, $session );
+            if ( ! in_array( $session->status, [ PaymentSession::STATUS_AUTHORIZED, PaymentSession::STATUS_SUCCEEDED ], true ) ) {
+                $row->status = CartPaymentSession::STATUS_STRANDED;
+                $row->save();
 
-            if ( ! $settled ) {
+                return [ $row, false ];
+            }
+
+            $attempted = null !== $row->release_attempted_at;
+            $outcome   = $attempted || self::POLICY_REFUND === $this->policy() ? $this->release( $cart, $row, $session ) : self::RELEASE_UNAVAILABLE;
+            $settled   = self::RELEASED === $outcome;
+
+            // Only when nothing reached the provider: an unknown refund or
+            // void must never become a paid hold.
+            if ( ! $settled && ! $attempted && self::RELEASE_UNKNOWN !== $outcome && null !== $cart ) {
                 $settled = $this->hold( $cart, $row, $session, $reason );
             }
 
             if ( ! $settled ) {
                 $row->status = CartPaymentSession::STATUS_STRANDED;
 
-                Log::channel( 'ecommerce' )->critical( 'A confirmed payment could not be held or refunded; settle it manually.', [
-                    'cart_id'   => $cart->getKey(),
-                    'gateway'   => $session->gatewayKey,
-                    'reference' => $session->reference,
-                    'amount'    => (int) $session->amount->getAmount(),
-                    'currency'  => $session->amount->getCurrency()->getCode(),
-                ] );
+                Log::channel( 'ecommerce' )->critical( self::RELEASE_UNKNOWN === $outcome
+                    ? 'A stranded payment\'s refund or void was not confirmed; it will be retried with the same request.'
+                    : 'A confirmed payment could not be held or refunded; settle it manually.', [
+                        'cart_id'   => $cart?->getKey(),
+                        'gateway'   => $session->gatewayKey,
+                        'reference' => $session->reference,
+                        'amount'    => (int) $session->amount->getAmount(),
+                        'currency'  => $session->amount->getCurrency()->getCode(),
+                    ] );
             }
 
             $row->save();
@@ -472,7 +548,7 @@ class StrandedPaymentService
             return [ $row, $first ];
         } );
 
-        if ( $first ) {
+        if ( $first && null !== $cart ) {
             $this->announce( $cart, $session, $reason );
         }
 
@@ -639,14 +715,16 @@ class StrandedPaymentService
 
             try {
                 if ( $session->isCaptured() ) {
-                    $refund = $gateway->refund( $this->pinned( $locked, $session ), $session->amount, null, [ 'idempotency_key' => 'ap-ec-stranded-' . $session->reference ] );
+                    // The same request an automatic stranded refund sends, so
+                    // the provider replays it rather than refusing a key reuse.
+                    $refund = $gateway->refund( $this->releaseOrder( $session ), $session->amount, null, [ 'idempotency_key' => 'ap-ec-stranded-' . $session->reference ] );
 
                     if ( $refund->success ) {
                         $released  = CartPaymentSession::STATUS_REFUNDED;
                         $reference = $refund->gatewayReference;
                     }
                 } elseif ( ! $session->isCanceled() ) {
-                    $gateway->voidPendingPayment( $this->pinned( $locked, $session ) );
+                    $gateway->voidPendingPayment( $this->releaseOrder( $session ) );
 
                     $released = CartPaymentSession::STATUS_VOIDED;
                 } else {
@@ -810,73 +888,124 @@ class StrandedPaymentService
 
     /**
      * Refunds a captured session, or voids an authorized one, through its
-     * gateway. On success the row is `refunded` / `voided` and a cart still
-     * pointing at the session is stepped back to payment selection.
+     * gateway, with the idempotency key `ap-ec-stranded-{reference}` and the
+     * same request every time ({@see self::releaseOrder()}). On success the
+     * row is `refunded` / `voided` and a cart still pointing at this very
+     * session (same gateway and reference) steps back to payment selection.
      *
      * @since 1.4.0
      *
-     * @param  Cart                $cart     Cart (locked).
+     * @param  Cart|null           $cart     Cart (locked), or null once pruned.
      * @param  CartPaymentSession  $row      Locked history row.
      * @param  PaymentSession      $session  Session.
      *
-     * @return bool Whether the money was released.
+     * @return string `self::RELEASED`, `self::RELEASE_UNAVAILABLE` (nothing sent) or `self::RELEASE_UNKNOWN` (sent, not confirmed).
      */
-    protected function release( Cart $cart, CartPaymentSession $row, PaymentSession $session ): bool
+    protected function release( ?Cart $cart, CartPaymentSession $row, PaymentSession $session ): string
     {
         $gateway = $this->gateways->find( $row->gateway_key );
 
-        if ( null === $gateway ) {
-            return false;
+        if ( null === $gateway || ( $session->isCaptured() && ! $gateway->supportsRefunds() ) ) {
+            return self::RELEASE_UNAVAILABLE;
         }
 
-        $order = $this->orderFor( $cart, $session );
+        $row->release_attempted_at ??= Carbon::now();
 
         try {
             if ( $session->isCaptured() ) {
-                if ( ! $gateway->supportsRefunds() ) {
-                    return false;
-                }
-
-                $refund = $gateway->refund( $order, $session->amount, null, [ 'idempotency_key' => 'ap-ec-stranded-' . $session->reference ] );
+                $refund = $gateway->refund( $this->releaseOrder( $session ), $session->amount, null, [ 'idempotency_key' => 'ap-ec-stranded-' . $session->reference ] );
 
                 if ( ! $refund->success ) {
-                    Log::channel( 'ecommerce' )->warning( 'The gateway refused to refund a stranded payment; holding it for review instead.', [
-                        'cart_id'   => $cart->getKey(),
+                    Log::channel( 'ecommerce' )->warning( 'The gateway did not confirm a stranded payment\'s refund; it stays stranded and is retried.', [
+                        'cart_id'   => $cart?->getKey(),
                         'gateway'   => $gateway->key(),
                         'reference' => $session->reference,
                         'code'      => $refund->errorCode,
                     ] );
 
-                    return false;
+                    return self::RELEASE_UNKNOWN;
                 }
 
                 $row->status               = CartPaymentSession::STATUS_REFUNDED;
                 $row->resolution_reference = $refund->gatewayReference;
             } else {
-                $gateway->voidPendingPayment( $order );
+                $gateway->voidPendingPayment( $this->releaseOrder( $session ) );
 
                 $row->status = CartPaymentSession::STATUS_VOIDED;
             }
         } catch ( Throwable $exception ) {
-            Log::channel( 'ecommerce' )->warning( 'A stranded payment could not be refunded or voided; holding it for review instead.', [
-                'cart_id'   => $cart->getKey(),
+            Log::channel( 'ecommerce' )->warning( 'A stranded payment\'s refund or void failed; it stays stranded and is retried.', [
+                'cart_id'   => $cart?->getKey(),
                 'gateway'   => $gateway->key(),
                 'reference' => $session->reference,
                 'error'     => $exception->getMessage(),
             ] );
 
-            return false;
+            return self::RELEASE_UNKNOWN;
         }
 
         $row->resolved_at = Carbon::now();
 
-        Cart::query()
-            ->whereKey( $cart->getKey() )
-            ->whereNull( 'completed_order_id' )
+        if ( null !== $cart ) {
+            Cart::query()
+                ->whereKey( $cart->getKey() )
+                ->whereNull( 'completed_order_id' )
+                ->where( 'payment_gateway_key', $session->gatewayKey )
+                ->where( 'payment_reference', $session->reference )
+                ->update( [ 'payment_reference' => null, 'checkout_state' => CheckoutState::PAYMENT_SELECTION ] );
+        }
+
+        return self::RELEASED;
+    }
+
+    /**
+     * Whether an order owns the session (it is that order's payment): a paid
+     * one marks the row `completed`; a pending or `processing` one (a
+     * finalize in flight) defers it. Failed or voided orders don't own it.
+     *
+     * @since 1.4.0
+     *
+     * @param  CartPaymentSession  $row      Locked history row.
+     * @param  PaymentSession      $session  Session.
+     *
+     * @return bool
+     */
+    protected function ownedByOrder( CartPaymentSession $row, PaymentSession $session ): bool
+    {
+        $owner = Order::query()
+            ->where( 'payment_gateway_key', $session->gatewayKey )
             ->where( 'payment_reference', $session->reference )
-            ->update( [ 'payment_reference' => null, 'checkout_state' => CheckoutState::PAYMENT_SELECTION ] );
+            ->whereIn( 'payment_status', [ 'pending', PaymentOrchestrator::STATUS_PROCESSING, 'paid', 'partially_refunded', 'refunded' ] )
+            ->orderByDesc( 'id' )
+            ->first();
+
+        if ( null === $owner ) {
+            return false;
+        }
+
+        if ( in_array( (string) $owner->payment_status, [ 'paid', 'partially_refunded', 'refunded' ], true ) ) {
+            $row->forceFill( [ 'status' => CartPaymentSession::STATUS_COMPLETED, 'order_id' => $owner->id, 'resolved_at' => Carbon::now() ] )->save();
+        }
 
         return true;
+    }
+
+    /**
+     * Copies the provider's amount, currency and status onto the row (a row
+     * recorded from a pre-1.4 reference has no amount yet).
+     *
+     * @since 1.4.0
+     *
+     * @param  CartPaymentSession  $row      Row.
+     * @param  PaymentSession      $session  Session.
+     *
+     * @return void
+     */
+    protected function fillFromSession( CartPaymentSession $row, PaymentSession $session ): void
+    {
+        $row->provider_status = $session->status;
+        $row->amount ??= (int) $session->amount->getAmount();
+        $row->currency ??= strtoupper( $session->amount->getCurrency()->getCode() );
     }
 
     /**
@@ -989,38 +1118,28 @@ class StrandedPaymentService
     }
 
     /**
-     * The order to hand the gateway for a refund or void: the cart's order
-     * (with the session pinned), or an unsaved one carrying the session's
-     * reference, gateway and amount when the cart has none.
+     * The order handed to the gateway to refund or void a stranded session:
+     * always an unsaved one carrying only the session's reference, gateway,
+     * currency and amount. Automatic releases and {@see self::rejectHold()}
+     * send exactly the same request with the same idempotency key, so a
+     * retry after a lost response replays the first refund instead of being
+     * refused as a changed request.
      *
      * @since 1.4.0
      *
-     * @param  Cart            $cart     Cart.
      * @param  PaymentSession  $session  Session.
      *
      * @return Order
      */
-    protected function orderFor( Cart $cart, PaymentSession $session ): Order
+    protected function releaseOrder( PaymentSession $session ): Order
     {
-        $order = $this->convertedOrder( $cart );
-        $order = null === $order ? new Order() : clone $order;
-
-        $order->forceFill( [
+        return ( new Order() )->forceFill( [
             'payment_gateway_key' => $session->gatewayKey,
             'payment_reference'   => $session->reference,
             'currency'            => $session->amount->getCurrency()->getCode(),
+            'total_amount'        => (int) $session->amount->getAmount(),
+            'total_currency'      => $session->amount->getCurrency()->getCode(),
         ] );
-
-        if ( ! $order->exists ) {
-            $order->forceFill( [
-                'email'          => $cart->email,
-                'customer_id'    => $cart->customer_id,
-                'total_amount'   => (int) $session->amount->getAmount(),
-                'total_currency' => $session->amount->getCurrency()->getCode(),
-            ] );
-        }
-
-        return $order;
     }
 
     /**
@@ -1044,18 +1163,18 @@ class StrandedPaymentService
      *
      * @since 1.4.0
      *
-     * @param  Cart            $cart     Cart.
+     * @param  Cart|null       $cart     Cart (null for a pruned cart's existing row).
      * @param  PaymentSession  $session  Session.
      *
      * @return CartPaymentSession
      */
-    protected function row( Cart $cart, PaymentSession $session ): CartPaymentSession
+    protected function row( ?Cart $cart, PaymentSession $session ): CartPaymentSession
     {
         /** @var CartPaymentSession */
         return CartPaymentSession::query()->createOrFirst(
             [ 'gateway_key' => $session->gatewayKey, 'reference' => $session->reference ],
             [
-                'cart_id'         => $cart->getKey(),
+                'cart_id'         => $cart?->getKey(),
                 'amount'          => (int) $session->amount->getAmount(),
                 'currency'        => strtoupper( $session->amount->getCurrency()->getCode() ),
                 'status'          => CartPaymentSession::STATUS_ACTIVE,
@@ -1069,12 +1188,12 @@ class StrandedPaymentService
      *
      * @since 1.4.0
      *
-     * @param  Cart            $cart     Cart.
+     * @param  Cart|null       $cart     Cart (null for a pruned cart's existing row).
      * @param  PaymentSession  $session  Session.
      *
      * @return CartPaymentSession
      */
-    protected function lockedRow( Cart $cart, PaymentSession $session ): CartPaymentSession
+    protected function lockedRow( ?Cart $cart, PaymentSession $session ): CartPaymentSession
     {
         $id = $this->row( $cart, $session )->getKey();
 

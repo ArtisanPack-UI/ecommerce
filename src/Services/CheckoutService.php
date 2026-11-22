@@ -479,8 +479,10 @@ class CheckoutService
                 if ( null !== $confirmed ) {
                     return [ null, $gateway, false, $confirmed ];
                 }
-            } else {
-                $this->stranded()->supersede( $locked, $locked->payment_gateway_key, $locked->payment_reference );
+            } elseif ( '' !== (string) ( $locked->payment_reference ?? '' ) ) {
+                // The provider can't tell us how the current session stands:
+                // it may already be paid, so it isn't replaced.
+                throw new CheckoutException( 'payment_reference', 'payment-status-unknown', __( 'We couldn\'t check the status of your current payment. Try again in a moment.' ), 503 );
             }
 
             $this->advance( $locked, CheckoutState::PAYMENT_PENDING );
@@ -564,12 +566,18 @@ class CheckoutService
         $this->assertReadyToPay( $cart );
 
         if ( (int) $cart->total_amount <= 0 ) {
-            return $this->finalizeFree( $cart, $context );
+            $placed = $this->settleSessionBeforeFreeOrder( $cart );
+
+            return null === $placed ? $this->finalizeFree( $cart, $context ) : new CheckoutResult( $placed );
         }
 
         $reference = (string) ( $cart->payment_reference ?? '' );
 
         if ( '' === $reference ) {
+            if ( null !== $paymentReference ) {
+                $this->settleSupersededSession( $cart, $paymentReference );
+            }
+
             throw new CheckoutException( 'payment_reference', 'payment-session-required', __( 'Set up the payment before placing the order.' ) );
         }
 
@@ -686,12 +694,12 @@ class CheckoutService
             }
         }
 
+        // Every replaced session, newest first: none is skipped for good.
         $superseded = CartPaymentSession::query()
             ->where( 'cart_id', $cart->getKey() )
             ->where( 'status', CartPaymentSession::STATUS_SUPERSEDED )
             ->orderByDesc( 'id' )
-            ->limit( 5 )
-            ->get();
+            ->cursor();
 
         foreach ( $superseded as $row ) {
             $gateway = $this->gateways->find( $row->gateway_key );
@@ -1177,6 +1185,43 @@ class CheckoutService
         }
 
         $this->resetPayment( $cart );
+    }
+
+    /**
+     * Before a zero-total cart is placed for free, deals with a payment
+     * session it still holds (a discount brought the total to zero after the
+     * shopper paid): a confirmed one is settled as a stranded payment, an
+     * unconfirmed one is retired. Returns the order the cart became when the
+     * `hold` policy placed it.
+     *
+     * @since 1.4.0
+     *
+     * @param  Cart  $cart  Cart.
+     *
+     * @throws CheckoutException When the provider can't say how the session stands (`payment-status-unknown`, 503).
+     *
+     * @return Order|null
+     */
+    protected function settleSessionBeforeFreeOrder( Cart $cart ): ?Order
+    {
+        $reference = (string) ( $cart->payment_reference ?? '' );
+        $gateway   = null === $cart->payment_gateway_key ? null : $this->gateways->find( (string) $cart->payment_gateway_key );
+
+        if ( '' === $reference || null === $gateway ) {
+            return null;
+        }
+
+        $session = $this->retrieveQuietly( $gateway, $reference );
+
+        if ( null === $session ) {
+            throw new CheckoutException( 'payment_reference', 'payment-status-unknown', __( 'We couldn\'t check the status of your current payment. Try again in a moment.' ), 503 );
+        }
+
+        $this->dropChangedSession( $cart, $gateway, $session, StrandedPaymentService::REASON_TOTALS_CHANGED );
+
+        $cart->refresh();
+
+        return $this->placedOrder( $cart );
     }
 
     /**

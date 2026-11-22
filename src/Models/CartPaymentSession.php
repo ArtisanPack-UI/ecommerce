@@ -41,11 +41,11 @@ use Money\Money;
  * @since      1.4.0
  *
  * @property int          $id
- * @property int          $cart_id
+ * @property int|null     $cart_id
  * @property string       $gateway_key
  * @property string       $reference
- * @property int          $amount
- * @property string       $currency
+ * @property int|null     $amount
+ * @property string|null  $currency
  * @property string       $status
  * @property string|null  $provider_status
  * @property string|null  $reason
@@ -54,9 +54,10 @@ use Money\Money;
  * @property Carbon|null  $superseded_at
  * @property Carbon|null  $stranded_at
  * @property Carbon|null  $resolved_at
+ * @property Carbon|null  $release_attempted_at
  * @property Carbon|null  $created_at
  * @property Carbon|null  $updated_at
- * @property Cart         $cart
+ * @property Cart|null    $cart
  * @property Order|null   $order
  */
 class CartPaymentSession extends Model
@@ -191,6 +192,7 @@ class CartPaymentSession extends Model
         'superseded_at',
         'stranded_at',
         'resolved_at',
+        'release_attempted_at',
     ];
 
     /**
@@ -216,7 +218,9 @@ class CartPaymentSession extends Model
     /**
      * Marks the cart's still-active session `$reference` superseded, so it is
      * kept for matching after the cart moves on to another session, gateway
-     * or currency. Does nothing for a blank reference.
+     * or currency. A reference with no row (a cart from before 1.4.0) is
+     * recorded first, with an unknown amount. Does nothing for a blank
+     * reference.
      *
      * @since 1.4.0
      *
@@ -231,6 +235,13 @@ class CartPaymentSession extends Model
         if ( null === $gatewayKey || null === $reference || '' === $gatewayKey || '' === $reference ) {
             return;
         }
+
+        // A reference a cart got before 1.4.0 has no row yet: record it
+        // (amount unknown) before the cart lets go of it.
+        static::query()->createOrFirst(
+            [ 'gateway_key' => $gatewayKey, 'reference' => $reference ],
+            [ 'cart_id' => $cartId, 'status' => self::STATUS_ACTIVE ],
+        );
 
         static::query()
             ->where( 'cart_id', $cartId )
@@ -277,7 +288,7 @@ class CartPaymentSession extends Model
         return new PaymentSession(
             gatewayKey: $this->gateway_key,
             reference: $this->reference,
-            amount: new Money( (int) $this->amount, new Currency( strtoupper( $this->currency ) ) ),
+            amount: new Money( (int) ( $this->amount ?? 0 ), new Currency( strtoupper( $this->currency ?? 'XXX' ) ) ),
             status: $this->provider_status,
         );
     }
@@ -320,12 +331,13 @@ class CartPaymentSession extends Model
     protected function casts(): array
     {
         return [
-            'cart_id'       => 'integer',
-            'amount'        => 'integer',
-            'order_id'      => 'integer',
-            'superseded_at' => 'datetime',
-            'stranded_at'   => 'datetime',
-            'resolved_at'   => 'datetime',
+            'cart_id'              => 'integer',
+            'amount'               => 'integer',
+            'order_id'             => 'integer',
+            'superseded_at'        => 'datetime',
+            'stranded_at'          => 'datetime',
+            'resolved_at'          => 'datetime',
+            'release_attempted_at' => 'datetime',
         ];
     }
 
