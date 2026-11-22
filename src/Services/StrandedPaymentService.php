@@ -31,6 +31,13 @@
  * $session, string $reason )` fires once per session, the first time it is
  * found stranded (after the policy ran, when it could run).
  *
+ * Staff resolve a hold with {@see self::acceptHold()} (capture if needed,
+ * mark paid, commit stock, move to `processing`) or {@see self::rejectHold()}
+ * (void or refund, release stock, move to `failed`), the in-process
+ * equivalents of the fraud review's `accept_challenge`. Both fire
+ * `ap.ecommerce.checkout.strandedPaymentResolved( Order $order, string
+ * $resolution )`.
+ *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
  *
@@ -46,15 +53,19 @@ namespace ArtisanPackUI\Ecommerce\Services;
 use ArtisanPackUI\Ecommerce\Checkout\CheckoutState;
 use ArtisanPackUI\Ecommerce\Contracts\CancelsPaymentSessions;
 use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
+use ArtisanPackUI\Ecommerce\Events\PaymentSucceeded;
+use ArtisanPackUI\Ecommerce\Exceptions\PaymentNotAllowedException;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartPaymentSession;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderTimelineEntry;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\Support\AfterCommit;
+use ArtisanPackUI\Ecommerce\ValueObjects\PaymentResult;
 use ArtisanPackUI\Ecommerce\ValueObjects\PaymentSession;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -122,6 +133,24 @@ class StrandedPaymentService
     public const REASON_REPLACEMENT_REFUSED = 'replacement_refused';
 
     /**
+     * {@see self::acceptHold()}: staff accepted a held payment.
+     *
+     * @since 1.4.0
+     *
+     * @var string
+     */
+    public const RESOLUTION_ACCEPTED = 'accepted';
+
+    /**
+     * {@see self::rejectHold()}: staff rejected a held payment.
+     *
+     * @since 1.4.0
+     *
+     * @var string
+     */
+    public const RESOLUTION_REJECTED = 'rejected';
+
+    /**
      * Order meta key holding a held payment's details.
      *
      * @since 1.4.0
@@ -135,10 +164,14 @@ class StrandedPaymentService
      *
      * @param  OrderPlacementService   $placement  Cart → order, for a hold.
      * @param  PaymentGatewayRegistry  $gateways   Gateways.
+     * @param  InventoryService        $inventory  Commits or releases a held order's stock.
+     * @param  OrderStatusMachine      $statuses   Moves a resolved hold on.
      */
     public function __construct(
         protected OrderPlacementService $placement,
         protected PaymentGatewayRegistry $gateways,
+        protected InventoryService $inventory,
+        protected OrderStatusMachine $statuses,
     ) {
     }
 
@@ -444,6 +477,335 @@ class StrandedPaymentService
         }
 
         return $row;
+    }
+
+    /**
+     * Whether `$order` is an order placed to hold a stranded payment
+     * (`meta.payment_mismatch`), resolved or not.
+     *
+     * @since 1.4.0
+     *
+     * @param  Order  $order  Order.
+     *
+     * @return bool
+     */
+    public function isHold( Order $order ): bool
+    {
+        $mismatch = ( (array) ( $order->meta ?? [] ) )[ self::MISMATCH_META_KEY ] ?? null;
+
+        return is_array( $mismatch ) && '' !== (string) ( $mismatch['reference'] ?? '' ) && '' !== (string) ( $mismatch['gateway'] ?? '' );
+    }
+
+    /**
+     * Staff accept a held stranded payment, as `accept_challenge` accepts a
+     * payment held for fraud review: an authorized session is captured
+     * through its gateway, the order is marked paid with the session pinned
+     * as its payment, its stock reservations are committed, it moves to
+     * `processing`, and a `payment.stranded_accepted` timeline entry is
+     * written. `ap.ecommerce.payment.succeeded`, `ap.ecommerce.order.paid`
+     * and {@see PaymentSucceeded} fire as for a normal capture, then
+     * `ap.ecommerce.checkout.strandedPaymentResolved( $order, 'accepted' )`.
+     *
+     * Runs under the order's row lock. Calling it again on an accepted hold
+     * returns the order unchanged.
+     *
+     * @since 1.4.0
+     *
+     * @param  Order     $order        A stranded-payment hold.
+     * @param  int|null  $actorUserId  Staff user, for the timeline.
+     *
+     * @throws PaymentNotAllowedException When the order isn't an unresolved hold, the gateway is gone, or the capture fails (nothing changes).
+     *
+     * @return Order
+     */
+    public function acceptHold( Order $order, ?int $actorUserId = null ): Order
+    {
+        [ $order, $result, $changed ] = DB::transaction( function () use ( $order, $actorUserId ): array {
+            $locked   = Order::query()->lockForUpdate()->findOrFail( $order->id );
+            $mismatch = $this->unresolvedHold( $locked, self::RESOLUTION_ACCEPTED );
+
+            if ( null === $mismatch ) {
+                return [ $locked, null, false ];
+            }
+
+            [ $gateway, $session ] = $this->heldSession( $locked, $mismatch );
+
+            if ( $session->isCaptured() ) {
+                $recorded = ( (array) ( ( (array) ( $locked->meta ?? [] ) )['payment'] ?? [] ) )['capture_reference'] ?? null;
+                $result   = PaymentResult::success( $session->amount, (string) ( $recorded ?? $session->metadata['charge'] ?? $session->reference ) );
+            } elseif ( PaymentSession::STATUS_AUTHORIZED === $session->status ) {
+                $result = $gateway->capturePayment( $this->pinned( $locked, $session ), $session );
+
+                if ( ! $result->success ) {
+                    throw new PaymentNotAllowedException( __( 'The held payment for order :order could not be captured: :reason', [
+                        'order'  => $locked->order_number,
+                        'reason' => (string) ( $result->errorMessage ?? $result->errorCode ?? '' ),
+                    ] ), [ 'order_id' => $locked->id ] );
+                }
+            } else {
+                throw new PaymentNotAllowedException( __( 'The held payment for order :order is :status at the provider and can\'t be accepted.', [
+                    'order'  => $locked->order_number,
+                    'status' => (string) $session->status,
+                ] ), [ 'order_id' => $locked->id ] );
+            }
+
+            $meta    = (array) ( $locked->meta ?? [] );
+            $payment = (array) ( $meta['payment'] ?? [] );
+
+            $payment['capture_reference'] = $payment['capture_reference'] ?? $result->gatewayReference;
+            $payment['captured_at']       = $payment['captured_at'] ?? Carbon::now()->toIso8601String();
+            $meta['payment']              = $payment;
+
+            $mismatch['captured']            = true;
+            $mismatch['resolution']          = self::RESOLUTION_ACCEPTED;
+            $mismatch['resolved_at']         = Carbon::now()->toIso8601String();
+            $meta[ self::MISMATCH_META_KEY ] = $mismatch;
+
+            $locked->forceFill( [
+                'payment_status'      => 'paid',
+                'payment_gateway_key' => $session->gatewayKey,
+                'payment_reference'   => $session->reference,
+                'meta'                => $meta,
+            ] )->save();
+
+            OrderTimelineEntry::query()->create( [
+                'order_id'      => $locked->id,
+                'actor_user_id' => $actorUserId,
+                'event_type'    => 'payment.stranded_accepted',
+                'payload'       => [
+                    'gateway'           => $session->gatewayKey,
+                    'reference'         => $session->reference,
+                    'amount'            => (string) $result->amount->getAmount(),
+                    'currency'          => $result->amount->getCurrency()->getCode(),
+                    'gateway_reference' => $result->gatewayReference,
+                ],
+            ] );
+
+            $this->inventory->commitFor( $locked );
+            $this->statuses->transition( $locked, 'processing', $actorUserId, 'payment.stranded_accepted' );
+
+            $this->resolveRow( $session, CartPaymentSession::STATUS_COMPLETED );
+
+            return [ $locked->fresh() ?? $locked, $result, true ];
+        } );
+
+        if ( $changed && $result instanceof PaymentResult ) {
+            AfterCommit::action( 'ap.ecommerce.payment.succeeded', $result, $order );
+            AfterCommit::action( 'ap.ecommerce.order.paid', $order, $result );
+            AfterCommit::run( PaymentSucceeded::class, static fn () => Event::dispatch( new PaymentSucceeded( $order, $result ) ) );
+            AfterCommit::action( 'ap.ecommerce.checkout.strandedPaymentResolved', $order, self::RESOLUTION_ACCEPTED );
+        }
+
+        return $order;
+    }
+
+    /**
+     * Staff reject a held stranded payment, as a fraud `block` does: the
+     * session is voided when it's only authorized, or refunded (in full,
+     * idempotency key `ap-ec-stranded-{reference}`) when it was captured;
+     * then the order's `payment_status` becomes `failed`, its stock
+     * reservations are released, it moves to `failed`, and a
+     * `payment.stranded_rejected` timeline entry is written.
+     * `ap.ecommerce.checkout.strandedPaymentResolved( $order, 'rejected' )`
+     * fires.
+     *
+     * Unlike the fraud path, the money must be released: when the gateway
+     * refuses, nothing changes and it throws. Runs under the order's row
+     * lock. Calling it again on a rejected hold returns the order unchanged.
+     *
+     * @since 1.4.0
+     *
+     * @param  Order     $order        A stranded-payment hold.
+     * @param  int|null  $actorUserId  Staff user, for the timeline.
+     *
+     * @throws PaymentNotAllowedException When the order isn't an unresolved hold, the gateway is gone, or the refund or void fails (nothing changes).
+     *
+     * @return Order
+     */
+    public function rejectHold( Order $order, ?int $actorUserId = null ): Order
+    {
+        [ $order, $changed ] = DB::transaction( function () use ( $order, $actorUserId ): array {
+            $locked   = Order::query()->lockForUpdate()->findOrFail( $order->id );
+            $mismatch = $this->unresolvedHold( $locked, self::RESOLUTION_REJECTED );
+
+            if ( null === $mismatch ) {
+                return [ $locked, false ];
+            }
+
+            [ $gateway, $session ] = $this->heldSession( $locked, $mismatch );
+
+            $released  = null;
+            $reference = null;
+
+            try {
+                if ( $session->isCaptured() ) {
+                    $refund = $gateway->refund( $this->pinned( $locked, $session ), $session->amount, null, [ 'idempotency_key' => 'ap-ec-stranded-' . $session->reference ] );
+
+                    if ( $refund->success ) {
+                        $released  = CartPaymentSession::STATUS_REFUNDED;
+                        $reference = $refund->gatewayReference;
+                    }
+                } elseif ( ! $session->isCanceled() ) {
+                    $gateway->voidPendingPayment( $this->pinned( $locked, $session ) );
+
+                    $released = CartPaymentSession::STATUS_VOIDED;
+                } else {
+                    $released = CartPaymentSession::STATUS_VOIDED;
+                }
+            } catch ( Throwable $exception ) {
+                Log::channel( 'ecommerce' )->warning( 'A held stranded payment could not be released.', [
+                    'order_id'  => $locked->id,
+                    'reference' => $session->reference,
+                    'error'     => $exception->getMessage(),
+                ] );
+            }
+
+            if ( null === $released ) {
+                throw new PaymentNotAllowedException( __( 'The held payment for order :order could not be refunded or voided, so the order was left on hold.', [ 'order' => $locked->order_number ] ), [ 'order_id' => $locked->id ] );
+            }
+
+            $meta = (array) ( $locked->meta ?? [] );
+
+            $meta[ self::MISMATCH_META_KEY ]['resolution']  = self::RESOLUTION_REJECTED;
+            $meta[ self::MISMATCH_META_KEY ]['released']    = $released;
+            $meta[ self::MISMATCH_META_KEY ]['resolved_at'] = Carbon::now()->toIso8601String();
+
+            $locked->forceFill( [ 'payment_status' => 'failed', 'meta' => $meta ] )->save();
+
+            OrderTimelineEntry::query()->create( [
+                'order_id'      => $locked->id,
+                'actor_user_id' => $actorUserId,
+                'event_type'    => 'payment.stranded_rejected',
+                'payload'       => [
+                    'gateway'           => $session->gatewayKey,
+                    'reference'         => $session->reference,
+                    'amount'            => (string) $session->amount->getAmount(),
+                    'currency'          => $session->amount->getCurrency()->getCode(),
+                    'released'          => $released,
+                    'gateway_reference' => $reference,
+                ],
+            ] );
+
+            $this->inventory->releaseFor( $locked );
+            $this->statuses->transition( $locked, 'failed', $actorUserId, 'payment.stranded_rejected' );
+
+            $this->resolveRow( $session, $released, $reference );
+
+            return [ $locked->fresh() ?? $locked, true ];
+        } );
+
+        if ( $changed ) {
+            AfterCommit::action( 'ap.ecommerce.checkout.strandedPaymentResolved', $order, self::RESOLUTION_REJECTED );
+        }
+
+        return $order;
+    }
+
+    /**
+     * The hold's `payment_mismatch` meta when it can still be resolved;
+     * `null` when it was already resolved the same way (a repeat call).
+     *
+     * @since 1.4.0
+     *
+     * @param  Order   $order       Locked order.
+     * @param  string  $resolution  `self::RESOLUTION_*` being applied.
+     *
+     * @throws PaymentNotAllowedException When the order isn't a hold, was resolved the other way, or is no longer pending.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function unresolvedHold( Order $order, string $resolution ): ?array
+    {
+        if ( ! $this->isHold( $order ) ) {
+            throw new PaymentNotAllowedException( __( 'Order :order isn\'t holding a stranded payment.', [ 'order' => $order->order_number ] ), [ 'order_id' => $order->id ] );
+        }
+
+        $mismatch = (array) $order->meta[ self::MISMATCH_META_KEY ];
+        $done     = $mismatch['resolution'] ?? null;
+
+        if ( $resolution === $done ) {
+            return null;
+        }
+
+        if ( null !== $done ) {
+            throw new PaymentNotAllowedException( __( 'The held payment for order :order was already :resolution.', [ 'order' => $order->order_number, 'resolution' => (string) $done ] ), [ 'order_id' => $order->id ] );
+        }
+
+        if ( 'pending' !== (string) $order->system_status ) {
+            throw new PaymentNotAllowedException( __( 'Order :order is :status, so its held payment can no longer be resolved.', [ 'order' => $order->order_number, 'status' => (string) $order->system_status ] ), [ 'order_id' => $order->id ] );
+        }
+
+        return $mismatch;
+    }
+
+    /**
+     * The hold's gateway and its session, freshly retrieved.
+     *
+     * @since 1.4.0
+     *
+     * @param  Order                 $order     Locked order.
+     * @param  array<string, mixed>  $mismatch  Its `payment_mismatch` meta.
+     *
+     * @throws PaymentNotAllowedException When the gateway is no longer registered.
+     *
+     * @return array{0: PaymentGateway, 1: PaymentSession}
+     */
+    protected function heldSession( Order $order, array $mismatch ): array
+    {
+        $gateway = $this->gateways->find( (string) $mismatch['gateway'] );
+
+        if ( null === $gateway ) {
+            throw new PaymentNotAllowedException( __( 'The payment method of the held payment for order :order is no longer available.', [ 'order' => $order->order_number ] ), [ 'order_id' => $order->id ] );
+        }
+
+        return [ $gateway, $gateway->retrievePaymentSession( (string) $mismatch['reference'] ) ];
+    }
+
+    /**
+     * A copy of `$order` with the held session pinned, in the session's
+     * currency, to hand the gateway.
+     *
+     * @since 1.4.0
+     *
+     * @param  Order           $order    Order.
+     * @param  PaymentSession  $session  Held session.
+     *
+     * @return Order
+     */
+    protected function pinned( Order $order, PaymentSession $session ): Order
+    {
+        $pinned = clone $order;
+
+        $pinned->forceFill( [
+            'payment_gateway_key' => $session->gatewayKey,
+            'payment_reference'   => $session->reference,
+            'currency'            => $session->amount->getCurrency()->getCode(),
+        ] );
+
+        return $pinned;
+    }
+
+    /**
+     * Records how a held session ended in the history.
+     *
+     * @since 1.4.0
+     *
+     * @param  PaymentSession  $session    Session.
+     * @param  string          $status     `CartPaymentSession::STATUS_*`.
+     * @param  string|null     $reference  Provider refund id, if any.
+     *
+     * @return void
+     */
+    protected function resolveRow( PaymentSession $session, string $status, ?string $reference = null ): void
+    {
+        CartPaymentSession::query()
+            ->forReference( [ $session->gatewayKey ], $session->reference )
+            ->update( array_filter( [
+                'status'               => $status,
+                'resolution_reference' => $reference,
+                'resolved_at'          => Carbon::now(),
+                'updated_at'           => Carbon::now(),
+            ], static fn ( mixed $value ): bool => null !== $value ) );
     }
 
     /**
