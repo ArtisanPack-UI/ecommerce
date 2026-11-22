@@ -11,6 +11,15 @@
  * status, and settles the settled ones through {@see PaymentReconciler}.
  * Scheduled every 15 minutes.
  *
+ * Since 1.4.0 it also polls the carts' payment session history: sessions a
+ * cart replaced, sessions recorded as stranded, and a cart's current session
+ * when the cart left `payment_pending` (its total changed) without becoming
+ * an order. A confirmed one is settled by the `checkout.stranded_payments`
+ * policy, so a stranded payment is settled even without webhooks. Its
+ * summary reports how many stranded payments it handled, and how many
+ * (across the store) are still `stranded` and need settling — an
+ * unconfirmed refund being retried, or one staff must settle by hand.
+ *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
  *
@@ -25,10 +34,12 @@ namespace ArtisanPackUI\Ecommerce\Console\Commands;
 
 use ArtisanPackUI\Ecommerce\Checkout\CheckoutState;
 use ArtisanPackUI\Ecommerce\Models\Cart;
+use ArtisanPackUI\Ecommerce\Models\CartPaymentSession;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\Services\PaymentReconciler;
 use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -79,10 +90,16 @@ class ReconcilePaymentsCommand extends Command
         $minutes = null === $minutes ? (int) config( 'artisanpack.ecommerce.checkout.reconcile_after_minutes', 15 ) : (int) $minutes;
         $before  = Carbon::now()->subMinutes( max( 0, $minutes ) );
         $after   = Carbon::now()->subDays( self::WINDOW_DAYS );
-        $counts  = [ PaymentReconciler::FINALIZED => 0, PaymentReconciler::FAILED => 0, PaymentReconciler::SKIPPED => 0, 'errors' => 0 ];
+        $counts  = [ PaymentReconciler::FINALIZED => 0, PaymentReconciler::FAILED => 0, PaymentReconciler::STRANDED => 0, PaymentReconciler::SKIPPED => 0, 'errors' => 0 ];
+        $seen    = [];
 
-        $settle = function ( string $gatewayKey, string $reference ) use ( $gateways, $reconciler, &$counts ): void {
-            $gateway = $gateways->find( $gatewayKey );
+        $settle = function ( string $gatewayKey, string $reference ) use ( $gateways, $reconciler, &$counts, &$seen ): void {
+            if ( isset( $seen[ $gatewayKey . '|' . $reference ] ) ) {
+                return;
+            }
+
+            $seen[ $gatewayKey . '|' . $reference ] = true;
+            $gateway                                = $gateways->find( $gatewayKey );
 
             if ( null === $gateway ) {
                 ++$counts[ PaymentReconciler::SKIPPED ];
@@ -100,7 +117,7 @@ class ReconcilePaymentsCommand extends Command
                 return;
             }
 
-            ++$counts[ $done ];
+            $counts[ $done ] = ( $counts[ $done ] ?? 0 ) + 1;
         };
 
         Cart::query()
@@ -129,12 +146,36 @@ class ReconcilePaymentsCommand extends Command
                 }
             } );
 
+        CartPaymentSession::query()
+            ->where( function ( Builder $query ): void {
+                $query->whereIn( 'status', [ CartPaymentSession::STATUS_SUPERSEDED, CartPaymentSession::STATUS_STRANDED ] )
+                    // A pruned cart's session is kept, and still asked about.
+                    ->orWhere( fn ( Builder $query ) => $query->where( 'status', CartPaymentSession::STATUS_ACTIVE )->whereNull( 'cart_id' ) )
+                    ->orWhere( function ( Builder $query ): void {
+                        $query->where( 'status', CartPaymentSession::STATUS_ACTIVE )
+                            ->whereHas( 'cart', function ( Builder $cart ): void {
+                                $cart->whereNull( 'completed_order_id' )
+                                    ->whereColumn( 'payment_reference', 'ecommerce_cart_payment_sessions.reference' )
+                                    ->where( 'checkout_state', '!=', CheckoutState::PAYMENT_PENDING );
+                            } );
+                    } );
+            } )
+            ->whereBetween( 'updated_at', [ $after, $before ] )
+            ->select( [ 'id', 'gateway_key', 'reference' ] )
+            ->chunkById( 100, function ( $sessions ) use ( $settle ): void {
+                foreach ( $sessions as $session ) {
+                    $settle( (string) $session->gateway_key, (string) $session->reference );
+                }
+            } );
+
         $this->info( sprintf(
-            'Finalized %d, released %d, left %d, errors %d.',
+            'Finalized %d, released %d, left %d, errors %d. Handled %d stranded payment(s); %d still need settling.',
             $counts[ PaymentReconciler::FINALIZED ],
             $counts[ PaymentReconciler::FAILED ],
             $counts[ PaymentReconciler::SKIPPED ],
             $counts['errors'],
+            $counts[ PaymentReconciler::STRANDED ],
+            CartPaymentSession::query()->where( 'status', CartPaymentSession::STATUS_STRANDED )->count(),
         ) );
 
         return 0 === $counts['errors'] ? self::SUCCESS : self::FAILURE;

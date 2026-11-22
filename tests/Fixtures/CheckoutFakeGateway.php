@@ -20,8 +20,11 @@ use RuntimeException;
  * A two-phase gateway for checkout tests: sessions are created for the
  * cart's total, "confirmed" by the test (as the shopper's browser would),
  * and captured once confirmed.
+ *
+ * Refunds and voids are recorded (`$refunds`, `$voids`) and can be made to
+ * fail (`$refundsFail`, `$voidsFail`).
  */
-final class CheckoutFakeGateway implements PaymentGateway
+class CheckoutFakeGateway implements PaymentGateway
 {
     /** @var array<int, string> */
     public array $calls = [];
@@ -31,6 +34,27 @@ final class CheckoutFakeGateway implements PaymentGateway
 
     /** @var array<int, array<string, mixed>> */
     public array $contexts = [];
+
+    /** @var array<int, array{reference: string, amount: int, context: array<string, mixed>}> */
+    public array $refunds = [];
+
+    /** @var array<int, string> */
+    public array $voids = [];
+
+    public bool $refundsFail = false;
+
+    public bool $refundsSupported = true;
+
+    /** The next refund goes through at the provider, but reports a failure. */
+    public bool $refundsLoseResponse = false;
+
+    /** The next void goes through at the provider, but throws. */
+    public bool $voidsLoseResponse = false;
+
+    /** @var array<string, array<string, mixed>> */
+    public array $refundRequests = [];
+
+    public bool $voidsFail = false;
 
     private int $sequence = 0;
 
@@ -50,7 +74,7 @@ final class CheckoutFakeGateway implements PaymentGateway
 
     public function supportsRefunds(): bool
     {
-        return true;
+        return $this->refundsSupported;
     }
 
     public function supportsPartialRefunds(): bool
@@ -111,13 +135,63 @@ final class CheckoutFakeGateway implements PaymentGateway
     public function voidPendingPayment( Order $order ): void
     {
         $this->calls[] = 'voidPendingPayment';
+
+        if ( $this->voidsFail ) {
+            throw new RuntimeException( 'The provider refused the void.' );
+        }
+
+        $reference = (string) $order->payment_reference;
+        $session   = $this->sessions[ $reference ] ?? null;
+
+        // Already voided: a no-op, like a real provider.
+        if ( null === $session || $session->isCanceled() ) {
+            return;
+        }
+
+        $this->voids[] = $reference;
+        $this->confirm( $reference, PaymentSession::STATUS_CANCELED );
+
+        if ( $this->voidsLoseResponse ) {
+            $this->voidsLoseResponse = false;
+
+            throw new RuntimeException( 'The provider voided the payment, but the response was lost.' );
+        }
     }
 
     public function refund( Order $order, Money $amount, ?string $reason = null, array $context = [] ): RefundResult
     {
         $this->calls[] = 'refund';
 
-        return RefundResult::success( $amount, 're_' . $order->id );
+        if ( $this->refundsFail ) {
+            return RefundResult::failure( $amount, 'refund_refused', 'The provider refused the refund.' );
+        }
+
+        $key     = (string) ( $context['idempotency_key'] ?? '' );
+        $request = [ 'reference' => (string) $order->payment_reference, 'amount' => (int) $amount->getAmount(), 'order_id' => $order->getKey() ];
+
+        // Like Stripe: a reused key replays the first refund, but only for
+        // the same request; a changed one is refused.
+        if ( '' !== $key && isset( $this->refundRequests[ $key ] ) ) {
+            if ( $this->refundRequests[ $key ] !== $request ) {
+                return RefundResult::failure( $amount, 'idempotency_error', 'Keys for idempotent requests can only be used with the same parameters.' );
+            }
+
+            return RefundResult::success( $amount, 're_' . $key );
+        }
+
+        $this->refunds[] = $request + [ 'context' => $context ];
+
+        if ( '' !== $key ) {
+            $this->refundRequests[ $key ] = $request;
+        }
+
+        if ( $this->refundsLoseResponse ) {
+            $this->refundsLoseResponse = false;
+
+            return RefundResult::failure( $amount, 'api_connection_error', 'The response was lost.' );
+        }
+
+        return RefundResult::success( $amount, '' !== $key ? 're_' . $key : 're_' . $order->id );
     }
 
     public function handleWebhook( Request $request ): WebhookResult

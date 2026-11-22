@@ -354,6 +354,7 @@ final class ResourceSchemas
                 'line_total'         => 'Money!',
                 'is_free_item'       => 'Boolean!',
                 'options'            => 'JSON',
+                'option_lines'       => '[LineOption!]!',
                 'meta'               => 'JSON',
             ], [
                 'product' => [ 'Product', false, 'product' ],
@@ -417,6 +418,7 @@ final class ResourceSchemas
                 'product_id'         => 'Int',
                 'product_variant_id' => 'Int',
                 'product_snapshot'   => 'JSON',
+                'option_lines'       => '[LineOption!]!',
                 'quantity'           => 'Int!',
                 'unit_price'         => 'Money!',
                 'discount'           => 'Money!',

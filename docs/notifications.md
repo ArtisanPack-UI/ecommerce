@@ -21,6 +21,7 @@ from a template. Customers choose which kinds of notification they receive.
 | `inventory.low-stock.admin` | `ap.ecommerce.inventory.lowStock` | staff | transactional |
 | `inventory.out-of-stock.admin` | `ap.ecommerce.inventory.outOfStock` | staff | transactional |
 | `review.awaiting-moderation.admin` | a review is submitted and still pending | staff | transactional |
+| `inventory.back-in-stock.customer` | `ap.ecommerce.inventory.backInStock`, to each pending back-in-stock subscriber (since 1.4.0) | subscriber | back-in-stock |
 
 Customer notifications go to the order's customer record. For a guest order
 they go to the order's email address. Staff notifications go to
@@ -104,6 +105,22 @@ ISO 8601 strings, so format them with the `localized_date` filter (Twig's own
 Hi {{ Order.customer.first_name|default(Order.customer.name) }},
 {% for item in Order.items %}{{ item.name }} × {{ item.quantity }} — {{ item.total }}{% endfor %}
 ```
+
+Since 1.4.0 each order line also carries `option_lines`
+(`Order.items.*.option_lines.*.label` / `.value`): the human-readable option
+rows recorded on the line at placement ([products.md](products.md#line-option-descriptions)).
+The default order confirmation, admin order-paid, shipped, and refunded
+templates list them under each line (a row with an empty `label`, such as a
+variant name, shows its value alone):
+
+```twig
+{% for item in Order.items %}{{ item.name }}{% for row in item.option_lines %}<br><small>{% if row.label %}{{ row.label }}: {% endif %}{{ row.value }}</small>{% endfor %}{% endfor %}
+```
+
+Rows already stored in `notification_templates` keep their copy: seeding
+only creates missing rows, and saving a template stores the body submitted.
+To pick up the new defaults, update each stored row's body to the catalog
+default, or delete the row so the next template listing seeds it again.
 
 Two variables are per recipient:
 
@@ -220,6 +237,42 @@ GraphQL has the same operations: the `notificationTemplates` and
 `notificationTemplate(id:)` queries, and the `updateNotificationTemplate` and
 `previewNotificationTemplate` mutations (the latter returns
 `rendered { subject body }`).
+
+## Back in stock
+
+Since 1.4.0, `BackInStockService` keeps back-in-stock subscriptions
+(`ecommerce_back_in_stock_subscriptions`: `email`, `customer_id`,
+`product_id`, `product_variant_id`, `locale`, `notified_at`,
+`unsubscribed_at`; see [products.md](products.md#back-in-stock-subscriptions)).
+When `ap.ecommerce.inventory.backInStock` fires, each pending subscriber of
+the product or variant is sent `inventory.back-in-stock.customer` through
+`NotificationDispatcher`, queued like every catalog notification:
+
+- the recipient is the linked customer record (their preferences apply), else
+  an on-demand route to the subscription's email (the preferences of a
+  customer record with that email apply, so a guest who unsubscribed stays
+  unsubscribed);
+- the category is `back-in-stock`, so the mail carries the signed one-click
+  unsubscribe link (`Store.preferences_url` and the `List-Unsubscribe`
+  headers) like every opt-out category;
+- it is sent in the subscription's `locale`, else the customer's preference;
+- `notified_at` is set once it is handed off, so each subscription is
+  notified once. A subscriber who turned the category off is skipped and
+  their subscription stays pending.
+
+Variables: `Store.*`, `Product.name`, `Product.sku` (the variant's SKU for a
+variant), `Product.variant_name`, `Product.url` (from
+`notifications.product_url` / `ECOMMERCE_NOTIFICATIONS_PRODUCT_URL`, with
+`{slug}` and `{id}` placeholders, filtered through
+`ap.ecommerce.backInStock.productUrl`; null when unset), `Customer.name`, and
+`Customer.first_name`.
+
+Hooks: `ap.ecommerce.backInStock.subscribed`, `.unsubscribed`, and
+`.notified` (actions), and `ap.ecommerce.backInStock.shouldNotify` (filter).
+See [hooks.md](hooks.md#inventory). Subscriptions are personal data: they're
+deleted with the customer ([customers.md](customers.md#deleting-a-customer))
+and added to an artisanpack-ui/privacy export (`ap.privacy.exportData`) as
+`ecommerce.back_in_stock_subscriptions`.
 
 ## Customer preferences
 

@@ -164,6 +164,10 @@ class EcommerceSchema
                     'endCursor'       => 'String',
                 ],
             ],
+            'LineOption' => [
+                'description' => 'A human-readable cart or order line option ("Size: 16 × 20 in"). `label` may be empty, e.g. for a variant name.',
+                'fields'      => [ 'label' => 'String!', 'value' => 'String!' ],
+            ],
             'UserError' => [
                 'description' => 'An expected, recoverable mutation failure.',
                 'fields'      => [ 'field' => 'String', 'code' => 'String!', 'message' => 'String!' ],

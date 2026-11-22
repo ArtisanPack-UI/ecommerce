@@ -412,6 +412,8 @@ class CustomerService
      *   published but lose `customer_id` and `author_email`, and
      *   `author_name` becomes {@see self::ANONYMIZED_NAME}.
      * - Promotion usages keep their counts and lose `customer_id`.
+     * - Back-in-stock subscriptions (the customer's, and any under the same
+     *   email) are deleted (since 1.4.0).
      * - Customer notes are deleted and the customer's activity entries are
      *   scrubbed through {@see ActivityLogService::scrubCustomer()}; a
      *   `customer.deleted` entry with counts only (no personal data) is
@@ -459,7 +461,7 @@ class CustomerService
      *
      * @param  Customer  $customer  Customer being deleted (locked).
      *
-     * @return array{orders: int, addresses: int, notification_preferences: int, claim_attempts: int, notes: int, carts: int, reviews: int, promotion_usages: int}
+     * @return array{orders: int, addresses: int, notification_preferences: int, claim_attempts: int, notes: int, carts: int, reviews: int, promotion_usages: int, back_in_stock_subscriptions: int}
      */
     protected function anonymize( Customer $customer ): array
     {
@@ -483,7 +485,8 @@ class CustomerService
                     'author_name'  => self::ANONYMIZED_NAME,
                     'author_email' => null,
                 ] ),
-            'promotion_usages'         => PromotionUsage::query()->where( 'customer_id', $customer->id )->update( [ 'customer_id' => null ] ),
+            'promotion_usages'            => PromotionUsage::query()->where( 'customer_id', $customer->id )->update( [ 'customer_id' => null ] ),
+            'back_in_stock_subscriptions' => app( BackInStockService::class )->eraseFor( $email, $customer ),
         ];
 
         $this->scrubWebhookDeliveries( $orders, (int) $customer->id );

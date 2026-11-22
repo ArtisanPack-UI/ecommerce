@@ -206,6 +206,7 @@ use ArtisanPackUI\Ecommerce\Reviews\NoopReviewModerator;
 use ArtisanPackUI\Ecommerce\Reviews\ProductRatingAggregator;
 use ArtisanPackUI\Ecommerce\Search\DatabaseSearchProvider;
 use ArtisanPackUI\Ecommerce\Services\ActivityLogService;
+use ArtisanPackUI\Ecommerce\Services\BackInStockService;
 use ArtisanPackUI\Ecommerce\Services\DatabaseCartStorage;
 use ArtisanPackUI\Ecommerce\Services\DigitalDownloadService;
 use ArtisanPackUI\Ecommerce\Services\Fraud\AlwaysApproveFraudProvider;
@@ -1683,6 +1684,10 @@ class EcommerceServiceProvider extends ServiceProvider
 
         $this->app->make( TrackCustomerMilestones::class )->subscribe();
         $this->app->make( UpdateCustomerStats::class )->subscribe();
+
+        // Personal data the engine holds outside the customer record joins
+        // an artisanpack-ui/privacy export (no-op without that package).
+        addFilter( 'ap.privacy.exportData', static fn ( mixed $data, mixed $subject = null ): array => app( BackInStockService::class )->privacyExport( (array) $data, $subject ) );
     }
 
     /**

@@ -18,6 +18,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Resources;
 
+use ArtisanPackUI\Ecommerce\Support\LineOptionDescriber;
 use Illuminate\Http\Request;
 
 /**
@@ -38,7 +39,11 @@ class CartItemResource extends EcommerceResource
     public const NAME = 'cartItem';
 
     /**
+     * `option_lines` are the human-readable option rows
+     * ({@see LineOptionDescriber}).
+     *
      * @since 1.0.0
+     * @since 1.4.0 Adds `option_lines`.
      *
      * @param  Request  $request  Request.
      *
@@ -58,6 +63,7 @@ class CartItemResource extends EcommerceResource
             'line_total'         => $this->money( 'line_total_amount' ),
             'is_free_item'       => $this->resource->isFreeItem(),
             'options'            => $this->resource->options,
+            'option_lines'       => app( LineOptionDescriber::class )->forCartItem( $this->resource ),
             'meta'               => $this->resource->meta,
         ];
     }

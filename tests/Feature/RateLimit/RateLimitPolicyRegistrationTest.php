@@ -123,3 +123,25 @@ it( 'honours overrides in the published config shape (dotted policy keys)', func
         ->and( $catalog[0]->maxAttempts )->toBe( 17 )
         ->and( collect( $checkout )->pluck( 'maxAttempts' )->sort()->values()->all() )->toBe( [ 3, 5 ] );
 } );
+
+it( 'resolves backInStock.subscribe with 10/hour per IP + 5/hour per email (only when an email is sent)', function (): void {
+    $withEmail    = ( RateLimiter::limiter( 'ecommerce.backInStock.subscribe' ) )( Request::create( '/x', 'POST', [ 'email' => ' Ada@Example.test ' ] ) );
+    $withoutEmail = ( RateLimiter::limiter( 'ecommerce.backInStock.subscribe' ) )( Request::create( '/x', 'POST' ) );
+
+    expect( $withEmail )->toHaveCount( 2 )
+        ->and( $withEmail[0]->maxAttempts )->toBe( 10 )
+        ->and( $withEmail[0]->decaySeconds )->toBe( 3_600 )
+        ->and( $withEmail[0]->key )->toStartWith( 'ecommerce:back-in-stock:ip:' )
+        ->and( $withEmail[1]->maxAttempts )->toBe( 5 )
+        ->and( $withEmail[1]->key )->toBe( 'ecommerce:back-in-stock:email:' . sha1( 'ada@example.test' ) )
+        ->and( $withoutEmail )->toHaveCount( 1 );
+} );
+
+it( 'reads backInStock.subscribe overrides from the shipped config shape', function (): void {
+    config()->set( 'artisanpack.ecommerce.rate_limits', array_merge( (array) config( 'artisanpack.ecommerce.rate_limits' ), [ 'backInStock.subscribe' => [ 'per_ip' => 3, 'per_email' => 2 ] ] ) );
+
+    $limits = ( RateLimiter::limiter( 'ecommerce.backInStock.subscribe' ) )( Request::create( '/x', 'POST', [ 'email' => 'ada@example.test' ] ) );
+
+    expect( $limits[0]->maxAttempts )->toBe( 3 )
+        ->and( $limits[1]->maxAttempts )->toBe( 2 );
+} );

@@ -6,7 +6,7 @@
  * Payload for `PATCH orders/{order}`: the customer-facing fields an admin
  * may correct without an order edit (line / total changes go through
  * `OrderEditService`). `meta` is merged into the existing value, and
- * engine-owned keys (`fraud_decision`) can't be written.
+ * engine-owned keys (`fraud_decision`, `payment_mismatch`) can't be written.
  *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
@@ -19,6 +19,8 @@
 declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Requests\Api\V1;
+
+use ArtisanPackUI\Ecommerce\Services\StrandedPaymentService;
 use Closure;
 
 /**
@@ -45,6 +47,12 @@ class UpdateOrderRequest extends ApiFormRequest
                 // validated() keeps the rest of the meta payload.
                 if ( is_array( $value ) && array_key_exists( 'fraud_decision', $value ) ) {
                     $fail( __( 'meta.fraud_decision is managed by the engine and cannot be changed.' ) );
+                }
+
+                // Written by StrandedPaymentService for a held stranded
+                // payment; storefronts and the resolve actions trust it.
+                if ( is_array( $value ) && array_key_exists( StrandedPaymentService::MISMATCH_META_KEY, $value ) ) {
+                    $fail( __( 'meta.payment_mismatch is managed by the engine and cannot be changed.' ) );
                 }
 
                 // Recorded when the order is placed; the tax report reads it.

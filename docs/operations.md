@@ -82,7 +82,7 @@ The schedule is set in `artisanpack.ecommerce.schedule`:
 | `ecommerce:release-expired-reservations` | | Deletes `inventory_reservations` past `expires_at`, frees the reserved stock, and fires `ap.ecommerce.inventory.reservationReleased` per row |
 | `ecommerce:retry-webhook-deliveries` | `--limit=500` most deliveries to queue in one run | Queues outbound deliveries whose retry time has come |
 | `ecommerce:flag-abandoned-carts` | | Flags carts in checkout, with an email, untouched for `cart.abandoned_after_minutes` |
-| `ecommerce:reconcile-payments` | `--minutes=` quiet period (default `checkout.reconcile_after_minutes`) | Asks the provider how quiet payment sessions ended, and finalizes or releases them. Looks back 7 days. Exits non-zero when any session errored |
+| `ecommerce:reconcile-payments` | `--minutes=` quiet period (default `checkout.reconcile_after_minutes`) | Asks the provider how quiet payment sessions ended, and finalizes or releases them. Since 1.4.0 it also polls replaced, stranded and pruned-cart sessions in the payment session history, settles confirmed ones by `checkout.stranded_payments`, and reports `Handled N stranded payment(s); M still need settling.` Looks back 7 days. Exits non-zero when any session errored |
 | `ecommerce:prune-idempotency-records` | | Deletes expired `idempotency_records` rows |
 | `ecommerce:audit-order-status` | | Reports drift between `orders.system_status` and sub-statuses |
 | `ecommerce:prune-carts` | | Deletes expired carts and old converted carts, releasing their stock holds first |
@@ -165,6 +165,7 @@ default, so a limit can't be switched off this way.
 | `ecommerce.webhook.inbound` | 120/min per IP | Every inbound provider webhook |
 | `ecommerce.webhook.verified` | 1,000/min per provider (`rate_limits.webhook.inbound.per_provider`) | Verified inbound webhooks only |
 | `ecommerce.notifications.unsubscribe` | 30/min per IP | Signed unsubscribe links |
+| `ecommerce.backInStock.subscribe` | 10/hour per IP + 5/hour per email | Registered for storefront back-in-stock sign-up forms; no engine route uses it |
 | `ecommerce.admin.mutate` | 120/min per user | Admin, kanban, and `me/*` routes |
 | `ecommerce.login` | 5/min per IP + 20/hour per email | Registered for storefront and admin login forms; no engine route uses it |
 

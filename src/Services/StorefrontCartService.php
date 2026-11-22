@@ -46,6 +46,7 @@ use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
 use ArtisanPackUI\Ecommerce\Inventory\StockLevels;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
+use ArtisanPackUI\Ecommerce\Models\CartPaymentSession;
 use ArtisanPackUI\Ecommerce\Models\Coupon;
 use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\Product;
@@ -61,11 +62,13 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Money\Currency;
 use Money\Money;
 use RuntimeException;
 use Throwable;
+use TypeError;
 
 /**
  * @package    ArtisanPack_UI
@@ -616,6 +619,9 @@ class StorefrontCartService
 
             $locked->meta                = $meta;
             $locked->shipping_amount     = 0;
+
+            CartPaymentSession::supersede( (int) $locked->getKey(), $locked->payment_gateway_key, $locked->payment_reference );
+
             $locked->payment_reference   = null;
             $locked->payment_gateway_key = null;
 
@@ -1341,6 +1347,9 @@ class StorefrontCartService
      * line stores in its own column). Unknown options are dropped.
      *
      * @since 1.0.0
+     * @since 1.4.0 A `ValidationException` from the type (as
+     *              `StorefrontOptionSchema::validate()` throws) is refused
+     *              too, with its first message.
      *
      * @param  Product               $product  Product.
      * @param  ProductVariant|null   $variant  Variant.
@@ -1354,8 +1363,13 @@ class StorefrontCartService
     {
         try {
             $validated = $product->productType()->validateCartOptions( $product, array_filter( [ 'variant_id' => $variant?->id ] ) + $options );
-        } catch ( InvalidArgumentException ) {
+        } catch ( InvalidArgumentException | TypeError ) {
+            // A TypeError is a type that didn't expect an option's shape (a nested value where it reads a scalar).
             throw new CartOperationException( 'options', 'options-invalid', __( 'Choose the options this product needs.' ) );
+        } catch ( ValidationException $exception ) {
+            $message = collect( $exception->errors() )->flatten()->first();
+
+            throw new CartOperationException( 'options', 'options-invalid', is_string( $message ) && '' !== $message ? $message : __( 'Choose the options this product needs.' ) );
         }
 
         unset( $validated['variant_id'] );

@@ -261,6 +261,7 @@ shown. A blank, zero, or negative value falls back to the default.
 | `ecommerce.webhook.inbound` | 120/min per IP (`…_WEBHOOK_INBOUND_PER_IP`) | IP | every request to `POST /ecommerce/webhooks/{provider}` |
 | `ecommerce.webhook.verified` | 1,000/min per provider (`…_WEBHOOK_INBOUND_PER_PROVIDER`) | `{provider}` route segment | counted by the webhook controller after the signature is verified |
 | `ecommerce.notifications.unsubscribe` | 30/min per IP (`ECOMMERCE_RATE_UNSUBSCRIBE_PER_IP`) | IP | the unsubscribe links |
+| `ecommerce.backInStock.subscribe` | 10/hour per IP (`…_BACK_IN_STOCK_SUBSCRIBE_PER_IP`) + 5/hour per email (only when an email is sent) (`…_BACK_IN_STOCK_SUBSCRIBE_PER_EMAIL`) | IP; `email` input | registered for storefront back-in-stock sign-up forms (`EcommerceRateLimiter::attempt()`); no engine route uses it |
 | `ecommerce.admin.mutate` | 120/min per user (anonymous: per IP) (`…_ADMIN_MUTATE_PER_USER`) | user id; IP | every admin, order, customer, kanban, and `me/*` route, reads included |
 | `ecommerce.login` | 5/min per IP (`…_LOGIN_PER_IP`) + 20/hour per email (only when an email is sent) (`…_LOGIN_PER_EMAIL`) | IP; `email` input | registered for storefront and admin login surfaces; no engine route uses it |
 
@@ -306,7 +307,7 @@ All of these use the `catalog.read` policy and the public cache mode.
 | `GET` | `products/{product}` | By id |
 | `GET` | `products/{product}/variants` | |
 | `GET` | `products/{product}/related` | `?type=related\|upsell\|cross_sell&limit=` (1–50) |
-| `GET` | `products/{product}/purchase-options` | `?currency&country_code&region_code&postal_code` → `{ product_id, currency, price, stock, variants, options }` |
+| `GET` | `products/{product}/purchase-options` | `?currency&country_code&region_code&postal_code` → `{ product_id, currency, price, stock, variants, options }`. `options` are normalized add-to-cart fields ([products.md](products.md#add-to-cart-fields)). |
 | `GET` | `products/{product}/reviews` | Approved reviews, with `meta.histogram` and `meta.average` |
 | `GET` | `search?q=…` | See [search.md](search.md) |
 | `GET` | `categories` | The whole tree, nested under `children` |
@@ -320,6 +321,7 @@ All of these use the `catalog.read` policy and the public cache mode.
 |---|---|---|---|---|
 | `POST` | `products/{product}/reviews` | optional | `review.submit` | yes |
 | `GET` | `products/{product}/reviews/eligibility` → `{ allowed, reason, verified_purchase }` | optional | `catalog.read` | |
+| `POST` | `products/{product}/quote` (`{ options?, quantity?: 1, currency? }`) → `{ currency, quantity, unit_price, line_total, breakdown, errors, valid }` (`errors` is `{}` when valid); 422 with `options.*` field errors, or for a malformed payload (more than 20 top-level options, nesting deeper than 3 levels, more than 100 values, or a value over 255 characters — the cart's limits, which allow nested values for dot-named fields); 404 for a product that isn't on sale. List price, no side effects ([products.md](products.md#price-quotes)) | public | `catalog.read` | |
 | `POST` | `products/{product}/views` → 202 (fires `ap.ecommerce.product.viewed` for satellites such as recently-viewed) | optional | `catalog.read` | yes |
 | `GET` | `downloads/{token}` | the token | `catalog.read` | |
 | `GET` | `downloads/{token}/stream` (supports `Range`) | the token | `catalog.read` | |
