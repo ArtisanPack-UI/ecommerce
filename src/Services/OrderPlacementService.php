@@ -23,7 +23,8 @@
  *  6. the order attributes run through `ap.ecommerce.order.placing`, the
  *     number comes from the {@see OrderNumberGenerator} through
  *     `ap.ecommerce.order.number`, and each line is snapshotted through its
- *     product type's `buildOrderSnapshot()`, with its own discount and tax;
+ *     product type's `buildOrderSnapshot()` (plus its `option_lines`, from
+ *     {@see LineOptionDescriber}), with its own discount and tax;
  *  7. shipping, and tax not tied to a line (tax on shipping), are split
  *     across the lines by the configured {@see FulfillmentAllocationStrategy};
  *  8. the cart's reservations become the order's (they no longer expire);
@@ -67,6 +68,7 @@ use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Models\OrderItem;
 use ArtisanPackUI\Ecommerce\Registries\CurrencyRateProviderRegistry;
 use ArtisanPackUI\Ecommerce\Support\AfterCommit;
+use ArtisanPackUI\Ecommerce\Support\LineOptionDescriber;
 use ArtisanPackUI\Ecommerce\ValueObjects\PromotionResult;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -367,6 +369,7 @@ class OrderPlacementService
                     'variant_name' => $variant?->name,
                     'free_item'    => $item->isFreeItem() ? true : null,
                     'promotion_id' => $item->isFreeItem() ? ( $item->meta['promotion_id'] ?? null ) : null,
+                    'option_lines' => app( LineOptionDescriber::class )->forCartItem( $item ),
                 ], static fn ( mixed $value ): bool => null !== $value ), $product->productType()->buildOrderSnapshot( $item ) ),
                 'quantity'            => (int) $item->quantity,
                 'unit_price_amount'   => (int) $item->unit_price_amount,

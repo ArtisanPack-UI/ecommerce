@@ -128,6 +128,13 @@ final class NotificationCatalog
     public const REVIEW_AWAITING_MODERATION_ADMIN = 'review.awaiting-moderation.admin';
 
     /**
+     * @since 1.4.0
+     *
+     * @var string
+     */
+    public const BACK_IN_STOCK = 'inventory.back-in-stock.customer';
+
+    /**
      * Every catalog definition.
      *
      * @since 1.0.0
@@ -156,6 +163,8 @@ final class NotificationCatalog
             'Order.view_url',
             'Order.items.*.name',
             'Order.items.*.sku',
+            'Order.items.*.option_lines.*.label',
+            'Order.items.*.option_lines.*.value',
             'Order.items.*.quantity',
             'Order.items.*.unit_price',
             'Order.items.*.total',
@@ -166,7 +175,7 @@ final class NotificationCatalog
         $sample = self::sampleContext();
         $pick   = static fn ( string ...$roots ): array => array_intersect_key( $sample, array_flip( $roots ) );
 
-        $orderTable = '{% for item in Order.items %}<tr><td>{{ item.name }} &times; {{ item.quantity }}</td><td>{{ item.total }}</td></tr>{% endfor %}';
+        $orderTable = '{% for item in Order.items %}<tr><td>{{ item.name }} &times; {{ item.quantity }}{% for row in item.option_lines %}<br><small>{% if row.label %}{{ row.label }}: {% endif %}{{ row.value }}</small>{% endfor %}</td><td>{{ item.total }}</td></tr>{% endfor %}';
 
         return [
             new CatalogNotificationTemplate(
@@ -199,7 +208,8 @@ final class NotificationCatalog
                 array_merge( $store, $order, [ 'Shipment.carrier', 'Shipment.service', 'Shipment.tracking_number', 'Shipment.tracking_url', 'Shipment.shipped_at' ] ),
                 $pick( 'Store', 'Order', 'Shipment' ),
                 static fn ( ?string $locale ): string => __( 'Your order :number is on its way', [ 'number' => '{{ Order.number }}' ], $locale ),
-                static fn ( ?string $locale ): string => __( '<p>Hi {{ Order.customer.first_name|default(Order.customer.name) }},</p><p>Your order {{ Order.number }} has shipped{% if Shipment.carrier %} with {{ Shipment.carrier }}{% endif %}.</p>{% if Shipment.tracking_url %}<p><a href="{{ Shipment.tracking_url }}">Track your package</a> ({{ Shipment.tracking_number }})</p>{% endif %}', [], $locale ),
+                static fn ( ?string $locale ): string => __( '<p>Hi {{ Order.customer.first_name|default(Order.customer.name) }},</p><p>Your order {{ Order.number }} has shipped{% if Shipment.carrier %} with {{ Shipment.carrier }}{% endif %}.</p>{% if Shipment.tracking_url %}<p><a href="{{ Shipment.tracking_url }}">Track your package</a> ({{ Shipment.tracking_number }})</p>{% endif %}', [], $locale )
+                    . '<table role="presentation">' . $orderTable . '</table>',
             ),
             new CatalogNotificationTemplate(
                 self::ORDER_DELIVERED,
@@ -226,7 +236,8 @@ final class NotificationCatalog
                 array_merge( $store, $order, [ 'Refund.amount', 'Refund.reason', 'Refund.created_at' ] ),
                 $pick( 'Store', 'Order', 'Refund' ),
                 static fn ( ?string $locale ): string => __( 'A refund for order :number', [ 'number' => '{{ Order.number }}' ], $locale ),
-                static fn ( ?string $locale ): string => __( '<p>Hi {{ Order.customer.first_name|default(Order.customer.name) }},</p><p>We have refunded <strong>{{ Refund.amount }}</strong> for order {{ Order.number }}.{% if Refund.reason %} Reason: {{ Refund.reason }}.{% endif %}</p>', [], $locale ),
+                static fn ( ?string $locale ): string => __( '<p>Hi {{ Order.customer.first_name|default(Order.customer.name) }},</p><p>We have refunded <strong>{{ Refund.amount }}</strong> for order {{ Order.number }}.{% if Refund.reason %} Reason: {{ Refund.reason }}.{% endif %}</p>', [], $locale )
+                    . '<table role="presentation">' . $orderTable . '</table>',
             ),
             new CatalogNotificationTemplate(
                 self::REVIEW_REQUEST,
@@ -303,6 +314,25 @@ final class NotificationCatalog
                 static fn ( ?string $locale ): string => __( '<p>{{ InventoryItem.name }}{% if InventoryItem.sku %} ({{ InventoryItem.sku }}){% endif %} is out of stock.</p>', [], $locale ),
             ),
             new CatalogNotificationTemplate(
+                self::BACK_IN_STOCK,
+                static fn ( ?string $locale ): string => __( 'Back in stock', [], $locale ),
+                'back-in-stock',
+                array_merge( $store, $product, [ 'Product.variant_name', 'Product.url', 'Customer.name', 'Customer.first_name' ] ),
+                [
+                    'Store'    => $sample['Store'],
+                    'Product'  => [
+                        // i18n-lint:ignore reason:sample product name (store data), not interface copy
+                        'name'         => 'Difference Engine Poster',
+                        'sku'          => 'POSTER-01',
+                        'variant_name' => '16 × 20 in',
+                        'url'          => 'https://shop.example.com/products/difference-engine-poster',
+                    ],
+                    'Customer' => $sample['Customer'],
+                ],
+                static fn ( ?string $locale ): string => __( ':product is back in stock', [ 'product' => '{{ Product.name }}' ], $locale ),
+                static fn ( ?string $locale ): string => __( '<p>{% if Customer.first_name %}Hi {{ Customer.first_name }},{% else %}Hi,{% endif %}</p><p>Good news: {{ Product.name }}{% if Product.variant_name %} ({{ Product.variant_name }}){% endif %} is back in stock.</p>{% if Product.url %}<p><a href="{{ Product.url }}">Shop now</a></p>{% endif %}<p>You asked us to let you know, so we are telling you once. <a href="{{ Store.preferences_url }}">Stop back-in-stock emails</a></p>', [], $locale ),
+            ),
+            new CatalogNotificationTemplate(
                 self::REVIEW_AWAITING_MODERATION_ADMIN,
                 static fn ( ?string $locale ): string => __( 'New review awaiting moderation (admin)', [], $locale ),
                 'transactional',
@@ -341,8 +371,8 @@ final class NotificationCatalog
                 'customer'         => [ 'name' => 'Ada Lovelace', 'first_name' => 'Ada', 'email' => 'ada@example.com' ],
                 'view_url'         => 'https://shop.example.com/order/sample-token',
                 'items'            => [
-                    [ 'name' => 'Difference Engine Poster', 'sku' => 'POSTER-01', 'quantity' => 2, 'unit_price' => MoneyFormatter::format( 1200, 'USD' ), 'total' => MoneyFormatter::format( 2400, 'USD' ) ],
-                    [ 'name' => 'Notes on the Engine (PDF)', 'sku' => 'EBOOK-01', 'quantity' => 1, 'unit_price' => MoneyFormatter::format( 1800, 'USD' ), 'total' => MoneyFormatter::format( 1800, 'USD' ) ],
+                    [ 'name' => 'Difference Engine Poster', 'sku' => 'POSTER-01', 'option_lines' => [ [ 'label' => 'Size', 'value' => '16 × 20 in' ], [ 'label' => 'Paper', 'value' => 'Lustre' ] ], 'quantity' => 2, 'unit_price' => MoneyFormatter::format( 1200, 'USD' ), 'total' => MoneyFormatter::format( 2400, 'USD' ) ],
+                    [ 'name' => 'Notes on the Engine (PDF)', 'sku' => 'EBOOK-01', 'option_lines' => [], 'quantity' => 1, 'unit_price' => MoneyFormatter::format( 1800, 'USD' ), 'total' => MoneyFormatter::format( 1800, 'USD' ) ],
                 ],
             ],
             'Customer'      => [ 'name' => 'Ada Lovelace', 'first_name' => 'Ada', 'email' => 'ada@example.com' ],

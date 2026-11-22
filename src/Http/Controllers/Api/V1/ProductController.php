@@ -21,21 +21,20 @@ namespace ArtisanPackUI\Ecommerce\Http\Controllers\Api\V1;
 
 use ArtisanPackUI\Ecommerce\Catalog\CatalogQuery;
 use ArtisanPackUI\Ecommerce\Catalog\ProductViews;
+use ArtisanPackUI\Ecommerce\Catalog\PurchaseOptions;
 use ArtisanPackUI\Ecommerce\Catalog\RelatedProducts;
-use ArtisanPackUI\Ecommerce\Catalog\VariantResolver;
-use ArtisanPackUI\Ecommerce\Contracts\ProvidesStorefrontOptions;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductQuoteRequest;
 use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\PurchaseOptionsRequest;
 use ArtisanPackUI\Ecommerce\Http\Resources\ProductResource;
 use ArtisanPackUI\Ecommerce\Http\Resources\ProductVariantResource;
 use ArtisanPackUI\Ecommerce\Http\Support\ListQuery;
 use ArtisanPackUI\Ecommerce\Http\Support\Problem;
-use ArtisanPackUI\Ecommerce\Inventory\StockStatus;
 use ArtisanPackUI\Ecommerce\Models\Product;
 use ArtisanPackUI\Ecommerce\Models\ProductRelation;
 use ArtisanPackUI\Ecommerce\OpenApi\Attributes\ApiOperation;
 use ArtisanPackUI\Ecommerce\OpenApi\CatalogParameters;
-use ArtisanPackUI\Ecommerce\Pricing\PriceDisplayResolver;
 use ArtisanPackUI\Ecommerce\Services\CustomerService;
+use ArtisanPackUI\Ecommerce\Services\PriceQuoteService;
 use ArtisanPackUI\Ecommerce\Services\StoreCurrencies;
 use ArtisanPackUI\Ecommerce\ValueObjects\Address;
 use Closure;
@@ -236,9 +235,11 @@ class ProductController extends ApiController
      * What a product page needs to sell `$product` (#172): its display
      * price (with tax at the destination, default the store's country),
      * its stock status, and, for variable products, every variant with
-     * its attribute values, availability, price, and image.
+     * its attribute values, availability, price, and image, plus the
+     * type's add-to-cart fields, normalized ({@see PurchaseOptions}).
      *
      * @since 1.0.0
+     * @since 1.4.0 `options` are normalized through `StorefrontOptionSchema`.
      *
      * @param  PurchaseOptionsRequest  $request  Validated request.
      * @param  int                     $product  Product id.
@@ -257,14 +258,42 @@ class ProductController extends ApiController
             'postal_code'  => $request->validated( 'postal_code' ),
         ] );
 
-        return new JsonResponse( [ 'data' => [
-            'product_id' => (int) $model->id,
-            'currency'   => $currency,
-            'price'      => app( PriceDisplayResolver::class )->for( $model, $currency, $destination )?->toArray(),
-            'stock'      => StockStatus::for( $model )->toArray(),
-            'variants'   => app( VariantResolver::class )->matrix( $model, $currency ),
-            'options'    => ! $model->typeIsMissing() && $model->productType() instanceof ProvidesStorefrontOptions ? $model->productType()->storefrontOptions( $model ) : [],
-        ] ] );
+        return new JsonResponse( [ 'data' => app( PurchaseOptions::class )->for( $model, $currency, $destination ) ] );
+    }
+
+    /**
+     * Prices `$product` with a set of add-to-cart options (#224): the
+     * type validates the options and prices the line, with no promotions
+     * and no side effects. 422 with `options.*` field errors when the
+     * options are invalid.
+     *
+     * @since 1.4.0
+     *
+     * @param  ProductQuoteRequest  $request  Validated request.
+     * @param  int                  $product  Product id.
+     *
+     * @return JsonResponse
+     */
+    #[ApiOperation( summary: 'Quote a product\'s price for a set of options', description: 'List price (promotions are not applied) for `quantity` units with `options`. Returns { data: PriceQuote }; 422 with `options.*` errors when the options are invalid.' )]
+    public function quote( ProductQuoteRequest $request, int $product ): JsonResponse
+    {
+        $model    = $this->visible()->findOrFail( $product );
+        $currency = strtoupper( (string) ( $request->validated( 'currency' ) ?? app( StoreCurrencies::class )->base() ) );
+        $quote    = app( PriceQuoteService::class )->quote( $model, (array) ( $request->validated( 'options' ) ?? [] ), (int) ( $request->validated( 'quantity' ) ?? 1 ), $currency );
+
+        if ( ! $quote->isValid() ) {
+            $errors = [];
+
+            foreach ( $quote->errors() as $field => $messages ) {
+                foreach ( $messages as $message ) {
+                    $errors[] = [ 'field' => $field, 'code' => 'invalid', 'message' => $message ];
+                }
+            }
+
+            return Problem::make( 422, 'validation-failed', __( 'Validation failed' ), __( 'The options are not valid for this product.' ), $request, $errors );
+        }
+
+        return new JsonResponse( [ 'data' => $quote->toArray() ] );
     }
 
     /**

@@ -61,6 +61,7 @@ class RateLimitPolicyRegistrar
         'ecommerce.webhook.inbound',
         'ecommerce.webhook.verified',
         'ecommerce.notifications.unsubscribe',
+        'ecommerce.backInStock.subscribe',
         'ecommerce.admin.mutate',
     ];
 
@@ -212,6 +213,24 @@ class RateLimitPolicyRegistrar
                 Limit::perMinute( self::limit( 'notifications.unsubscribe.per_ip', 30 ) )
                     ->by( 'ecommerce:unsubscribe:ip:' . sha1( (string) $request->ip() ) ),
             ];
+        } );
+
+        // Back-in-stock sign-ups (1.4.0): per IP, and per address so one
+        // inbox can't be signed up for every product by a third party.
+        RateLimiter::for( 'ecommerce.backInStock.subscribe', function ( Request $request ): array {
+            $email  = mb_strtolower( trim( (string) $request->input( 'email', '' ) ) );
+            $limits = [
+                Limit::perHour( self::limit( 'backInStock.subscribe.per_ip', 10 ) )
+                    ->by( 'ecommerce:back-in-stock:ip:' . sha1( (string) $request->ip() ) ),
+            ];
+
+            // Same empty-subject guard as `login`.
+            if ( '' !== $email ) {
+                $limits[] = Limit::perHour( self::limit( 'backInStock.subscribe.per_email', 5 ) )
+                    ->by( 'ecommerce:back-in-stock:email:' . sha1( $email ) );
+            }
+
+            return $limits;
         } );
 
         RateLimiter::for( 'ecommerce.admin.mutate', function ( Request $request ): array {

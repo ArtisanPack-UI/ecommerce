@@ -203,6 +203,7 @@ and guest reviews under the same email are matched the same way.
 | Carts | Kept (they may hold stock reservations); `customer_id` and `email` are nulled. |
 | Reviews | Kept; `customer_id` and `author_email` are nulled and `author_name` becomes `Anonymous`. |
 | Promotion usages | Kept for usage counts; `customer_id` is nulled. |
+| Back-in-stock subscriptions | Deleted: the customer's, and any under the same email (since 1.4.0). |
 | The linked user account | Untouched. It belongs to the host application. |
 
 Once the outermost transaction commits, `ap.ecommerce.customer.deleted`

@@ -29,10 +29,13 @@ namespace ArtisanPackUI\Ecommerce\GraphQL\Fields;
 
 use ArtisanPackUI\Ecommerce\Auth\TokenAbilities;
 use ArtisanPackUI\Ecommerce\Catalog\CatalogQuery;
+use ArtisanPackUI\Ecommerce\Catalog\PurchaseOptions;
 use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
 use ArtisanPackUI\Ecommerce\Exceptions\GuestLookupLockedException;
 use ArtisanPackUI\Ecommerce\GraphQL\GraphQLError;
 use ArtisanPackUI\Ecommerce\GraphQL\Support\Resolvers;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\AddCartItemRequest;
+use ArtisanPackUI\Ecommerce\Http\Requests\Api\V1\ProductQuoteRequest;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\InventoryItem;
@@ -49,6 +52,8 @@ use ArtisanPackUI\Ecommerce\Registries\SubStatusRegistry;
 use ArtisanPackUI\Ecommerce\Services\CheckoutService;
 use ArtisanPackUI\Ecommerce\Services\GuestOrderLookupService;
 use ArtisanPackUI\Ecommerce\Services\NotificationTemplateService;
+use ArtisanPackUI\Ecommerce\Services\PriceQuoteService;
+use ArtisanPackUI\Ecommerce\Services\StoreCurrencies;
 use ArtisanPackUI\Ecommerce\Services\StorefrontCartService;
 use ArtisanPackUI\Ecommerce\Support\OrderViewToken;
 use ArtisanPackUI\Ecommerce\ValueObjects\Address;
@@ -57,6 +62,7 @@ use GraphQL\Type\Definition\ResolveInfo;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Validator;
 use Throwable;
 
 /**
@@ -149,6 +155,26 @@ class Queries
                 'kind'   => 'input',
                 'fields' => [ 'email' => 'String' ],
             ],
+            'QuoteMoney' => [
+                'description' => 'An amount in minor units, its ISO 4217 currency, and a display string.',
+                'fields'      => [ 'amount' => 'BigInt!', 'currency' => 'String!', 'formatted' => 'String!' ],
+            ],
+            'PriceQuoteRow' => [
+                'description' => 'A breakdown row of a price quote.',
+                'fields'      => [ 'label' => 'String!', 'amount' => 'QuoteMoney!' ],
+            ],
+            'PriceQuote' => [
+                'description' => 'The list price of a product with a set of add-to-cart options (promotions are not applied).',
+                'fields'      => [
+                    'currency'   => 'String!',
+                    'quantity'   => 'Int!',
+                    'unit_price' => 'QuoteMoney!',
+                    'line_total' => 'QuoteMoney!',
+                    'breakdown'  => '[PriceQuoteRow!]!',
+                    'valid'      => 'Boolean!',
+                    'errors'     => '[UserError!]!',
+                ],
+            ],
             'CheckoutInfo' => [
                 'fields' => [
                     'state'             => 'String!',
@@ -202,6 +228,23 @@ class Queries
                 'args'        => [ 'query' => 'String!' ] + $page,
                 'resolve'     => fn ( $root, array $args, $context, ResolveInfo $info ): array => $this->catalog(
                     fn () => $this->search( $args, $info ),
+                ),
+            ],
+
+            'productPurchaseOptions' => [
+                'type'        => 'JSON',
+                'description' => 'What a product page needs to sell a product: display price, stock, variants, and normalized add-to-cart fields (same shape as REST `purchase-options`).',
+                'args'        => [ 'product' => 'ID!', 'currency' => 'String', 'country_code' => 'String', 'region_code' => 'String', 'postal_code' => 'String' ],
+                'resolve'     => fn ( $root, array $args ): ?array => $this->catalog(
+                    fn (): ?array => $this->purchaseOptions( $args ),
+                ),
+            ],
+            'productQuote' => [
+                'type'        => 'PriceQuote',
+                'description' => 'Prices a product with add-to-cart options, without a cart. Promotions are not applied. Null for a product that is not on sale.',
+                'args'        => [ 'product' => 'ID!', 'options' => 'JSON', 'quantity' => 'Int', 'currency' => 'String' ],
+                'resolve'     => fn ( $root, array $args ): ?array => $this->catalog(
+                    fn (): ?array => $this->quote( $args ),
                 ),
             ],
 
@@ -550,6 +593,116 @@ class Queries
         }
 
         return $this->r->present( $order, 'Order', $this->r->selection( $info ), $admin );
+    }
+
+    /**
+     * `productPurchaseOptions`: null for a product that isn't visible.
+     *
+     * @since 1.4.0
+     *
+     * @param  array<string, mixed>  $args  Arguments.
+     *
+     * @throws GraphQLError When the currency or country is malformed.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function purchaseOptions( array $args ): ?array
+    {
+        $product = Product::query()->storefrontVisible()->find( $args['product'] );
+
+        if ( null === $product ) {
+            return null;
+        }
+
+        $currency = $this->currencyArgument( $args );
+        $country  = isset( $args['country_code'] ) ? (string) $args['country_code'] : null;
+
+        if ( null !== $country && 1 !== preg_match( '/^[A-Za-z]{2}$/', $country ) ) {
+            throw new GraphQLError( __( 'country_code must be a two-letter ISO 3166 code.' ), 'BAD_USER_INPUT' );
+        }
+
+        $destination = null === $country ? null : Address::fromArray( [
+            'country_code' => strtoupper( $country ),
+            'region_code'  => isset( $args['region_code'] ) ? mb_substr( (string) $args['region_code'], 0, 10 ) : null,
+            'postal_code'  => isset( $args['postal_code'] ) ? mb_substr( (string) $args['postal_code'], 0, 20 ) : null,
+        ] );
+
+        return app( PurchaseOptions::class )->for( $product, $currency, $destination );
+    }
+
+    /**
+     * `productQuote`: null for a product that isn't visible; a quote with
+     * `valid: false` and `errors` for rejected options.
+     *
+     * @since 1.4.0
+     *
+     * @param  array<string, mixed>  $args  Arguments.
+     *
+     * @throws GraphQLError When the currency, quantity, or options are malformed.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function quote( array $args ): ?array
+    {
+        $product = Product::query()->storefrontVisible()->find( $args['product'] );
+
+        if ( null === $product ) {
+            return null;
+        }
+
+        $quantity = (int) ( $args['quantity'] ?? 1 );
+        $options  = $args['options'] ?? [];
+
+        if ( $quantity < 1 || $quantity > ProductQuoteRequest::MAX_QUANTITY ) {
+            throw new GraphQLError( __( 'The quantity must be between 1 and :max.', [ 'max' => ProductQuoteRequest::MAX_QUANTITY ] ), 'BAD_USER_INPUT' );
+        }
+
+        if ( ! is_array( $options ) ) {
+            throw new GraphQLError( __( 'options must be an object.' ), 'BAD_USER_INPUT' );
+        }
+
+        $validator = Validator::make( [ 'options' => $options ], AddCartItemRequest::optionRules() );
+
+        if ( $validator->fails() ) {
+            throw new GraphQLError( (string) $validator->errors()->first(), 'BAD_USER_INPUT' );
+        }
+
+        $quote = app( PriceQuoteService::class )->quote( $product, $options, $quantity, $this->currencyArgument( $args ) )->toArray();
+        $rows  = [];
+
+        foreach ( $quote['errors'] as $field => $messages ) {
+            foreach ( $messages as $message ) {
+                $rows[] = [ 'field' => (string) $field, 'code' => 'invalid', 'message' => $message ];
+            }
+        }
+
+        $quote['errors'] = $rows;
+
+        return $quote;
+    }
+
+    /**
+     * The `currency` argument, upper-cased, or the store's base currency.
+     *
+     * @since 1.4.0
+     *
+     * @param  array<string, mixed>  $args  Arguments.
+     *
+     * @throws GraphQLError When it isn't three letters.
+     *
+     * @return string
+     */
+    protected function currencyArgument( array $args ): string
+    {
+        if ( ! isset( $args['currency'] ) ) {
+            return strtoupper( app( StoreCurrencies::class )->base() );
+        }
+
+        if ( 1 !== preg_match( '/^[A-Za-z]{3}$/', (string) $args['currency'] ) ) {
+            throw new GraphQLError( __( 'currency must be a three-letter ISO 4217 code.' ), 'BAD_USER_INPUT' );
+        }
+
+        return strtoupper( (string) $args['currency'] );
     }
 
     /**

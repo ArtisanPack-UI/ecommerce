@@ -18,6 +18,7 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Http\Resources;
 
+use ArtisanPackUI\Ecommerce\Support\LineOptionDescriber;
 use Illuminate\Http\Request;
 
 /**
@@ -38,7 +39,12 @@ class OrderItemResource extends EcommerceResource
     public const NAME = 'orderItem';
 
     /**
+     * `option_lines` are read from the line's snapshot
+     * ({@see LineOptionDescriber::forOrderItem()}), so they never change
+     * after placement.
+     *
      * @since 1.0.0
+     * @since 1.4.0 Adds `option_lines`.
      *
      * @param  Request  $request  Request.
      *
@@ -51,6 +57,7 @@ class OrderItemResource extends EcommerceResource
             'product_id'         => $this->resource->product_id,
             'product_variant_id' => $this->resource->product_variant_id,
             'product_snapshot'   => $this->resource->product_snapshot,
+            'option_lines'       => app( LineOptionDescriber::class )->forOrderItem( $this->resource ),
             'quantity'           => $this->resource->quantity,
             'unit_price'         => $this->money( 'unit_price_amount' ),
             'discount'           => $this->money( 'discount_amount' ),

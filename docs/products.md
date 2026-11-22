@@ -200,15 +200,178 @@ and refunds always read stock rows fresh; only display code uses loaded rows.
 
 A product type that implements `Contracts\ProvidesStorefrontOptions` describes
 its add-to-cart form framework-agnostically: `storefrontOptions( $product )`
-returns fields of `type` (`text`, `textarea`, `number`, `quantity`, `select`,
-`radio`, `checkbox`, `info`), `name`, `label`, and optionally `options`,
-`rules`, `required`, `default`, `help`, and `meta`. Core implements it for:
+returns a list of fields. Core implements it for:
 
 - `grouped`: one `quantity` field per visible child (`name` `items.{childId}`,
   `meta.product_id` / `variant_id`, `meta.add_separately` true), because each
   child is added to the cart as its own line;
 - `bundled`: one read-only `info` field, "Includes", listing the members and
   quantities in `meta.items`.
+
+Every field has:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type` | string | `text`, `textarea`, `number`, `quantity`, `select`, `radio`, `checkbox`, `info`, or `swatch` (since 1.4.0). Satellites can add types through the `ap.ecommerce.storefrontOptions.fieldTypes` filter. |
+| `name` | string | The cart option key, in dot or bracket notation (`frame.mat`, `frame[mat]`). |
+| `label` | string | Translated label. |
+| `options` | list | Choices, required (and non-empty) for `select`, `radio`, and `swatch`. See below. |
+| `rules` | list or string | Laravel validation rules, enforced through `StorefrontOptionSchema::validate()`. |
+| `required` | bool | Adds `required` to `rules`. |
+| `default`, `help` | mixed, string | Initial value, help text. |
+| `visible_when` | list | Since 1.4.0. `[ { field, in: [values] } ]`: the field shows only when every condition's `field` holds one of its `in` values (for a list value such as a multi-checkbox, any of them). |
+| `meta` | object | Type-specific extras. Since 1.4.0, `meta.disables` is `{ value: { field: [values] } }`: choosing `value` in this field disables those values of other fields, client-side. Server validation stays authoritative. |
+
+Each entry in `options` is `{ value, label }` (`value` a string or number)
+and may carry (since 1.4.0):
+
+| Key | Shape | Meaning |
+|---|---|---|
+| `price_delta` | `{ amount, currency }` | What the choice adds, in minor units (`amount` may be negative). For display; the type's `priceLine()` still decides the price. |
+| `image` | `{ url, srcset?, alt }` | An image card for the choice. |
+| `swatch` | `{ hex?, image_url?, alt }` | A colour (`#rgb`, `#rrggbb`, or `#rrggbbaa`) or texture image; at least one of `hex` / `image_url`. |
+| `hint` | string | Short extra text ("+$5"). |
+| `disabled` | bool | Shown but not selectable. |
+
+`swatch` is a single choice rendered as swatches; a storefront that doesn't
+support it renders a `radio`.
+
+```php
+public function storefrontOptions( Product $product ): array
+{
+    return [
+        [
+            'type'    => 'swatch',
+            'name'    => 'color',
+            'label'   => __( 'Color' ),
+            'options' => [
+                [ 'value' => 'black', 'label' => __( 'Black' ), 'swatch' => [ 'hex' => '#111111', 'alt' => __( 'Black' ) ] ],
+                [
+                    'value'       => 'gold',
+                    'label'       => __( 'Metallic gold' ),
+                    'swatch'      => [ 'image_url' => 'https://cdn.example.com/gold.png', 'alt' => __( 'Gold' ) ],
+                    'image'       => [ 'url' => 'https://cdn.example.com/gold-card.jpg', 'srcset' => 'https://cdn.example.com/gold-card@2x.jpg 2x', 'alt' => __( 'Gold frame' ) ],
+                    'price_delta' => [ 'amount' => 500, 'currency' => 'USD' ],
+                    'hint'        => __( '+$5' ),
+                ],
+                [ 'value' => 'silver', 'label' => __( 'Silver' ), 'disabled' => true ],
+            ],
+            'meta'    => [ 'disables' => [ 'gold' => [ 'frame' => [ 'none' ] ] ] ],
+        ],
+        [
+            'type'     => 'select',
+            'name'     => 'frame',
+            'label'    => __( 'Frame' ),
+            'required' => true,
+            'rules'    => [ 'in:none,oak' ],
+            'options'  => [ [ 'value' => 'none', 'label' => __( 'No frame' ) ], [ 'value' => 'oak', 'label' => __( 'Black oak' ) ] ],
+        ],
+        [
+            'type'         => 'select',
+            'name'         => 'mat',
+            'label'        => __( 'Mat' ),
+            'required'     => true,
+            'visible_when' => [ [ 'field' => 'frame', 'in' => [ 'oak' ] ] ],
+            'options'      => [ [ 'value' => 'white', 'label' => __( 'White' ) ] ],
+        ],
+    ];
+}
+```
+
+`GET products/{product}/purchase-options` and the GraphQL
+`productPurchaseOptions` query serve the fields after
+`Support\StorefrontOptionSchema::normalize()`, which never throws: a
+malformed field (unknown type, bad name, a choice field with no valid
+options, a malformed `visible_when`) or option is dropped, and malformed
+option metadata or `meta.disables` is removed on its own, each with an
+`ecommerce.storefront_options.*` warning on the `ecommerce` log channel.
+
+**Hidden fields are not validated and are dropped.** A field whose
+`visible_when` doesn't match (or that depends on a hidden field) must not be
+validated or stored. Call the schema from `validateCartOptions()`:
+
+```php
+public function validateCartOptions( Product $product, array $options ): array
+{
+    // Drops hidden fields' values, validates the visible fields' rules
+    // (ValidationException keyed `options.{name}`), returns what is left.
+    $options = app( StorefrontOptionSchema::class )->validate( $this->storefrontOptions( $product ), $options );
+
+    return array_intersect_key( $options, array_flip( [ 'color', 'frame', 'mat' ] ) );
+}
+```
+
+The building blocks are public too: `isVisible( $field, $values )`,
+`visibleFields( $fields, $values )`, `stripHidden( $fields, $options )`, and
+`rules( $fields, $options )` (dot-path rules for the visible fields).
+
+### Line option descriptions
+
+Carts, orders, emails, and both APIs show a line's options as
+human-readable rows (`option_lines`: `[ { label, value } ]`, since 1.4.0),
+from `Support\LineOptionDescriber`:
+
+- a type implementing `Contracts\DescribesLineOptions` describes its own
+  options (`describeLineOptions( $product, $options )`), e.g.
+  "Size: 16 × 20 in", "Paper: Lustre", "Frame: Black oak";
+- other types get the default rows: the variant name (with an empty label),
+  then each scalar option with its key headlined (`gift_message` →
+  "Gift Message"; `true` → "Yes"). `variant_id`, `product_id`, keys starting
+  with `_`, nested arrays (grouped `items`), and empty values are skipped.
+
+`forCartItem( $item )` describes a cart line (the REST cart item resource and
+the GraphQL `CartItem.option_lines`). At placement the rows are copied into
+`order_items.product_snapshot.option_lines`, and `forOrderItem( $item )`
+reads them from there (the order item resource, `OrderItem.option_lines`,
+and the order notification templates), so a placed order keeps its wording
+after the store renames a choice. Orders placed before 1.4.0 fall back to
+describing the snapshot's options. Every result passes through
+`ap.ecommerce.lineOptions.described`.
+
+### Price quotes
+
+`Services\PriceQuoteService::quote( $product, $options, $quantity, $currency )`
+prices a product with a set of add-to-cart options without touching a cart
+(since 1.4.0), for live prices as a shopper configures a product. It runs the
+type's `validateCartOptions()` then `priceLine()` (for one unit and for the
+quantity) and returns a `ValueObjects\PriceQuote`: `unitPrice()`,
+`lineTotal()`, `currency()`, `quantity()`, `breakdown()`, `errors()`,
+`isValid()`, and `toArray()`. A type implementing `Contracts\QuotesPrice`
+adds breakdown rows (`[ { label, amount: Money } ]`).
+
+**Promotions are not applied**: a quote is the list price, and nothing is
+written, reserved, or dispatched. Rejected options don't throw: the quote
+has zero prices and `errors` keyed `options.*` (a type's
+`ValidationException` keys are prefixed with `options.`; an
+`InvalidArgumentException` becomes `options`). A variant of another product
+is `options.variant_id`; no price in the currency is `currency`.
+
+Over REST, `POST products/{product}/quote` (public for storefront-visible
+products, `catalog.read` rate policy, no Idempotency-Key):
+
+```json
+{ "options": { "size": "16x20", "frame": "oak" }, "quantity": 1, "currency": "USD" }
+```
+
+returns 200:
+
+```json
+{ "data": {
+    "currency": "USD", "quantity": 1,
+    "unit_price": { "amount": 18500, "currency": "USD", "formatted": "$185.00" },
+    "line_total": { "amount": 18500, "currency": "USD", "formatted": "$185.00" },
+    "breakdown": [
+        { "label": "Print (16 × 20 in)", "amount": { "amount": 12000, "currency": "USD", "formatted": "$120.00" } },
+        { "label": "Black oak frame", "amount": { "amount": 6500, "currency": "USD", "formatted": "$65.00" } }
+    ],
+    "errors": {}, "valid": true
+} }
+```
+
+or 422 problem+json with `errors: [ { field: "options.frame", code, message } ]`,
+or 404 when the product isn't on sale. GraphQL: `productQuote( product,
+options, quantity, currency )` (see [graphql.md](graphql.md)). The result
+passes through `ap.ecommerce.priceQuote.quoted`.
 
 ### Recording views
 
@@ -233,6 +396,36 @@ under the low-stock threshold fires `ProductStockLow` (webhook
 `product.stock.low`), and running out fires `ProductOutOfStock`
 (`product.out.of.stock`), next to the `ap.ecommerce.inventory.lowStock` /
 `outOfStock` hooks.
+
+### Back-in-stock subscriptions
+
+Since 1.4.0, shoppers can ask to hear when an out-of-stock product (or one of
+its variants) can be bought again:
+
+```php
+$service = app( BackInStockService::class );
+
+$subscription = $service->subscribe( $product, $variant, 'ada@example.com', $customer, 'fr' );
+$service->isSubscribed( $product, $variant, 'ada@example.com' ); // true
+$service->unsubscribe( $subscription );
+```
+
+`subscribe()` lowercases and trims the email, links the customer record with
+that email when no customer is passed, and returns the existing pending
+subscription instead of a duplicate. A `null` variant subscribes to the
+product as a whole. It throws `InvalidArgumentException` for an invalid
+email or another product's variant. Storefront sign-up forms should throttle
+it with the `ecommerce.backInStock.subscribe` rate policy
+(`EcommerceRateLimiter::attempt()`).
+
+When available stock (on hand less reserved) on a tracked,
+non-backorderable row goes from zero or less to above zero — a restock, a
+refund that restocks, or a released reservation, but not a rise from 3 to
+5 — `InventoryService` fires `ap.ecommerce.inventory.backInStock`, and every
+pending subscriber of that product or variant (plus product-level
+subscribers when a variant restocks) is sent `inventory.back-in-stock.customer`
+(see [notifications.md](notifications.md#back-in-stock)). Each subscription is
+notified once. Bundles aren't notified when a member restocks.
 
 ## Categories and tags
 

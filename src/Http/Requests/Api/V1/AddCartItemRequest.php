@@ -42,8 +42,23 @@ class AddCartItemRequest extends ApiFormRequest
             'product_id'         => [ 'required', 'integer', 'min:1' ],
             'product_variant_id' => [ 'nullable', 'integer', 'min:1' ],
             'quantity'           => [ 'required', 'integer', 'min:1', 'max:10000' ],
-            'options'            => [ 'nullable', 'array', 'max:20' ],
-            'options.*'          => [ 'nullable', self::scalarOption( ... ) ],
+            ...self::optionRules(),
+        ];
+    }
+
+    /**
+     * The rules for an `options` payload: at most 20 options, each a scalar
+     * of at most 255 characters. Shared with the price quote endpoints.
+     *
+     * @since 1.4.0
+     *
+     * @return array<string, array<int, mixed>>
+     */
+    public static function optionRules(): array
+    {
+        return [
+            'options'   => [ 'nullable', 'array', 'max:20' ],
+            'options.*' => [ 'nullable', self::scalarOption( ... ) ],
         ];
     }
 

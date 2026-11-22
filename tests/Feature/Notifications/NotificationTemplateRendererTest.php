@@ -110,6 +110,7 @@ it( 'registers the whole notification catalog', function (): void {
         NotificationCatalog::LOW_STOCK_ADMIN,
         NotificationCatalog::OUT_OF_STOCK_ADMIN,
         NotificationCatalog::REVIEW_AWAITING_MODERATION_ADMIN,
+        NotificationCatalog::BACK_IN_STOCK,
     ] );
 } );
 

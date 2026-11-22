@@ -35,6 +35,7 @@ use ArtisanPackUI\Ecommerce\Models\ProductReview;
 use ArtisanPackUI\Ecommerce\Models\ProductVariant;
 use ArtisanPackUI\Ecommerce\Models\Refund;
 use ArtisanPackUI\Ecommerce\Models\Shipment;
+use ArtisanPackUI\Ecommerce\Support\LineOptionDescriber;
 use ArtisanPackUI\Ecommerce\Support\MoneyFormatter;
 use ArtisanPackUI\Ecommerce\Support\OrderViewToken;
 use ArtisanPackUI\Ecommerce\Support\TaxLabel;
@@ -69,9 +70,11 @@ class NotificationContext
     }
 
     /**
-     * `Order`, with its customer and lines.
+     * `Order`, with its customer and lines. Each line carries its
+     * `option_lines` (`label`, `value`) from the order snapshot.
      *
      * @since 1.0.0
+     * @since 1.4.0 Lines carry `option_lines`.
      *
      * @param  Order  $order  Order.
      *
@@ -108,11 +111,12 @@ class NotificationContext
             // A signed link for guests, who can't sign in to see it (#175).
             'view_url'         => null === $order->customer_id ? $this->viewUrl( $order ) : null,
             'items'            => $order->items->map( fn ( $item ): array => [
-                'name'       => (string) ( $item->product_snapshot['name'] ?? '' ),
-                'sku'        => $item->product_snapshot['sku'] ?? null,
-                'quantity'   => (int) $item->quantity,
-                'unit_price' => $this->money( (int) $item->unit_price_amount, (string) $item->unit_price_currency ),
-                'total'      => $this->money( (int) $item->total_amount, (string) $item->total_currency ),
+                'name'         => (string) ( $item->product_snapshot['name'] ?? '' ),
+                'sku'          => $item->product_snapshot['sku'] ?? null,
+                'option_lines' => app( LineOptionDescriber::class )->forOrderItem( $item ),
+                'quantity'     => (int) $item->quantity,
+                'unit_price'   => $this->money( (int) $item->unit_price_amount, (string) $item->unit_price_currency ),
+                'total'        => $this->money( (int) $item->total_amount, (string) $item->total_currency ),
             ] )->values()->all(),
         ];
     }
@@ -212,6 +216,36 @@ class NotificationContext
     public function product( ?Product $product ): array
     {
         return [ 'name' => $product?->name, 'sku' => $product?->sku ];
+    }
+
+    /**
+     * `Product` for `inventory.back-in-stock.customer`: its name and SKU
+     * (the variant's SKU when there is one), the variant name, and a link
+     * to it built from `notifications.product_url` (`{slug}` and `{id}`
+     * placeholders; null when unset), filtered through
+     * `ap.ecommerce.backInStock.productUrl`.
+     *
+     * @since 1.4.0
+     *
+     * @param  Product              $product  Product.
+     * @param  ProductVariant|null  $variant  Variant.
+     *
+     * @return array{name: string|null, sku: string|null, variant_name: string|null, url: string|null}
+     */
+    public function backInStockProduct( Product $product, ?ProductVariant $variant = null ): array
+    {
+        $template = config( 'artisanpack.ecommerce.notifications.product_url' );
+        $url      = is_string( $template ) && '' !== trim( $template )
+            ? str_replace( [ '{slug}', '{id}' ], [ rawurlencode( (string) $product->slug ), (string) $product->getKey() ], $template )
+            : null;
+        $url      = applyFilters( 'ap.ecommerce.backInStock.productUrl', $url, $product, $variant );
+
+        return [
+            'name'         => $product->name,
+            'sku'          => $variant?->sku ?? $product->sku,
+            'variant_name' => null === $variant || '' === trim( (string) $variant->name ) ? null : (string) $variant->name,
+            'url'          => is_string( $url ) && '' !== $url ? $url : null,
+        ];
     }
 
     /**

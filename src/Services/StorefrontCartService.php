@@ -61,6 +61,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Money\Currency;
 use Money\Money;
@@ -1341,6 +1342,9 @@ class StorefrontCartService
      * line stores in its own column). Unknown options are dropped.
      *
      * @since 1.0.0
+     * @since 1.4.0 A `ValidationException` from the type (as
+     *              `StorefrontOptionSchema::validate()` throws) is refused
+     *              too, with its first message.
      *
      * @param  Product               $product  Product.
      * @param  ProductVariant|null   $variant  Variant.
@@ -1356,6 +1360,10 @@ class StorefrontCartService
             $validated = $product->productType()->validateCartOptions( $product, array_filter( [ 'variant_id' => $variant?->id ] ) + $options );
         } catch ( InvalidArgumentException ) {
             throw new CartOperationException( 'options', 'options-invalid', __( 'Choose the options this product needs.' ) );
+        } catch ( ValidationException $exception ) {
+            $message = collect( $exception->errors() )->flatten()->first();
+
+            throw new CartOperationException( 'options', 'options-invalid', is_string( $message ) && '' !== $message ? $message : __( 'Choose the options this product needs.' ) );
         }
 
         unset( $validated['variant_id'] );

@@ -749,6 +749,15 @@ class OpenApiGenerator
                     'currency' => [ 'type' => [ 'string', 'null' ], 'minLength' => 3, 'maxLength' => 3 ],
                 ],
             ],
+            'LineOption' => [
+                'type'        => 'object',
+                'description' => 'A human-readable cart or order line option ("Size: 16 × 20 in"). `label` may be empty, e.g. for a variant name.',
+                'required'    => [ 'label', 'value' ],
+                'properties'  => [
+                    'label' => [ 'type' => 'string' ],
+                    'value' => [ 'type' => 'string' ],
+                ],
+            ],
             'Problem' => [
                 'type'        => 'object',
                 'description' => 'RFC 7807 problem details (engine spec §11.5).',

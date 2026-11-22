@@ -122,11 +122,30 @@ final class ResponseSchemas
                     'image_media_id'      => [ 'type' => [ 'integer', 'null' ] ],
                 ], [ 'variant_id', 'attribute_value_ids', 'available', 'stock' ] ) ),
                 'options'    => self::listOf( self::object( [
-                    'type'  => self::string(),
-                    'name'  => self::string(),
-                    'label' => self::string(),
-                ], [ 'type', 'name', 'label' ], true ) ),
+                    'type'         => [ 'type' => 'string', 'enum' => [ 'text', 'textarea', 'number', 'quantity', 'select', 'radio', 'checkbox', 'info', 'swatch' ], 'description' => 'Satellites may register more types; unknown ones render as text.' ],
+                    'name'         => self::string(),
+                    'label'        => self::string(),
+                    'options'      => self::listOf( self::object( [
+                        'value'       => [ 'type' => [ 'string', 'integer', 'number' ] ],
+                        'label'       => self::string(),
+                        'price_delta' => self::object( [ 'amount' => [ 'type' => 'integer' ], 'currency' => self::string() ], [ 'amount', 'currency' ] ),
+                        'image'       => self::object( [ 'url' => self::string(), 'srcset' => self::string(), 'alt' => self::string() ], [ 'url', 'alt' ] ),
+                        'swatch'      => self::object( [ 'hex' => self::string(), 'image_url' => self::string(), 'alt' => self::string() ], [ 'alt' ] ),
+                        'hint'        => self::string(),
+                        'disabled'    => [ 'type' => 'boolean' ],
+                    ], [ 'value', 'label' ], true ) ),
+                    'visible_when' => self::listOf( self::object( [ 'field' => self::string(), 'in' => self::listOf( [ 'type' => [ 'string', 'integer', 'number', 'boolean' ] ] ) ], [ 'field', 'in' ] ) ),
+                ], [ 'type', 'name' ], true ) ),
             ], [ 'product_id', 'currency', 'stock', 'variants', 'options' ] ),
+            'productsQuote'                     => self::object( [
+                'currency'   => self::string(),
+                'quantity'   => [ 'type' => 'integer' ],
+                'unit_price' => self::quoteMoney(),
+                'line_total' => self::quoteMoney(),
+                'breakdown'  => self::listOf( self::object( [ 'label' => self::string(), 'amount' => self::quoteMoney() ], [ 'label', 'amount' ] ) ),
+                'errors'     => [ 'type' => 'object', 'additionalProperties' => self::listOf( self::string() ), 'description' => 'Empty on success.' ],
+                'valid'      => [ 'type' => 'boolean' ],
+            ], [ 'currency', 'quantity', 'unit_price', 'line_total', 'breakdown', 'errors', 'valid' ] ),
             'tagsIndex'                         => self::listOf( self::object( [ 'id' => [ 'type' => 'integer' ], 'name' => self::string(), 'slug' => self::string(), 'products_count' => [ 'type' => 'integer' ] ], [ 'id', 'name', 'slug', 'products_count' ] ) ),
             'webhooks'                          => null,
             default                             => null,
@@ -256,6 +275,19 @@ final class ResponseSchemas
             'prices_include_tax'  => [ 'type' => 'boolean' ],
             'tax_label'           => [ 'type' => [ 'string', 'null' ] ],
         ], [ 'price', 'on_sale', 'price_including_tax', 'price_excluding_tax', 'prices_include_tax' ] );
+    }
+
+    /**
+     * Money in a {@see \ArtisanPackUI\Ecommerce\ValueObjects\PriceQuote}:
+     * minor units, currency, and a display string.
+     *
+     * @since 1.4.0
+     *
+     * @return array<string, mixed>
+     */
+    private static function quoteMoney(): array
+    {
+        return self::object( [ 'amount' => [ 'type' => 'integer' ], 'currency' => self::string(), 'formatted' => self::string() ], [ 'amount', 'currency', 'formatted' ] );
     }
 
     /**
