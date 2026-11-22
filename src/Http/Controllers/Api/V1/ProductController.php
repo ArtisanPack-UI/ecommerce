@@ -293,7 +293,8 @@ class ProductController extends ApiController
             return Problem::make( 422, 'validation-failed', __( 'Validation failed' ), __( 'The options are not valid for this product.' ), $request, $errors );
         }
 
-        return new JsonResponse( [ 'data' => $quote->toArray() ] );
+        // An empty `errors` map is `{}`, as the schema declares, not `[]`.
+        return new JsonResponse( [ 'data' => [ ...$quote->toArray(), 'errors' => (object) $quote->errors() ] ] );
     }
 
     /**

@@ -363,14 +363,15 @@ class OrderPlacementService
                 'order_id'           => $order->id,
                 'product_id'         => $item->product_id,
                 'product_variant_id' => $item->product_variant_id,
-                'product_snapshot'   => array_merge( array_filter( [
+                // The type's snapshot may override the base keys, but `option_lines`
+                // always come from the describer (which asks the type itself).
+                'product_snapshot'   => [ ...array_merge( array_filter( [
                     'name'         => $product?->name,
                     'sku'          => $variant?->sku ?? $product?->sku,
                     'variant_name' => $variant?->name,
                     'free_item'    => $item->isFreeItem() ? true : null,
                     'promotion_id' => $item->isFreeItem() ? ( $item->meta['promotion_id'] ?? null ) : null,
-                    'option_lines' => app( LineOptionDescriber::class )->forCartItem( $item ),
-                ], static fn ( mixed $value ): bool => null !== $value ), $product->productType()->buildOrderSnapshot( $item ) ),
+                ], static fn ( mixed $value ): bool => null !== $value ), $product->productType()->buildOrderSnapshot( $item ) ), 'option_lines' => app( LineOptionDescriber::class )->forCartItem( $item ) ],
                 'quantity'            => (int) $item->quantity,
                 'unit_price_amount'   => (int) $item->unit_price_amount,
                 'unit_price_currency' => $currency,

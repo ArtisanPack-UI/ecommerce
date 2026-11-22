@@ -172,6 +172,37 @@ it( 'copies the rows into the order snapshot so later product edits don\'t chang
         ->and( $this->describer->describe( $product, [ 'size' => '16x20', 'paper' => 'lustre' ] ) )->toContain( [ 'label' => 'Paper', 'value' => 'Lustre Pro' ] );
 } );
 
+it( 'records the describer\'s rows even when the type\'s snapshot sets option_lines', function (): void {
+    app( ProductTypeRegistry::class )->register( 'snapshotting-print', new class extends LineOptionsPrintType {
+        public function key(): string
+        {
+            return 'snapshotting-print';
+        }
+
+        public function buildOrderSnapshot( CartItem $item ): array
+        {
+            return [ ...parent::buildOrderSnapshot( $item ), 'option_lines' => [ [ 'label' => 'Stale', 'value' => 'Row' ] ], 'name' => 'From the type' ];
+        }
+    } );
+
+    checkoutGateway();
+    checkoutZone();
+    $product  = checkoutProduct( [ 'USD' => 2_000 ], [ 'type' => 'snapshotting-print', 'name' => 'Engine Print' ] );
+    $carts    = app( StorefrontCartService::class );
+    $checkout = app( CheckoutService::class );
+    $cart     = $carts->create( 'USD' );
+    $carts->addItem( $cart, $product->id, null, 1, [ 'size' => '8x10', 'paper' => 'matte' ] );
+    $checkout->setEmail( $cart, 'ada@example.test' );
+    $checkout->setAddress( $cart, checkoutAddress() );
+    $checkout->setShippingMethod( $cart, $checkout->shippingRates( $cart )->first()->id() );
+    $checkout->setPaymentGateway( $cart, 'fake' );
+
+    $snapshot = app( OrderPlacementService::class )->place( $cart->refresh() )->items->sole()->product_snapshot;
+
+    expect( $snapshot['option_lines'] )->toBe( [ [ 'label' => 'Size', 'value' => '8 × 10 in' ], [ 'label' => 'Paper', 'value' => 'Matte' ] ] )
+        ->and( $snapshot['name'] )->toBe( 'From the type' );
+} );
+
 it( 'reads order item option_lines from the snapshot, falling back to the snapshot options', function (): void {
     $product = Product::factory()->create( [ 'type' => 'simple' ] );
     $order   = Order::factory()->create();

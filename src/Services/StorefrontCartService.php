@@ -67,6 +67,7 @@ use Money\Currency;
 use Money\Money;
 use RuntimeException;
 use Throwable;
+use TypeError;
 
 /**
  * @package    ArtisanPack_UI
@@ -1358,7 +1359,8 @@ class StorefrontCartService
     {
         try {
             $validated = $product->productType()->validateCartOptions( $product, array_filter( [ 'variant_id' => $variant?->id ] ) + $options );
-        } catch ( InvalidArgumentException ) {
+        } catch ( InvalidArgumentException | TypeError ) {
+            // A TypeError is a type that didn't expect an option's shape (a nested value where it reads a scalar).
             throw new CartOperationException( 'options', 'options-invalid', __( 'Choose the options this product needs.' ) );
         } catch ( ValidationException $exception ) {
             $message = collect( $exception->errors() )->flatten()->first();

@@ -219,7 +219,7 @@ Every field has:
 | `rules` | list or string | Laravel validation rules, enforced through `StorefrontOptionSchema::validate()`. |
 | `required` | bool | Adds `required` to `rules`. |
 | `default`, `help` | mixed, string | Initial value, help text. |
-| `visible_when` | list | Since 1.4.0. `[ { field, in: [values] } ]`: the field shows only when every condition's `field` holds one of its `in` values (for a list value such as a multi-checkbox, any of them). |
+| `visible_when` | list | Since 1.4.0. `[ { field, in: [values] } ]`: the field shows only when every condition's `field` holds one of its `in` values (for a list value such as a multi-checkbox, any of them). An empty value never matches, so a field that hasn't been answered hides its dependants; `''` in `in` is ignored (a condition left with no values drops the field). |
 | `meta` | object | Type-specific extras. Since 1.4.0, `meta.disables` is `{ value: { field: [values] } }`: choosing `value` in this field disables those values of other fields, client-side. Server validation stays authoritative. |
 
 Each entry in `options` is `{ value, label }` (`value` a string or number)

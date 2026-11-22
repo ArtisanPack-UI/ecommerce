@@ -234,7 +234,37 @@ it( 'refuses oversized or nested option payloads like the cart does', function (
 
     expect( gql( $this, $query, [ 'id' => $product->id, 'options' => $options ] )->json( 'errors.0.extensions.code' ) )->toBe( 'BAD_USER_INPUT' );
 } )->with( [
-    'too many options' => [ array_fill_keys( array_map( static fn ( int $i ): string => "o{$i}", range( 1, 21 ) ), 'x' ) ],
-    'a nested value'   => [ [ 'size' => [ 'deep' => [ 'deeper' => 'x' ] ] ] ],
-    'a long value'     => [ [ 'size' => str_repeat( 'x', 256 ) ] ],
+    'too many options'    => [ array_fill_keys( array_map( static fn ( int $i ): string => "o{$i}", range( 1, 21 ) ), 'x' ) ],
+    'nested too deep'     => [ [ 'frame' => [ 'mat' => [ 'colour' => [ 'shade' => 'x' ] ] ] ] ],
+    'too many values'     => [ [ 'frame' => array_fill( 0, 101, 'x' ) ] ],
+    'a long value'        => [ [ 'size' => str_repeat( 'x', 256 ) ] ],
+    'a long nested value' => [ [ 'frame' => [ 'mat' => str_repeat( 'x', 256 ) ] ] ],
 ] );
+
+it( 'passes nested options (dot- or bracket-named fields) through to the product type', function (): void {
+    $product = quotedProduct( 'quote-configurable-print' );
+
+    // Within the limits, a nested value reaches the type, which decides: here it rejects it (no
+    // size) — a quote with options.* errors, not a payload error.
+    $this->postJson( "/api/ecommerce/v1/products/{$product->id}/quote", [ 'options' => [ 'engraving' => [ 'text' => 'Sam' ] ] ] )
+        ->assertStatus( 422 )
+        ->assertJsonPath( 'errors.0.field', 'options.size' );
+
+    // A type that reads a scalar where a nested value arrives refuses it instead of erroring.
+    $this->postJson( "/api/ecommerce/v1/products/{$product->id}/quote", [ 'options' => [ 'size' => '8x10', 'frame' => [ 'mat' => 'white' ] ] ] )
+        ->assertStatus( 422 )
+        ->assertJsonPath( 'errors.0.field', 'options' );
+
+    $query = 'query ($id: ID!, $options: JSON) { productQuote(product: $id, options: $options) { valid errors { field } } }';
+
+    gql( $this, $query, [ 'id' => $product->id, 'options' => [ 'size' => '8x10', 'frame' => 'none', 'engraving' => [ 'text' => 'Sam' ] ] ] )
+        ->assertJsonPath( 'data.productQuote.valid', true );
+} );
+
+it( 'serves an empty errors map as a JSON object over REST', function (): void {
+    $product = quotedProduct( 'quote-configurable-print' );
+
+    $response = $this->postJson( "/api/ecommerce/v1/products/{$product->id}/quote", [ 'options' => [ 'size' => '8x10', 'frame' => 'none' ] ] )->assertOk();
+
+    expect( $response->getContent() )->toContain( '"errors":{}' );
+} );

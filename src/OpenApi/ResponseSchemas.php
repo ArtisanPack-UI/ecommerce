@@ -122,7 +122,7 @@ final class ResponseSchemas
                     'image_media_id'      => [ 'type' => [ 'integer', 'null' ] ],
                 ], [ 'variant_id', 'attribute_value_ids', 'available', 'stock' ] ) ),
                 'options'    => self::listOf( self::object( [
-                    'type'         => [ 'type' => 'string', 'enum' => [ 'text', 'textarea', 'number', 'quantity', 'select', 'radio', 'checkbox', 'info', 'swatch' ], 'description' => 'Satellites may register more types; unknown ones render as text.' ],
+                    'type'         => [ 'type' => 'string', 'description' => 'Built in: text, textarea, number, quantity, select, radio, checkbox, info, swatch. Satellites may register more types (ap.ecommerce.storefrontOptions.fieldTypes); unknown ones render as text.' ],
                     'name'         => self::string(),
                     'label'        => self::string(),
                     'options'      => self::listOf( self::object( [

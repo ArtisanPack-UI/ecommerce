@@ -51,6 +51,7 @@ use ArtisanPackUI\Ecommerce\Support\AfterCommit;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use InvalidArgumentException;
 
@@ -105,22 +106,32 @@ class BackInStockService
             throw new InvalidArgumentException( __( 'That variant is not available for this product.' ) );
         }
 
-        $existing = $this->pendingFor( $product, $variant, $email )->first();
-
-        if ( null !== $existing ) {
-            return $existing;
-        }
-
         $customer ??= Customer::query()->where( 'email', $email )->first();
         $locale     = null === $locale ? null : mb_substr( trim( $locale ), 0, 20 );
 
-        $subscription = BackInStockSubscription::query()->create( [
-            'email'              => $email,
-            'customer_id'        => $customer?->getKey(),
-            'product_id'         => $product->getKey(),
-            'product_variant_id' => $variant?->getKey(),
-            'locale'             => '' === (string) $locale ? null : $locale,
-        ] );
+        // Locking the product row serializes concurrent sign-ups for it, so two
+        // requests can't both miss the pending row and insert a duplicate.
+        [ $subscription, $created ] = DB::transaction( function () use ( $product, $variant, $email, $customer, $locale ): array {
+            Product::query()->whereKey( $product->getKey() )->lockForUpdate()->first();
+
+            $existing = $this->pendingFor( $product, $variant, $email )->first();
+
+            if ( null !== $existing ) {
+                return [ $existing, false ];
+            }
+
+            return [ BackInStockSubscription::query()->create( [
+                'email'              => $email,
+                'customer_id'        => $customer?->getKey(),
+                'product_id'         => $product->getKey(),
+                'product_variant_id' => $variant?->getKey(),
+                'locale'             => '' === (string) $locale ? null : $locale,
+            ] ), true ];
+        } );
+
+        if ( ! $created ) {
+            return $subscription;
+        }
 
         AfterCommit::action( 'ap.ecommerce.backInStock.subscribed', $subscription, $product, $variant );
 
@@ -189,6 +200,11 @@ class BackInStockService
             return 0;
         }
 
+        // No inventory components (an untracked or missing type): not a restock.
+        if ( [] === $this->stock->components( $product, $variant, 1 ) ) {
+            return 0;
+        }
+
         $sellable = $this->stock->sellable( $product, $variant );
 
         if ( null !== $sellable && $sellable < 1 ) {
@@ -245,26 +261,46 @@ class BackInStockService
             return false;
         }
 
-        $customer  = null === $subscription->customer_id ? null : $subscription->customer;
-        $recipient = null !== $customer && '' !== (string) $customer->email ? $customer : Notification::route( 'mail', $subscription->email );
+        // Claim the row under a lock and hand off in the same transaction, so
+        // overlapping restock runs notify each subscriber once, and a row
+        // unsubscribed meanwhile is skipped. The notification is queued after
+        // commit; when nothing is sent the row stays pending.
+        $claimed = DB::transaction( function () use ( $subscription, $product, $variant ): ?BackInStockSubscription {
+            $locked = BackInStockSubscription::query()->whereKey( $subscription->getKey() )->lockForUpdate()->first();
 
-        $sent = $this->notifications->send(
-            NotificationCatalog::BACK_IN_STOCK,
-            $recipient,
-            [
-                'Product'  => $this->context->backInStockProduct( $product, $variant ),
-                'Customer' => $this->context->customer( $customer, $subscription->email ),
-            ],
-            $subscription,
-            locale: $subscription->locale,
-        );
+            if ( null === $locked || ! $locked->isPending() ) {
+                return null;
+            }
 
-        if ( $sent < 1 ) {
+            $customer  = null === $locked->customer_id ? null : $locked->customer;
+            $recipient = null !== $customer && '' !== (string) $customer->email ? $customer : Notification::route( 'mail', $locked->email );
+
+            $sent = $this->notifications->send(
+                NotificationCatalog::BACK_IN_STOCK,
+                $recipient,
+                [
+                    'Product'  => $this->context->backInStockProduct( $product, $variant ),
+                    'Customer' => $this->context->customer( $customer, $locked->email ),
+                ],
+                $locked,
+                locale: $locked->locale,
+            );
+
+            if ( $sent < 1 ) {
+                return null;
+            }
+
+            $locked->notified_at = Carbon::now();
+            $locked->save();
+
+            return $locked;
+        } );
+
+        if ( null === $claimed ) {
             return false;
         }
 
-        $subscription->notified_at = Carbon::now();
-        $subscription->save();
+        $subscription->setRawAttributes( $claimed->getAttributes(), true );
 
         AfterCommit::action( 'ap.ecommerce.backInStock.notified', $subscription, $product, $variant );
 

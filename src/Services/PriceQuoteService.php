@@ -41,6 +41,7 @@ use InvalidArgumentException;
 use Money\Money;
 use RuntimeException;
 use Throwable;
+use TypeError;
 
 /**
  * @package    ArtisanPack_UI
@@ -84,7 +85,8 @@ class PriceQuoteService
             $validated = $type->validateCartOptions( $product, $options );
         } catch ( ValidationException $exception ) {
             return PriceQuote::invalid( $currency, $quantity, $this->optionErrors( $exception->errors() ) );
-        } catch ( InvalidArgumentException ) {
+        } catch ( InvalidArgumentException | TypeError ) {
+            // A TypeError is a type that didn't expect an option's shape (a nested value where it reads a scalar).
             return PriceQuote::invalid( $currency, $quantity, [ 'options' => [ __( 'Choose the options this product needs.' ) ] ] );
         }
 

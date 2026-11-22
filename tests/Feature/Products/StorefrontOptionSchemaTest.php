@@ -213,3 +213,40 @@ it( 'keeps grouped and bundled fields unchanged (backwards compatible)', functio
     expect( $grouped[0]['type'] )->toBe( 'quantity' )
         ->and( $grouped[0]['name'] )->toStartWith( 'items.' );
 } );
+
+it( 'keeps the first of two fields that name the same option in dot and bracket notation', function (): void {
+    $fields = app( StorefrontOptionSchema::class )->normalize( [
+        [ 'type' => 'text', 'name' => 'frame.mat', 'label' => 'Mat', 'rules' => [ 'max:5' ] ],
+        [ 'type' => 'text', 'name' => 'frame[mat]', 'label' => 'Mat again', 'rules' => [ 'max:500' ] ],
+    ] );
+
+    expect( $fields )->toHaveCount( 1 )
+        ->and( $fields[0]['label'] )->toBe( 'Mat' )
+        ->and( app( StorefrontOptionSchema::class )->rules( $fields, [] ) )->toBe( [ 'frame.mat' => [ 'max:5' ] ] );
+} );
+
+it( 'drops a field whose rules the validator can\'t take, keeping valid rule forms', function (): void {
+    $fields = app( StorefrontOptionSchema::class )->normalize( [
+        [ 'type' => 'text', 'name' => 'a', 'rules' => 'required|max:5' ],
+        [ 'type' => 'text', 'name' => 'b', 'rules' => [ 'max:5', Illuminate\Validation\Rule::in( [ 'x' ] ), static fn (): bool => true ] ],
+        [ 'type' => 'text', 'name' => 'c', 'rules' => 42 ],
+        [ 'type' => 'text', 'name' => 'd', 'rules' => [ 'max:5', [ 'nested' ] ] ],
+    ] );
+
+    expect( array_column( $fields, 'name' ) )->toBe( [ 'a', 'b' ] );
+} );
+
+it( 'never matches an empty value in visible_when, ignoring an empty string in `in`', function (): void {
+    $schema = app( StorefrontOptionSchema::class );
+    $fields = $schema->normalize( [
+        [ 'type' => 'text', 'name' => 'frame' ],
+        [ 'type' => 'text', 'name' => 'mat', 'required' => true, 'visible_when' => [ [ 'field' => 'frame', 'in' => [ '', 'oak' ] ] ] ],
+        [ 'type' => 'text', 'name' => 'note', 'visible_when' => [ [ 'field' => 'frame', 'in' => [ '' ] ] ] ],
+    ] );
+
+    expect( array_column( $fields, 'name' ) )->toBe( [ 'frame', 'mat' ] )
+        ->and( $fields[1]['visible_when'][0]['in'] )->toBe( [ 'oak' ] )
+        ->and( array_column( $schema->visibleFields( $fields, [ 'frame' => '' ] ), 'name' ) )->toBe( [ 'frame' ] )
+        ->and( $schema->rules( $fields, [ 'frame' => '' ] ) )->not->toHaveKey( 'mat' )
+        ->and( array_column( $schema->visibleFields( $fields, [ 'frame' => 'oak' ] ), 'name' ) )->toBe( [ 'frame', 'mat' ] );
+} );

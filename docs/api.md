@@ -321,7 +321,7 @@ All of these use the `catalog.read` policy and the public cache mode.
 |---|---|---|---|---|
 | `POST` | `products/{product}/reviews` | optional | `review.submit` | yes |
 | `GET` | `products/{product}/reviews/eligibility` → `{ allowed, reason, verified_purchase }` | optional | `catalog.read` | |
-| `POST` | `products/{product}/quote` (`{ options?, quantity?: 1, currency? }`) → `{ currency, quantity, unit_price, line_total, breakdown, errors, valid }`; 422 with `options.*` field errors; 404 for a product that isn't on sale. List price, no side effects ([products.md](products.md#price-quotes)) | public | `catalog.read` | |
+| `POST` | `products/{product}/quote` (`{ options?, quantity?: 1, currency? }`) → `{ currency, quantity, unit_price, line_total, breakdown, errors, valid }` (`errors` is `{}` when valid); 422 with `options.*` field errors, or for a malformed payload (more than 20 top-level options, nesting deeper than 3 levels, more than 100 values, or a value over 255 characters — the cart's limits, which allow nested values for dot-named fields); 404 for a product that isn't on sale. List price, no side effects ([products.md](products.md#price-quotes)) | public | `catalog.read` | |
 | `POST` | `products/{product}/views` → 202 (fires `ap.ecommerce.product.viewed` for satellites such as recently-viewed) | optional | `catalog.read` | yes |
 | `GET` | `downloads/{token}` | the token | `catalog.read` | |
 | `GET` | `downloads/{token}/stream` (supports `Range`) | the token | `catalog.read` | |

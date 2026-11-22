@@ -117,8 +117,10 @@ variant name, shows its value alone):
 {% for item in Order.items %}{{ item.name }}{% for row in item.option_lines %}<br><small>{% if row.label %}{{ row.label }}: {% endif %}{{ row.value }}</small>{% endfor %}{% endfor %}
 ```
 
-Rows already seeded in `notification_templates` keep their copy; re-save or
-reseed them to pick up the new defaults.
+Rows already stored in `notification_templates` keep their copy: seeding
+only creates missing rows, and saving a template stores the body submitted.
+To pick up the new defaults, update each stored row's body to the catalog
+default, or delete the row so the next template listing seeds it again.
 
 Two variables are per recipient:
 

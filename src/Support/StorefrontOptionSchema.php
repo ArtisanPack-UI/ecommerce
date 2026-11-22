@@ -43,10 +43,15 @@ declare( strict_types=1 );
 
 namespace ArtisanPackUI\Ecommerce\Support;
 
+use Closure;
+use Illuminate\Contracts\Validation\InvokableRule;
+use Illuminate\Contracts\Validation\Rule;
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
+use Stringable;
 
 /**
  * @package    ArtisanPack_UI
@@ -98,13 +103,16 @@ class StorefrontOptionSchema
                 continue;
             }
 
-            if ( isset( $names[ $normalized['name'] ] ) ) {
+            // `frame[mat]` and `frame.mat` are the same option: the first wins.
+            $path = $this->path( $normalized['name'] );
+
+            if ( isset( $names[ $path ] ) ) {
                 $this->warn( 'duplicate_field', (string) $index, [ 'name' => $normalized['name'] ] );
 
                 continue;
             }
 
-            $names[ $normalized['name'] ] = true;
+            $names[ $path ]               = true;
             $clean[]                      = $normalized;
         }
 
@@ -342,6 +350,10 @@ class StorefrontOptionSchema
             return $this->reject( 'invalid_label', $index, [ 'name' => $name ] );
         }
 
+        if ( array_key_exists( 'rules', $field ) && ! $this->validRules( $field['rules'] ) ) {
+            return $this->reject( 'invalid_rules', $index, [ 'name' => $name ] );
+        }
+
         if ( array_key_exists( 'options', $field ) || in_array( $type, self::CHOICE_TYPES, true ) ) {
             if ( ! is_array( $field['options'] ?? null ) ) {
                 return $this->reject( 'invalid_options', $index, [ 'name' => $name ] );
@@ -495,10 +507,46 @@ class StorefrontOptionSchema
                 }
             }
 
-            $clean[] = [ 'field' => $condition['field'], 'in' => array_values( $condition['in'] ) ];
+            // An empty value never matches (an unanswered field isn't a choice), so `''` is dropped.
+            $values = array_values( array_filter( $condition['in'], static fn ( mixed $value ): bool => '' !== $value ) );
+
+            if ( [] === $values ) {
+                return null;
+            }
+
+            $clean[] = [ 'field' => $condition['field'], 'in' => $values ];
         }
 
         return $clean;
+    }
+
+    /**
+     * Whether `rules` is something Laravel's validator takes: a pipe string,
+     * or a list of strings, closures, and rule objects.
+     *
+     * @since 1.4.0
+     *
+     * @param  mixed  $rules  Candidate rules.
+     *
+     * @return bool
+     */
+    protected function validRules( mixed $rules ): bool
+    {
+        if ( null === $rules || is_string( $rules ) ) {
+            return true;
+        }
+
+        if ( ! is_array( $rules ) ) {
+            return false;
+        }
+
+        foreach ( $rules as $rule ) {
+            if ( ! is_string( $rule ) && ! $rule instanceof Closure && ! $rule instanceof ValidationRule && ! $rule instanceof Rule && ! $rule instanceof InvokableRule && ! $rule instanceof Stringable ) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

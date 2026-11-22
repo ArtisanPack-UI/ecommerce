@@ -16,7 +16,8 @@ follows [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - `StorefrontCartService` refuses options that fail a type's `StorefrontOptionSchema::validate()` (a `ValidationException`) as `options-invalid` with the schema's first message, as it already did for `InvalidArgumentException`.
-- `AddCartItemRequest::optionRules()` exposes the cart's option payload limits (at most 20 options, each a scalar of up to 255 characters); the quote endpoint and GraphQL `productQuote` apply them too.
+- `AddCartItemRequest::optionRules()` exposes the cart's option payload limits, shared by the quote endpoint and GraphQL `productQuote`: at most 20 top-level options, values of up to 255 characters, and now nested values for dot- or bracket-named fields (up to 3 levels deep, 100 values in all) so they reach the type's `StorefrontOptionSchema` instead of being refused.
+- A product type that throws a `TypeError` on an option's shape (a nested value where it reads a scalar) is refused as `options-invalid` by the cart and as an invalid quote, instead of erroring.
 
 ## [1.3.0] - 2026-11-10
 

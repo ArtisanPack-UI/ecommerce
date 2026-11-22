@@ -284,3 +284,38 @@ it( 'erases subscriptions with the customer', function (): void {
 
     expect( BackInStockSubscription::query()->pluck( 'id' )->all() )->toBe( [ $kept->id ] );
 } );
+
+it( 'skips a subscription unsubscribed after it was loaded, and leaves it unsent', function (): void {
+    Notification::fake();
+    $product = Product::factory()->create();
+    $stale   = $this->service->subscribe( $product, null, 'late@example.test' );
+
+    BackInStockSubscription::query()->whereKey( $stale->id )->update( [ 'unsubscribed_at' => now() ] );
+
+    expect( $this->service->notify( $stale ) )->toBeFalse()
+        ->and( $stale->refresh()->notified_at )->toBeNull();
+
+    Notification::assertNothingSent();
+} );
+
+it( 'marks the instance it was given as notified', function (): void {
+    Notification::fake();
+    $product      = Product::factory()->create();
+    $subscription = $this->service->subscribe( $product, null, 'ada@example.test' );
+
+    expect( $this->service->notify( $subscription ) )->toBeTrue()
+        ->and( $subscription->notified_at )->not->toBeNull()
+        ->and( $this->service->notify( $subscription ) )->toBeFalse()
+        ->and( backInStockSentTo( 'ada@example.test' ) )->toBe( 1 );
+} );
+
+it( 'does not treat a product without inventory components as restocked', function (): void {
+    Notification::fake();
+    $product = Product::factory()->digital()->create();
+    $row     = stockRow( $product, 3 );
+    $this->service->subscribe( $product, null, 'ada@example.test' );
+
+    expect( $this->service->notifyRestocked( $row ) )->toBe( 0 );
+
+    Notification::assertNothingSent();
+} );
