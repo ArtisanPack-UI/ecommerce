@@ -139,6 +139,19 @@ class Cart extends Model
     }
 
     /**
+     * Every provider payment session this cart was given, current and
+     * superseded.
+     *
+     * @since 1.4.0
+     *
+     * @return HasMany<CartPaymentSession, $this>
+     */
+    public function paymentSessions(): HasMany
+    {
+        return $this->hasMany( CartPaymentSession::class );
+    }
+
+    /**
      * Customer this cart is anchored to, if any.
      *
      * @since 1.0.0
