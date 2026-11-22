@@ -415,11 +415,39 @@ happens (env `ECOMMERCE_STRANDED_PAYMENTS`, or the store setting in the
 | `hold` (default) | The order is placed from the cart for staff review. It stays `pending` (the engine's review hold, as for a fraud challenge), its `payment_status` is `paid` and its `payment_reference` is the session when the payment was captured, and `meta.payment_mismatch` holds `reason`, `gateway`, `reference`, `paid`, `expected`, `currency`, `captured` and `detected_at`. A `payment.stranded` timeline entry is written. When the cart had already become an order (it paid with another session), the entry is written on that order instead and no order is placed |
 | `refund` | A captured payment is refunded and an authorized one voided, through the gateway's own `refund()` / `voidPendingPayment()` with the idempotency key `ap-ec-stranded-{reference}`. A cart still pointing at the session steps back to `payment_selection`. When the gateway can't (no refund support, or the provider refuses), the payment is held instead |
 
-Staff settle a held order themselves: accept it (move it on to `processing`),
-or cancel it and refund what was paid through `RefundService`. An authorized
-payment that was held isn't pinned to the order (the reconciler would
-otherwise void it as an amount mismatch), so capture or release it at the
-provider; its reference is in `meta.payment_mismatch`.
+An authorized payment that was held isn't pinned to the order (the reconciler
+would otherwise void it as an amount mismatch); its reference is in
+`meta.payment_mismatch`. Storefronts treat an order with that key as held:
+it goes to the confirmation and the shopper is never asked to pay again.
+`meta.payment_mismatch` is engine-owned: `PATCH orders/{order}` refuses to
+write it (422), as it does `meta.fraud_decision`.
+
+### Resolving a hold
+
+Staff resolve a hold in process, as they accept a fraud challenge with
+`accept_challenge` (there is no REST endpoint for either):
+
+```php
+$stranded = app( \ArtisanPackUI\Ecommerce\Services\StrandedPaymentService::class );
+
+$stranded->acceptHold( $order, auth()->id() );
+$stranded->rejectHold( $order, auth()->id() );
+```
+
+| Action | Result |
+|---|---|
+| `acceptHold()` | An authorized session (`captured: false`) is captured through its gateway. The order becomes `paid` with the session pinned as its `payment_reference` (and `meta.payment.capture_reference`), its stock reservations are committed, it moves to `processing`, and a `payment.stranded_accepted` timeline entry is written. `ap.ecommerce.payment.succeeded`, `ap.ecommerce.order.paid` and `PaymentSucceeded` fire as for a normal capture |
+| `rejectHold()` | An authorized session is voided, a captured one refunded in full (idempotency key `ap-ec-stranded-{reference}`). As for a fraud block, the order's `payment_status` becomes `failed`, its reservations are released, it moves to `failed`, and a `payment.stranded_rejected` timeline entry is written. If the gateway refuses, nothing changes and it throws |
+
+Both run under the order's row lock, record `resolution` (`accepted` or
+`rejected`) and `resolved_at` in `meta.payment_mismatch`, update the session's
+history row (`completed`, `refunded` or `voided`), and fire
+`ap.ecommerce.checkout.strandedPaymentResolved( Order $order, string
+$resolution )` after commit. A repeat call with the same action returns the
+order unchanged. They throw `PaymentNotAllowedException` for an order without
+`meta.payment_mismatch`, one resolved the other way, one that is no longer
+`pending`, or when the session's gateway is gone or the capture fails.
+`isHold( $order )` tells whether an order is a stranded-payment hold.
 
 If the order can't be placed either (the cart was emptied, say), the session
 stays `stranded`, a critical message is logged to the `ecommerce` channel, and

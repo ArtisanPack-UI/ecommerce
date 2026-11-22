@@ -20,6 +20,7 @@ follows [Semantic Versioning](https://semver.org/).
   - The `ap.ecommerce.checkout.paymentStranded( Cart $cart, PaymentSession $session, string $reason )` action fires once per session from `createPaymentSession()`, `finalize()`, `strandedPayment()`, and `PaymentReconciler`.
   - `Contracts\CancelsPaymentSessions` (optional, on a `PaymentGateway`): `cancelPaymentSession( $reference )` cancels an unconfirmed session the cart is replacing or dropping. `StripeGateway` implements it (cancels the PaymentIntent, never a confirmed one).
   - `PaymentReconciler::STRANDED`: what `reconcile()` returns when it settled a stranded payment.
+  - `StrandedPaymentService::acceptHold( $order, $actorUserId )` and `::rejectHold( $order, $actorUserId )` resolve a hold, like the fraud review's `accept_challenge`: accept captures an authorized session, marks the order paid with the session pinned, commits its stock, moves it to `processing` and fires the usual paid hooks and `PaymentSucceeded`; reject voids or refunds the session, fails the order and releases its stock as a fraud block does. Both are idempotent, refuse orders that aren't unresolved holds, write `payment.stranded_accepted` / `payment.stranded_rejected` timeline entries, and fire the new `ap.ecommerce.checkout.strandedPaymentResolved( Order $order, string $resolution )` action. `isHold( $order )`.
 
 ### Changed
 
@@ -28,6 +29,7 @@ follows [Semantic Versioning](https://semver.org/).
 - `PaymentReconciler` matches a `succeeded` session no cart or pending order points at through the payment session history and settles it instead of dropping it; a `failed` one is marked cancelled there. `ecommerce:reconcile-payments` also polls replaced and stranded sessions, and a cart's current session after the cart left `payment_pending`, and its summary adds `Settled N stranded payment(s).` (#231).
 - `CheckoutService::setPaymentGateway()` and a cart currency change keep the dropped session in the history as `superseded`, so it is still matched if it's confirmed (#231).
 - `CheckoutService` and `PaymentReconciler` take an optional `StrandedPaymentService` constructor argument (the container's when omitted).
+- `PATCH orders/{order}` (`UpdateOrderRequest`) refuses writes to the engine-owned `meta.payment_mismatch`, as it does `meta.fraud_decision` (#231).
 - `StorefrontCartService` refuses options that fail a type's `StorefrontOptionSchema::validate()` (a `ValidationException`) as `options-invalid` with the schema's first message, as it already did for `InvalidArgumentException`.
 - `AddCartItemRequest::optionRules()` exposes the cart's option payload limits, shared by the quote endpoint and GraphQL `productQuote`: at most 20 top-level options, values of up to 255 characters, and now nested values for dot- or bracket-named fields (up to 3 levels deep, 100 values in all) so they reach the type's `StorefrontOptionSchema` instead of being refused.
 - A product type that throws a `TypeError` on an option's shape (a nested value where it reads a scalar) is refused as `options-invalid` by the cart and as an invalid quote, instead of erroring.
