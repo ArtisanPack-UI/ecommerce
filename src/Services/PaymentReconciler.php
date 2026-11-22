@@ -19,6 +19,12 @@
  * - `requires_action` and `refunded` need nothing here (refunds are recorded
  *   through the refund flow).
  *
+ * Since 1.4.0, a `succeeded` session no cart or pending order points at any
+ * more (the cart replaced it, or dropped it when its total changed) is found
+ * through the carts' payment session history and settled by the
+ * `checkout.stranded_payments` policy ({@see StrandedPaymentService}),
+ * returning {@see self::STRANDED}. A `failed` one is marked cancelled there.
+ *
  * Checkouts are matched on `payment_gateway_key` against the key set from
  * {@see self::webhookGatewayKeys()}: the gateway's own key, plus the
  * registered sibling keys it declares through {@see SharesWebhookEndpoint}
@@ -92,17 +98,31 @@ class PaymentReconciler
     public const SKIPPED = 'skipped';
 
     /**
+     * What a reconcile did: settled a stranded payment (a confirmed session
+     * no order could take) by the `checkout.stranded_payments` policy, or
+     * recorded it as stranded when it couldn't be settled.
+     *
+     * @since 1.4.0
+     *
+     * @var string
+     */
+    public const STRANDED = 'stranded';
+
+    /**
      * @since 1.0.0
      * @since 1.3.0 Takes the payment gateway registry.
+     * @since 1.4.0 Takes the stranded payment service.
      *
      * @param  CheckoutService              $checkout   Finalize.
      * @param  InventoryService             $inventory  Releases holds.
      * @param  PaymentGatewayRegistry|null  $gateways   Resolves the gateway behind a key (the container's registry when omitted).
+     * @param  StrandedPaymentService|null  $stranded   Payment session history and stranded payments (the container's when omitted).
      */
     public function __construct(
         protected CheckoutService $checkout,
         protected InventoryService $inventory,
         protected ?PaymentGatewayRegistry $gateways = null,
+        protected ?StrandedPaymentService $stranded = null,
     ) {
     }
 
@@ -115,7 +135,7 @@ class PaymentReconciler
      * @param  string  $reference   Session reference.
      * @param  string  $outcome     `WebhookResult::OUTCOME_*` value.
      *
-     * @return string One of {@see self::FINALIZED}, {@see self::FAILED}, {@see self::SKIPPED}.
+     * @return string One of {@see self::FINALIZED}, {@see self::FAILED}, {@see self::STRANDED} (since 1.4.0), {@see self::SKIPPED}.
      */
     public function reconcile( string $gatewayKey, string $reference, string $outcome ): string
     {
@@ -200,14 +220,24 @@ class PaymentReconciler
         $cart = $this->cartFor( $gatewayKey, $reference ) ?? $this->cartForOrderWith( $gatewayKey, $reference );
 
         if ( null === $cart ) {
-            return self::SKIPPED;
+            return $this->succeededSuperseded( $gatewayKey, $reference );
         }
 
         try {
             $result = $this->checkout->finalize( $cart, $reference, [ 'source' => 'reconcile' ] );
         } catch ( CartOperationException $exception ) {
-            // A finalize already in flight, a changed total, …: the shopper
-            // (or the in-flight request) settles it.
+            // A changed total: finalize settled the stranded payment.
+            if ( true === $this->stranded()->find( $this->webhookGatewayKeys( $gatewayKey ), $reference )?->wasStranded() ) {
+                Log::channel( 'ecommerce' )->warning( 'A provider-confirmed payment was for a total its cart no longer has; it was settled as a stranded payment.', [
+                    'cart_id' => $cart->id,
+                    'policy'  => $this->stranded()->policy(),
+                ] );
+
+                return self::STRANDED;
+            }
+
+            // A finalize already in flight, …: the shopper (or the in-flight
+            // request) settles it.
             Log::channel( 'ecommerce' )->info( 'A provider-confirmed payment could not be finalized from its webhook.', [
                 'cart_id' => $cart->id,
                 'code'    => $exception->errorCode,
@@ -262,6 +292,8 @@ class PaymentReconciler
             return $cart;
         } );
 
+        $this->stranded()->markCanceled( $keys, $reference );
+
         if ( null === $cart ) {
             return self::SKIPPED;
         }
@@ -269,6 +301,74 @@ class PaymentReconciler
         doAction( 'ap.ecommerce.checkout.failed', $cart, new RuntimeException( 'The payment provider reported the payment as failed.' ) );
 
         return self::FAILED;
+    }
+
+    /**
+     * Settles a session no cart or pending order points at any more, found
+     * through the carts' payment session history (#231): a session that was
+     * replaced, or dropped when its cart's total changed, and that the
+     * shopper confirmed anyway. It is settled by the
+     * `checkout.stranded_payments` policy, never dropped.
+     *
+     * @since 1.4.0
+     *
+     * @param  string  $gatewayKey  Gateway key the outcome was reported for.
+     * @param  string  $reference   Session reference.
+     *
+     * @throws RuntimeException When the session's gateway is no longer registered.
+     *
+     * @return string
+     */
+    protected function succeededSuperseded( string $gatewayKey, string $reference ): string
+    {
+        $row = $this->stranded()->find( $this->webhookGatewayKeys( $gatewayKey ), $reference );
+
+        if ( null === $row ) {
+            Log::channel( 'ecommerce' )->info( 'A provider-confirmed payment matched no checkout.', [
+                'gateway'   => $gatewayKey,
+                'reference' => $reference,
+            ] );
+
+            return self::SKIPPED;
+        }
+
+        if ( $row->isResolved() ) {
+            return self::SKIPPED;
+        }
+
+        $gateway = ( $this->gateways ?? app( PaymentGatewayRegistry::class ) )->find( $row->gateway_key );
+
+        if ( null === $gateway ) {
+            throw new RuntimeException( sprintf( 'PaymentGateway "%s" for stranded payment session %d is not registered.', $row->gateway_key, $row->id ) );
+        }
+
+        // Load it from the provider rather than trust the webhook.
+        $session = $gateway->retrievePaymentSession( $reference );
+
+        if ( ! $session->isConfirmed() || null === $row->cart ) {
+            return self::SKIPPED;
+        }
+
+        $row = $this->stranded()->handle( $row->cart, $session, StrandedPaymentService::REASON_SUPERSEDED );
+
+        Log::channel( 'ecommerce' )->warning( 'A provider-confirmed payment was for a session its cart had replaced; it was settled as a stranded payment.', [
+            'cart_id' => $row->cart_id,
+            'status'  => $row->status,
+        ] );
+
+        return self::STRANDED;
+    }
+
+    /**
+     * The stranded payment service.
+     *
+     * @since 1.4.0
+     *
+     * @return StrandedPaymentService
+     */
+    protected function stranded(): StrandedPaymentService
+    {
+        return $this->stranded ??= app( StrandedPaymentService::class );
     }
 
     /**

@@ -150,6 +150,10 @@ final class CoreSettings
             ], position: 20 ),
             new SettingDefinition( 'cart.abandoned_after_minutes', 'checkout', 'integer', __( 'Abandoned after (minutes)' ), [ 'required', 'min:5', 'max:43200' ], __( 'How long a cart in checkout can sit untouched before it counts as abandoned.' ), position: 40 ),
             new SettingDefinition( 'checkout.account_creation', 'checkout', 'boolean', __( 'Offer account creation' ), [], __( 'Storefronts offer to create an account at checkout.' ), position: 30 ),
+            new SettingDefinition( 'checkout.stranded_payments', 'checkout', 'select', __( 'Payments for a changed order' ), [ 'required' ], __( 'What happens to a confirmed payment no order can take, because the cart changed after the shopper paid.' ), [
+                'hold'   => __( 'Hold the order for review' ),
+                'refund' => __( 'Refund or void the payment' ),
+            ], position: 50 ),
 
             // Tax.
             new SettingDefinition( 'tax.provider', 'tax', 'select', __( 'Tax provider' ), [ 'required' ], __( 'Calculates tax at checkout. Tax satellites add providers here.' ), self::registryOptions( TaxProviderRegistry::class ), position: 10 ),

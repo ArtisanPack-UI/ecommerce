@@ -50,6 +50,7 @@ namespace ArtisanPackUI\Ecommerce\Services;
 use ArtisanPackUI\Ecommerce\Checkout\CheckoutReservations;
 use ArtisanPackUI\Ecommerce\Checkout\CheckoutState;
 use ArtisanPackUI\Ecommerce\Contracts\AcceptsPaymentOptions;
+use ArtisanPackUI\Ecommerce\Contracts\CancelsPaymentSessions;
 use ArtisanPackUI\Ecommerce\Contracts\PaymentGateway;
 use ArtisanPackUI\Ecommerce\Exceptions\CheckoutException;
 use ArtisanPackUI\Ecommerce\Exceptions\OrderPlacementException;
@@ -59,6 +60,7 @@ use ArtisanPackUI\Ecommerce\Exceptions\PaymentInProgressException;
 use ArtisanPackUI\Ecommerce\Exceptions\PaymentNotAllowedException;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
+use ArtisanPackUI\Ecommerce\Models\CartPaymentSession;
 use ArtisanPackUI\Ecommerce\Models\Order;
 use ArtisanPackUI\Ecommerce\Registries\PaymentGatewayRegistry;
 use ArtisanPackUI\Ecommerce\Support\AfterCommit;
@@ -123,6 +125,7 @@ class CheckoutService
 
     /**
      * @since 1.0.0
+     * @since 1.4.0 Takes the stranded payment service.
      *
      * @param  StorefrontCartService  $carts         Cart rules, details, and shipping.
      * @param  CheckoutReservations   $reservations  Stock holds.
@@ -131,6 +134,7 @@ class CheckoutService
      * @param  PaymentGatewayRegistry $gateways      Gateways.
      * @param  InventoryService       $inventory     Stock commit for free orders.
      * @param  OrderStatusMachine     $statuses      Order status for free orders.
+     * @param  StrandedPaymentService|null  $stranded  Payment session history and stranded payments (the container's when omitted).
      */
     public function __construct(
         protected StorefrontCartService $carts,
@@ -140,6 +144,7 @@ class CheckoutService
         protected PaymentGatewayRegistry $gateways,
         protected InventoryService $inventory,
         protected OrderStatusMachine $statuses,
+        protected ?StrandedPaymentService $stranded = null,
     ) {
     }
 
@@ -367,6 +372,9 @@ class CheckoutService
             $locked = $this->lock( $cart );
 
             if ( $gatewayKey !== $locked->payment_gateway_key ) {
+                // Kept in the history, so it is still matched if it's confirmed.
+                $this->stranded()->supersede( $locked, $locked->payment_gateway_key, $locked->payment_reference );
+
                 $locked->payment_gateway_key = $gatewayKey;
                 $locked->payment_reference   = null;
 
@@ -396,13 +404,24 @@ class CheckoutService
      * while the gateway says it was made with the same options. Leaving them
      * out keeps the current session's choices.
      *
+     * Every session is kept in the cart's history ({@see CartPaymentSession}).
+     * Before a session is replaced, it is retrieved: one the shopper already
+     * confirmed for an earlier total is never replaced. It is recorded as
+     * stranded, `ap.ecommerce.checkout.paymentStranded` fires (once), and
+     * `payment-already-confirmed` (409) is thrown with the cart unchanged; the
+     * `checkout.stranded_payments` policy settles it when finalize or the
+     * provider's webhook reports it. An unconfirmed session is cancelled at
+     * the provider when the gateway implements {@see CancelsPaymentSessions},
+     * and marked superseded (or cancelled) in the history.
+     *
      * @since 1.0.0
      * @since 1.3.0 Accepts `payment_options`.
+     * @since 1.4.0 Keeps the session history and never replaces a confirmed session.
      *
      * @param  Cart                  $cart     Cart.
      * @param  array<string, mixed>  $context  Provider hints (return URL, idempotency key, payment options, …). Admin-only keys are stripped.
      *
-     * @throws CheckoutException When the cart isn't ready to pay, needs no payment, or the payment options are invalid.
+     * @throws CheckoutException When the cart isn't ready to pay, needs no payment, the payment options are invalid, or its session is already confirmed for another total (`payment-already-confirmed`).
      *
      * @return PaymentSession
      */
@@ -412,7 +431,7 @@ class CheckoutService
 
         $context = $this->clientContext( $context );
 
-        [ $session, $gateway, $created ] = DB::transaction( function () use ( $cart, $context ): array {
+        [ $session, $gateway, $created, $confirmed ] = DB::transaction( function () use ( $cart, $context ): array {
             $locked = $this->lock( $cart );
 
             $this->carts->recalculate( $locked );
@@ -433,7 +452,35 @@ class CheckoutService
                 $this->advance( $locked, CheckoutState::PAYMENT_PENDING );
                 $locked->save();
 
-                return [ $reused, $gateway, false ];
+                $this->stranded()->record( $locked, $reused );
+
+                return [ $reused, $gateway, false, null ];
+            }
+
+            // The session being replaced: one the shopper already confirmed
+            // (for an earlier total) is never replaced; an unconfirmed one is
+            // cancelled where the gateway can, and kept in the history.
+            $previous = $this->retrieveCurrent( $locked, $gateway );
+
+            if ( null !== $previous ) {
+                $confirmed = $this->stranded()->retire( $locked, $gateway, $previous );
+
+                // Confirmed for what the cart now costs (only its payment
+                // options differ): finalize can still place it.
+                if ( null !== $confirmed && $this->sessionMatchesTotal( $locked, $confirmed ) ) {
+                    $this->advance( $locked, CheckoutState::PAYMENT_PENDING );
+                    $locked->save();
+
+                    $this->stranded()->record( $locked, $confirmed );
+
+                    return [ $confirmed, $gateway, false, null ];
+                }
+
+                if ( null !== $confirmed ) {
+                    return [ null, $gateway, false, $confirmed ];
+                }
+            } else {
+                $this->stranded()->supersede( $locked, $locked->payment_gateway_key, $locked->payment_reference );
             }
 
             $this->advance( $locked, CheckoutState::PAYMENT_PENDING );
@@ -443,10 +490,18 @@ class CheckoutService
             $locked->payment_reference = $session->reference;
             $locked->save();
 
-            return [ $session, $gateway, true ];
+            $this->stranded()->record( $locked, $session );
+
+            return [ $session, $gateway, true, null ];
         } );
 
         $cart->refresh();
+
+        if ( $confirmed instanceof PaymentSession ) {
+            $this->stranded()->flag( $cart, $confirmed, StrandedPaymentService::REASON_REPLACEMENT_REFUSED );
+
+            throw new CheckoutException( 'payment_reference', 'payment-already-confirmed', __( 'A payment for this cart was already confirmed for an earlier total, so we can\'t start a new one. Don\'t pay again: contact us and we\'ll sort it out.' ), 409 );
+        }
 
         if ( $created ) {
             doAction( 'ap.ecommerce.checkout.paymentInitiated', $cart, $gateway, $session );
@@ -472,7 +527,19 @@ class CheckoutService
      * `ap.ecommerce.checkout.finalized` on success and
      * `ap.ecommerce.checkout.failed` on a terminal failure.
      *
+     * A session confirmed for a total (or currency) the cart no longer has is
+     * a stranded payment: instead of dropping it, the
+     * `checkout.stranded_payments` policy settles it through
+     * {@see StrandedPaymentService} (an order held for review, or a refund
+     * or void), `ap.ecommerce.checkout.paymentStranded` fires, and
+     * `totals-changed` is still thrown. A `$paymentReference` the cart
+     * replaced earlier is settled the same way when the provider reports it
+     * confirmed, before `payment-reference-mismatch` is thrown. An
+     * unconfirmed session dropped for a changed total is cancelled at the
+     * provider when the gateway implements {@see CancelsPaymentSessions}.
+     *
      * @since 1.0.0
+     * @since 1.4.0 Settles stranded payments instead of dropping them.
      *
      * @param  Cart                  $cart              Cart.
      * @param  string|null           $paymentReference  Session the shopper confirmed (checked against the cart's).
@@ -507,6 +574,8 @@ class CheckoutService
         }
 
         if ( null !== $paymentReference && ! hash_equals( $reference, $paymentReference ) ) {
+            $this->settleSupersededSession( $cart, $paymentReference );
+
             throw new CheckoutException( 'payment_reference', 'payment-reference-mismatch', __( 'That payment doesn\'t belong to this cart.' ), 409 );
         }
 
@@ -514,13 +583,14 @@ class CheckoutService
         $session = $gateway->retrievePaymentSession( $reference );
 
         if ( $session->isCanceled() ) {
+            $this->stranded()->markCanceled( [ $session->gatewayKey ], $session->reference );
             $this->resetPayment( $cart );
 
             throw new CheckoutException( 'payment', 'payment-canceled', __( 'The payment was cancelled. Set up the payment again.' ), 409 );
         }
 
         if ( strtoupper( $session->amount->getCurrency()->getCode() ) !== strtoupper( (string) $cart->currency ) ) {
-            $this->resetPayment( $cart );
+            $this->dropChangedSession( $cart, $gateway, $session, StrandedPaymentService::REASON_CURRENCY_CHANGED );
 
             throw OrderPlacementException::totalsChanged();
         }
@@ -533,7 +603,7 @@ class CheckoutService
             $order = $this->placement->place( $cart, $context + [ OrderPlacementService::EXPECTED_TOTAL => (int) $session->amount->getAmount() ] );
         } catch ( OrderPlacementException $exception ) {
             if ( 'totals-changed' === $exception->errorCode ) {
-                $this->resetPayment( $cart );
+                $this->dropChangedSession( $cart, $gateway, $session, StrandedPaymentService::REASON_TOTALS_CHANGED );
             }
 
             throw $exception;
@@ -556,6 +626,85 @@ class CheckoutService
         $orderId = Cart::query()->whereKey( $cart->getKey() )->value( 'completed_order_id' );
 
         return null === $orderId ? null : Order::query()->find( $orderId );
+    }
+
+    /**
+     * The payment the shopper confirmed for this cart that no order can take
+     * (a stranded payment), if any — so a storefront can tell the shopper not
+     * to pay again instead of detecting it itself.
+     *
+     * Returns, most recent first, a session already recorded as stranded
+     * (still unsettled, or held for review), else the cart's current session
+     * when the provider reports it confirmed for an amount or currency the
+     * cart no longer has, else a superseded session the provider reports
+     * confirmed. A session found live is recorded as stranded and fires
+     * `ap.ecommerce.checkout.paymentStranded`; it is settled by the
+     * `checkout.stranded_payments` policy when finalize, the provider's
+     * webhook, or `ecommerce:reconcile-payments` reaches it. Sessions that
+     * were refunded or voided are not returned. A provider that can't be
+     * reached counts as nothing found. Once the cart became an order, only
+     * recorded sessions are returned.
+     *
+     * @since 1.4.0
+     *
+     * @param  Cart  $cart  Cart.
+     *
+     * @return PaymentSession|null
+     */
+    public function strandedPayment( Cart $cart ): ?PaymentSession
+    {
+        $recorded = CartPaymentSession::query()
+            ->where( 'cart_id', $cart->getKey() )
+            ->whereNotNull( 'stranded_at' )
+            ->whereIn( 'status', [ CartPaymentSession::STATUS_STRANDED, CartPaymentSession::STATUS_HELD ] )
+            ->orderByDesc( 'stranded_at' )
+            ->orderByDesc( 'id' )
+            ->first();
+
+        if ( null !== $recorded ) {
+            return $recorded->toPaymentSession();
+        }
+
+        $cart->refresh();
+
+        // A cart that became an order: its payment belongs to that order.
+        if ( null !== $cart->completed_order_id ) {
+            return null;
+        }
+
+        $current = (string) ( $cart->payment_reference ?? '' );
+        $key     = (string) ( $cart->payment_gateway_key ?? '' );
+        $gateway = '' === $key ? null : $this->gateways->find( $key );
+
+        if ( null !== $gateway && '' !== $current ) {
+            $session = $this->retrieveQuietly( $gateway, $current );
+
+            if ( null !== $session && $session->isConfirmed() && ! $this->sessionMatchesTotal( $cart, $session ) ) {
+                $this->stranded()->flag( $cart, $session, StrandedPaymentService::REASON_TOTALS_CHANGED );
+
+                return $session;
+            }
+        }
+
+        $superseded = CartPaymentSession::query()
+            ->where( 'cart_id', $cart->getKey() )
+            ->where( 'status', CartPaymentSession::STATUS_SUPERSEDED )
+            ->orderByDesc( 'id' )
+            ->limit( 5 )
+            ->get();
+
+        foreach ( $superseded as $row ) {
+            $gateway = $this->gateways->find( $row->gateway_key );
+            $session = null === $gateway ? null : $this->retrieveQuietly( $gateway, $row->reference );
+
+            if ( null !== $session && $session->isConfirmed() ) {
+                $this->stranded()->flag( $cart, $session, StrandedPaymentService::REASON_SUPERSEDED );
+
+                return $session;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -661,6 +810,8 @@ class CheckoutService
         $cart->refresh();
 
         if ( $finalization->isCaptured() ) {
+            $this->stranded()->markCompleted( $finalization->order );
+
             doAction( 'ap.ecommerce.checkout.finalized', $finalization->order, $cart );
         } elseif ( $finalization->isBlocked() ) {
             doAction( 'ap.ecommerce.checkout.failed', $cart, new RuntimeException( 'The payment was blocked.' ) );
@@ -1000,6 +1151,125 @@ class CheckoutService
         $context[ self::PAYMENT_OPTIONS ] = $validator->validated();
 
         return $context;
+    }
+
+    /**
+     * Drops the cart's session after its total or currency changed. One the
+     * shopper already confirmed is a stranded payment, settled by the
+     * `checkout.stranded_payments` policy; an unconfirmed one is cancelled
+     * where the gateway can, and the cart steps back to payment selection.
+     *
+     * @since 1.4.0
+     *
+     * @param  Cart            $cart     Cart.
+     * @param  PaymentGateway  $gateway  Cart's gateway.
+     * @param  PaymentSession  $session  The cart's session, as retrieved.
+     * @param  string          $reason   `StrandedPaymentService::REASON_*`.
+     *
+     * @return void
+     */
+    protected function dropChangedSession( Cart $cart, PaymentGateway $gateway, PaymentSession $session, string $reason ): void
+    {
+        $confirmed = $this->stranded()->retire( $cart, $gateway, $session );
+
+        if ( null !== $confirmed ) {
+            $this->stranded()->handle( $cart, $confirmed, $reason );
+        }
+
+        $this->resetPayment( $cart );
+    }
+
+    /**
+     * Settles a session the cart replaced earlier when the shopper confirmed
+     * it anyway (a checkout tab still showing it). Only this cart's own
+     * history is consulted.
+     *
+     * @since 1.4.0
+     *
+     * @param  Cart    $cart       Cart.
+     * @param  string  $reference  The reference the shopper sent.
+     *
+     * @return void
+     */
+    protected function settleSupersededSession( Cart $cart, string $reference ): void
+    {
+        $row = CartPaymentSession::query()
+            ->where( 'cart_id', $cart->getKey() )
+            ->where( 'reference', $reference )
+            ->whereNotIn( 'status', CartPaymentSession::RESOLVED_STATUSES )
+            ->first();
+
+        $gateway = null === $row ? null : $this->gateways->find( $row->gateway_key );
+        $session = null === $gateway ? null : $this->retrieveQuietly( $gateway, $reference );
+
+        if ( null !== $session && $session->isConfirmed() ) {
+            $this->stranded()->handle( $cart, $session, StrandedPaymentService::REASON_SUPERSEDED );
+        }
+    }
+
+    /**
+     * The cart's current session, or null when it has none or the provider
+     * can't load it.
+     *
+     * @since 1.4.0
+     *
+     * @param  Cart            $cart     Cart.
+     * @param  PaymentGateway  $gateway  Cart's gateway.
+     *
+     * @return PaymentSession|null
+     */
+    protected function retrieveCurrent( Cart $cart, PaymentGateway $gateway ): ?PaymentSession
+    {
+        $reference = (string) ( $cart->payment_reference ?? '' );
+
+        return '' === $reference ? null : $this->retrieveQuietly( $gateway, $reference );
+    }
+
+    /**
+     * Loads a session, or null when the provider can't.
+     *
+     * @since 1.4.0
+     *
+     * @param  PaymentGateway  $gateway    Gateway.
+     * @param  string          $reference  Session reference.
+     *
+     * @return PaymentSession|null
+     */
+    protected function retrieveQuietly( PaymentGateway $gateway, string $reference ): ?PaymentSession
+    {
+        try {
+            return $gateway->retrievePaymentSession( $reference );
+        } catch ( Throwable ) {
+            return null;
+        }
+    }
+
+    /**
+     * Whether a session is for the cart's current total and currency.
+     *
+     * @since 1.4.0
+     *
+     * @param  Cart            $cart     Cart.
+     * @param  PaymentSession  $session  Session.
+     *
+     * @return bool
+     */
+    protected function sessionMatchesTotal( Cart $cart, PaymentSession $session ): bool
+    {
+        return (int) $session->amount->getAmount() === (int) $cart->total_amount
+            && strtoupper( $session->amount->getCurrency()->getCode() ) === strtoupper( (string) $cart->currency );
+    }
+
+    /**
+     * The stranded payment service.
+     *
+     * @since 1.4.0
+     *
+     * @return StrandedPaymentService
+     */
+    protected function stranded(): StrandedPaymentService
+    {
+        return $this->stranded ??= app( StrandedPaymentService::class );
     }
 
     /**

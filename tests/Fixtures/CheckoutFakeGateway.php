@@ -20,8 +20,11 @@ use RuntimeException;
  * A two-phase gateway for checkout tests: sessions are created for the
  * cart's total, "confirmed" by the test (as the shopper's browser would),
  * and captured once confirmed.
+ *
+ * Refunds and voids are recorded (`$refunds`, `$voids`) and can be made to
+ * fail (`$refundsFail`, `$voidsFail`).
  */
-final class CheckoutFakeGateway implements PaymentGateway
+class CheckoutFakeGateway implements PaymentGateway
 {
     /** @var array<int, string> */
     public array $calls = [];
@@ -31,6 +34,16 @@ final class CheckoutFakeGateway implements PaymentGateway
 
     /** @var array<int, array<string, mixed>> */
     public array $contexts = [];
+
+    /** @var array<int, array{reference: string, amount: int, context: array<string, mixed>}> */
+    public array $refunds = [];
+
+    /** @var array<int, string> */
+    public array $voids = [];
+
+    public bool $refundsFail = false;
+
+    public bool $voidsFail = false;
 
     private int $sequence = 0;
 
@@ -111,11 +124,23 @@ final class CheckoutFakeGateway implements PaymentGateway
     public function voidPendingPayment( Order $order ): void
     {
         $this->calls[] = 'voidPendingPayment';
+
+        if ( $this->voidsFail ) {
+            throw new RuntimeException( 'The provider refused the void.' );
+        }
+
+        $this->voids[] = (string) $order->payment_reference;
     }
 
     public function refund( Order $order, Money $amount, ?string $reason = null, array $context = [] ): RefundResult
     {
         $this->calls[] = 'refund';
+
+        if ( $this->refundsFail ) {
+            return RefundResult::failure( $amount, 'refund_refused', 'The provider refused the refund.' );
+        }
+
+        $this->refunds[] = [ 'reference' => (string) $order->payment_reference, 'amount' => (int) $amount->getAmount(), 'context' => $context ];
 
         return RefundResult::success( $amount, 're_' . $order->id );
     }

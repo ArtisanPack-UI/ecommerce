@@ -188,6 +188,19 @@ return [
     |                    before `ecommerce:reconcile-payments` asks the
     |                    provider how it ended.
     |
+    | `stranded_payments` — What happens to a payment the provider confirmed
+    |                    that no order can take, because the cart's total
+    |                    changed after the payment session was made or a
+    |                    newer session replaced it (#231):
+    |                    `hold` (default) places the order for staff review
+    |                    (it stays `pending`, is `paid` when the payment was
+    |                    captured, and `meta.payment_mismatch` holds both
+    |                    amounts and the session); `refund` refunds a
+    |                    captured payment, or voids an authorized one,
+    |                    through the gateway, and holds it instead when the
+    |                    gateway can't. Admins can change it in the store
+    |                    settings.
+    |
     | `order_view_url`  — Storefront page showing a guest their order, with a
     |                    `{token}` placeholder (`https://shop.test/order/{token}`).
     |                    Guest confirmation emails link to it. Unset: the
@@ -206,6 +219,7 @@ return [
         'guest_checkout'          => env( 'ECOMMERCE_GUEST_CHECKOUT', 'allowed' ),
         'account_creation'        => (bool) env( 'ECOMMERCE_CHECKOUT_ACCOUNT_CREATION', true ),
         'reconcile_after_minutes' => (int) env( 'ECOMMERCE_RECONCILE_AFTER_MINUTES', 15 ),
+        'stranded_payments'       => env( 'ECOMMERCE_STRANDED_PAYMENTS', 'hold' ),
         'order_view_url'          => env( 'ECOMMERCE_ORDER_VIEW_URL' ),
         'order_view_ttl_days'     => (int) env( 'ECOMMERCE_ORDER_VIEW_TTL_DAYS', 90 ),
         'guest_lookup'            => [
