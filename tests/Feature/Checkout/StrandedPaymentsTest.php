@@ -280,7 +280,7 @@ describe( 'finalize after the total changed', function (): void {
             ->and( Order::query()->count() )->toBe( 0 );
     } );
 
-    it( 'holds the session when the gateway can\'t refund or void it', function ( string $status, string $failure ): void {
+    it( 'keeps a refund or void with an unknown outcome stranded, never a paid hold, and retries it', function ( string $status, string $failure ): void {
         config()->set( 'artisanpack.ecommerce.checkout.stranded_payments', 'refund' );
         $this->gateway->{$failure} = true;
 
@@ -291,12 +291,60 @@ describe( 'finalize after the total changed', function (): void {
 
         strandedExpectCode( fn () => $this->checkout->finalize( $cart, $session->reference ), 'totals-changed' );
 
-        expect( strandedRow( $session->reference )->status )->toBe( CartPaymentSession::STATUS_HELD )
-            ->and( Order::query()->sole()->meta['payment_mismatch']['reference'] )->toBe( $session->reference );
+        expect( strandedRow( $session->reference ) )
+            ->status->toBe( CartPaymentSession::STATUS_STRANDED )
+            ->release_attempted_at->not->toBeNull()
+            ->and( Order::query()->count() )->toBe( 0 );
+
+        // The provider recovers; even after the store switches to hold, the
+        // retry repeats the release instead of holding the payment as paid.
+        $this->gateway->{$failure} = false;
+        config()->set( 'artisanpack.ecommerce.checkout.stranded_payments', 'hold' );
+
+        expect( $this->reconciler->reconcile( 'fake', $session->reference, WebhookResult::OUTCOME_SUCCEEDED ) )->toBe( PaymentReconciler::STRANDED )
+            ->and( strandedRow( $session->reference )->status )->toBeIn( [ CartPaymentSession::STATUS_REFUNDED, CartPaymentSession::STATUS_VOIDED ] )
+            ->and( Order::query()->count() )->toBe( 0 );
     } )->with( [
         'refund refused' => [ PaymentSession::STATUS_SUCCEEDED, 'refundsFail' ],
         'void refused'   => [ PaymentSession::STATUS_AUTHORIZED, 'voidsFail' ],
     ] );
+
+    it( 'replays a refund whose response was lost, with the same request, moving money once', function (): void {
+        config()->set( 'artisanpack.ecommerce.checkout.stranded_payments', 'refund' );
+        $this->gateway->refundsLoseResponse = true;
+
+        $cart    = readyCart( $this->product );
+        $session = $this->checkout->createPaymentSession( $cart );
+        strandedRaisePrice( $this->product );
+        $this->gateway->confirm( $session->reference, PaymentSession::STATUS_SUCCEEDED );
+
+        strandedExpectCode( fn () => $this->checkout->finalize( $cart, $session->reference ), 'totals-changed' );
+
+        expect( strandedRow( $session->reference )->status )->toBe( CartPaymentSession::STATUS_STRANDED )
+            ->and( Order::query()->count() )->toBe( 0 );
+
+        $this->reconciler->reconcile( 'fake', $session->reference, WebhookResult::OUTCOME_SUCCEEDED );
+
+        expect( $this->gateway->refunds )->toHaveCount( 1 )
+            ->and( $this->gateway->refunds[0]['order_id'] )->toBeNull()
+            ->and( strandedRow( $session->reference ) )->status->toBe( CartPaymentSession::STATUS_REFUNDED )->resolution_reference->toBe( 're_ap-ec-stranded-' . $session->reference );
+    } );
+
+    it( 'holds the session when the gateway doesn\'t take refunds at all', function (): void {
+        config()->set( 'artisanpack.ecommerce.checkout.stranded_payments', 'refund' );
+        $this->gateway->refundsSupported = false;
+
+        $cart    = readyCart( $this->product );
+        $session = $this->checkout->createPaymentSession( $cart );
+        strandedRaisePrice( $this->product );
+        $this->gateway->confirm( $session->reference, PaymentSession::STATUS_SUCCEEDED );
+
+        strandedExpectCode( fn () => $this->checkout->finalize( $cart, $session->reference ), 'totals-changed' );
+
+        expect( strandedRow( $session->reference ) )->status->toBe( CartPaymentSession::STATUS_HELD )->release_attempted_at->toBeNull()
+            ->and( $this->gateway->refunds )->toBe( [] )
+            ->and( Order::query()->sole()->meta['payment_mismatch']['reference'] )->toBe( $session->reference );
+    } );
 
     it( 'records the payment as stranded when it can be neither refunded nor held', function (): void {
         $cart    = readyCart( $this->product );
@@ -452,12 +500,37 @@ describe( 'reconciler', function (): void {
             ->and( $this->stranded )->toHaveCount( 1 );
     } );
 
-    it( 'marks a superseded session cancelled when the provider reports it failed', function (): void {
+    it( 'marks a superseded session cancelled only when the provider confirms the cancellation', function (): void {
         $cart  = readyCart( $this->product );
         $this->checkout->setPaymentGateway( $cart, 'plain' );
         $first = $this->checkout->createPaymentSession( $cart );
         $this->checkout->setPaymentGateway( $cart, 'fake' );
 
+        // A declined card: the session waits for another payment method and
+        // stays open (and polled).
+        $this->reconciler->reconcile( 'plain', $first->reference, WebhookResult::OUTCOME_FAILED );
+
+        expect( strandedRow( $first->reference )->status )->toBe( CartPaymentSession::STATUS_SUPERSEDED );
+
+        $this->plain->confirm( $first->reference, PaymentSession::STATUS_CANCELED );
+        $this->reconciler->reconcile( 'plain', $first->reference, WebhookResult::OUTCOME_FAILED );
+
+        expect( strandedRow( $first->reference )->status )->toBe( CartPaymentSession::STATUS_CANCELED );
+    } );
+
+    it( 'closes a flagged (stranded) session once the provider cancels it', function (): void {
+        $cart  = readyCart( $this->product );
+        $this->checkout->setPaymentGateway( $cart, 'plain' );
+        $first = $this->checkout->createPaymentSession( $cart );
+        strandedRaisePrice( $this->product );
+        $this->checkout->createPaymentSession( $cart );
+
+        $this->plain->confirm( $first->reference, PaymentSession::STATUS_PROCESSING );
+        $this->reconciler->reconcile( 'plain', $first->reference, WebhookResult::OUTCOME_SUCCEEDED );
+
+        expect( strandedRow( $first->reference )->status )->toBe( CartPaymentSession::STATUS_STRANDED );
+
+        $this->plain->confirm( $first->reference, PaymentSession::STATUS_CANCELED );
         $this->reconciler->reconcile( 'plain', $first->reference, WebhookResult::OUTCOME_FAILED );
 
         expect( strandedRow( $first->reference )->status )->toBe( CartPaymentSession::STATUS_CANCELED );
@@ -614,7 +687,7 @@ describe( 'reconcile command', function (): void {
         CartPaymentSession::query()->update( [ 'updated_at' => Carbon::now()->subMinutes( 20 ) ] );
 
         $this->artisan( 'ecommerce:reconcile-payments' )
-            ->expectsOutputToContain( 'Settled 1 stranded payment(s).' )
+            ->expectsOutputToContain( 'Handled 1 stranded payment(s); 0 still need settling.' )
             ->assertSuccessful();
 
         expect( strandedRow( $first->reference )->status )->toBe( CartPaymentSession::STATUS_HELD )
@@ -791,4 +864,252 @@ it( 'refuses API writes to meta.payment_mismatch', function (): void {
     $this->patchJson( "/api/ecommerce/v1/orders/{$order->id}", [ 'meta' => [ 'gift' => true ] ], idem() )->assertOk();
 
     expect( $order->fresh()->meta['payment_mismatch'] )->toBe( [ 'reference' => 'ps_1', 'gateway' => 'fake' ] );
+} );
+
+describe( 'review fixes', function (): void {
+    it( 'settles a replaced reference even when the cart has no current session', function (): void {
+        $cart  = readyCart( $this->product );
+        $first = $this->checkout->createPaymentSession( $cart );
+        $this->checkout->setPaymentGateway( $cart, 'plain' );
+        $this->gateway->confirm( $first->reference, PaymentSession::STATUS_SUCCEEDED );
+
+        strandedExpectCode( fn () => $this->checkout->finalize( $cart, $first->reference ), 'payment-session-required' );
+
+        expect( strandedRow( $first->reference, 'fake' ) )->status->toBe( CartPaymentSession::STATUS_HELD )->reason->toBe( StrandedPaymentService::REASON_SUPERSEDED );
+    } );
+
+    it( 'keeps a pruned cart\'s sessions matchable', function (): void {
+        config()->set( 'artisanpack.ecommerce.checkout.stranded_payments', 'refund' );
+
+        $cart  = readyCart( $this->product );
+        $first = $this->checkout->createPaymentSession( $cart );
+        $this->checkout->setPaymentGateway( $cart, 'plain' );
+        Cart::query()->whereKey( $cart->id )->update( [ 'expires_at' => Carbon::now()->subDay() ] );
+
+        $this->artisan( 'ecommerce:prune-carts' )->expectsOutputToContain( 'Pruned 1' )->assertSuccessful();
+
+        expect( Cart::query()->find( $cart->id ) )->toBeNull()
+            ->and( strandedRow( $first->reference, 'fake' )->cart_id )->toBeNull();
+
+        $this->gateway->confirm( $first->reference, PaymentSession::STATUS_SUCCEEDED );
+
+        expect( $this->reconciler->reconcile( 'fake', $first->reference, WebhookResult::OUTCOME_SUCCEEDED ) )->toBe( PaymentReconciler::STRANDED )
+            ->and( strandedRow( $first->reference, 'fake' )->status )->toBe( CartPaymentSession::STATUS_REFUNDED )
+            ->and( $this->stranded )->toBe( [] );
+    } );
+
+    it( 'records a pruned cart\'s confirmed session as stranded under hold', function (): void {
+        $cart  = readyCart( $this->product );
+        $first = $this->checkout->createPaymentSession( $cart );
+        $this->checkout->setPaymentGateway( $cart, 'plain' );
+        $cart->delete();
+        $this->gateway->confirm( $first->reference, PaymentSession::STATUS_SUCCEEDED );
+
+        $this->reconciler->reconcile( 'fake', $first->reference, WebhookResult::OUTCOME_SUCCEEDED );
+
+        expect( strandedRow( $first->reference, 'fake' ) )->status->toBe( CartPaymentSession::STATUS_STRANDED )->stranded_at->not->toBeNull()
+            ->and( $this->gateway->refunds )->toBe( [] )
+            ->and( Order::query()->count() )->toBe( 0 );
+    } );
+
+    it( 'leaves the bundled Stripe gateway without CancelsPaymentSessions', function (): void {
+        expect( ArtisanPackUI\Ecommerce\Gateways\Stripe\StripeGateway::class )->not->toImplement( ArtisanPackUI\Ecommerce\Contracts\CancelsPaymentSessions::class );
+    } );
+
+    it( 'refuses a new session while the current one\'s state is unknown', function (): void {
+        $cart = readyCart( $this->product );
+        Cart::query()->whereKey( $cart->id )->update( [ 'payment_reference' => 'ps_unreachable' ] );
+
+        strandedExpectCode( fn () => $this->checkout->createPaymentSession( $cart ), 'payment-status-unknown' );
+
+        expect( $cart->refresh()->payment_reference )->toBe( 'ps_unreachable' )
+            ->and( $this->gateway->calls )->not->toContain( 'createPaymentSession' );
+    } );
+
+    it( 'checks every superseded session, not only the newest few', function (): void {
+        $cart = readyCart( $this->product );
+        $this->checkout->setPaymentGateway( $cart, 'plain' );
+        $oldest = $this->checkout->createPaymentSession( $cart );
+
+        foreach ( range( 1, 6 ) as $step ) {
+            ProductPrice::query()->where( 'priceable_id', $this->product->id )->update( [ 'price_amount' => 2_000 + $step * 100 ] );
+            $this->checkout->createPaymentSession( $cart );
+        }
+
+        $this->plain->confirm( $oldest->reference, PaymentSession::STATUS_SUCCEEDED );
+
+        expect( CartPaymentSession::query()->where( 'status', CartPaymentSession::STATUS_SUPERSEDED )->count() )->toBe( 6 )
+            ->and( $this->checkout->strandedPayment( $cart )?->reference )->toBe( $oldest->reference );
+    } );
+
+    it( 'defers a superseded-looking session while a finalize owns it', function (): void {
+        config()->set( 'artisanpack.ecommerce.checkout.stranded_payments', 'refund' );
+
+        $cart    = readyCart( $this->product );
+        $session = $this->checkout->createPaymentSession( $cart );
+        $this->gateway->confirm( $session->reference );
+        $outcome = null;
+
+        // The webhook lands while the finalize holds the order `processing`.
+        addAction( 'ap.ecommerce.payment.charging', function () use ( &$outcome, $session ): void {
+            $outcome ??= $this->reconciler->reconcile( 'fake', $session->reference, WebhookResult::OUTCOME_SUCCEEDED );
+        } );
+
+        $order = $this->checkout->finalize( $cart, $session->reference )->order;
+
+        expect( $outcome )->toBe( PaymentReconciler::SKIPPED )
+            ->and( $this->gateway->refunds )->toBe( [] )
+            ->and( $this->gateway->voids )->toBe( [] )
+            ->and( $order->refresh()->payment_status )->toBe( 'paid' )
+            ->and( strandedRow( $session->reference )->status )->toBe( CartPaymentSession::STATUS_COMPLETED );
+    } );
+
+    it( 'never refunds the payment an order just paid with', function (): void {
+        config()->set( 'artisanpack.ecommerce.checkout.stranded_payments', 'refund' );
+
+        $cart    = readyCart( $this->product );
+        $session = $this->checkout->createPaymentSession( $cart );
+        $this->gateway->confirm( $session->reference, PaymentSession::STATUS_SUCCEEDED );
+        $outcome = null;
+
+        // The webhook lands after the paid order commits, before the history is marked.
+        addAction( 'ap.ecommerce.order.paid', function () use ( &$outcome, $session ): void {
+            $outcome ??= $this->reconciler->reconcile( 'fake', $session->reference, WebhookResult::OUTCOME_SUCCEEDED );
+        } );
+
+        $order = $this->checkout->finalize( $cart, $session->reference )->order;
+
+        expect( $outcome )->toBe( PaymentReconciler::SKIPPED )
+            ->and( $this->gateway->refunds )->toBe( [] )
+            ->and( strandedRow( $session->reference ) )->status->toBe( CartPaymentSession::STATUS_COMPLETED )->order_id->toBe( $order->id );
+    } );
+
+    it( 'settles a confirmed session on a cart that can no longer become an order', function (): void {
+        config()->set( 'artisanpack.ecommerce.checkout.stranded_payments', 'refund' );
+
+        $cart    = readyCart( $this->product );
+        $session = $this->checkout->createPaymentSession( $cart );
+        $this->gateway->confirm( $session->reference, PaymentSession::STATUS_SUCCEEDED );
+        $cart->items()->delete();
+
+        expect( $this->reconciler->reconcile( 'fake', $session->reference, WebhookResult::OUTCOME_SUCCEEDED ) )->toBe( PaymentReconciler::STRANDED )
+            ->and( strandedRow( $session->reference ) )->status->toBe( CartPaymentSession::STATUS_REFUNDED )->reason->toBe( StrandedPaymentService::REASON_CART_UNPLACEABLE );
+    } );
+
+    it( 'records a pre-1.4 reference before the cart lets go of it', function (): void {
+        $cart                                 = readyCart( $this->product );
+        $this->gateway->sessions['ps_legacy'] = new PaymentSession( gatewayKey: 'fake', reference: 'ps_legacy', amount: new Money\Money( 2_500, new Money\Currency( 'USD' ) ), status: PaymentSession::STATUS_REQUIRES_PAYMENT_METHOD );
+        Cart::query()->whereKey( $cart->id )->update( [ 'payment_reference' => 'ps_legacy' ] );
+
+        $this->checkout->setPaymentGateway( $cart, 'plain' );
+
+        expect( strandedRow( 'ps_legacy' ) )->status->toBe( CartPaymentSession::STATUS_SUPERSEDED )->amount->toBeNull()->cart_id->toBe( $cart->id );
+
+        $this->gateway->confirm( 'ps_legacy', PaymentSession::STATUS_SUCCEEDED );
+        $this->reconciler->reconcile( 'fake', 'ps_legacy', WebhookResult::OUTCOME_SUCCEEDED );
+
+        expect( strandedRow( 'ps_legacy' ) )->status->toBe( CartPaymentSession::STATUS_HELD )->amount->toBe( 2_500 )->currency->toBe( 'USD' );
+    } );
+
+    it( 'records a pre-1.4 reference before a currency change drops it', function (): void {
+        $cart = readyCart( checkoutProduct( [ 'USD' => 2_000, 'EUR' => 1_800 ] ) );
+        Cart::query()->whereKey( $cart->id )->update( [ 'payment_reference' => 'ps_legacy_fx' ] );
+        config()->set( 'artisanpack.ecommerce.currency.enabled', [ 'EUR' ] );
+
+        app( ArtisanPackUI\Ecommerce\Services\StorefrontCartService::class )->changeCurrency( $cart, 'EUR' );
+
+        expect( strandedRow( 'ps_legacy_fx' )->status )->toBe( CartPaymentSession::STATUS_SUPERSEDED );
+    } );
+
+    it( 'only steps the cart back when the refunded session is its own (gateway and reference)', function (): void {
+        config()->set( 'artisanpack.ecommerce.checkout.stranded_payments', 'refund' );
+
+        $cart = readyCart( $this->product );
+        $this->checkout->setPaymentGateway( $cart, 'plain' );
+        $plain = $this->checkout->createPaymentSession( $cart );
+        $this->checkout->setPaymentGateway( $cart, 'fake' );
+        $fake = $this->checkout->createPaymentSession( $cart );
+
+        expect( $fake->reference )->toBe( $plain->reference );
+
+        $this->plain->confirm( $plain->reference, PaymentSession::STATUS_SUCCEEDED );
+        $this->reconciler->reconcile( 'plain', $plain->reference, WebhookResult::OUTCOME_SUCCEEDED );
+
+        expect( strandedRow( $plain->reference, 'plain' )->status )->toBe( CartPaymentSession::STATUS_REFUNDED )
+            ->and( $cart->refresh() )->payment_reference->toBe( $fake->reference )->payment_gateway_key->toBe( 'fake' )
+            ->and( $cart->checkout_state )->toBe( CheckoutState::PAYMENT_PENDING );
+    } );
+
+    it( 'settles a confirmed session before placing a cart a discount made free', function ( string $policy ): void {
+        config()->set( 'artisanpack.ecommerce.checkout.stranded_payments', $policy );
+
+        $digital = checkoutProduct( [ 'USD' => 1_000 ], [ 'type' => 'digital' ] );
+        $cart    = readyCart( $digital );
+        $session = $this->checkout->createPaymentSession( $cart );
+        $this->gateway->confirm( $session->reference, PaymentSession::STATUS_SUCCEEDED );
+        ProductPrice::query()->where( 'priceable_id', $digital->id )->update( [ 'price_amount' => 0 ] );
+        app( ArtisanPackUI\Ecommerce\Services\StorefrontCartService::class )->recalculate( $cart );
+
+        expect( $cart->refresh()->total_amount )->toBe( 0 );
+
+        $order = $this->checkout->finalize( $cart )->order;
+
+        expect( Order::query()->count() )->toBe( 1 );
+
+        if ( 'hold' === $policy ) {
+            expect( $order->meta['payment_mismatch'] )->toMatchArray( [ 'paid' => 1_000, 'expected' => 0 ] )
+                ->and( strandedRow( $session->reference )->status )->toBe( CartPaymentSession::STATUS_HELD );
+        } else {
+            expect( $this->gateway->refunds )->toHaveCount( 1 )
+                ->and( $order->payment_reference )->toBeNull()
+                ->and( strandedRow( $session->reference )->status )->toBe( CartPaymentSession::STATUS_REFUNDED );
+        }
+    } )->with( [ 'hold', 'refund' ] );
+
+    it( 'reports stranded payments that still need settling', function (): void {
+        config()->set( 'artisanpack.ecommerce.checkout.stranded_payments', 'refund' );
+        $this->plain->refundsFail = true;
+
+        $cart  = readyCart( $this->product );
+        $this->checkout->setPaymentGateway( $cart, 'plain' );
+        $first = $this->checkout->createPaymentSession( $cart );
+        strandedRaisePrice( $this->product );
+        $this->checkout->createPaymentSession( $cart );
+        $this->plain->confirm( $first->reference, PaymentSession::STATUS_SUCCEEDED );
+        CartPaymentSession::query()->update( [ 'updated_at' => Carbon::now()->subMinutes( 20 ) ] );
+
+        $this->artisan( 'ecommerce:reconcile-payments' )
+            ->expectsOutputToContain( 'Handled 1 stranded payment(s); 1 still need settling.' )
+            ->assertSuccessful();
+    } );
+} );
+
+describe( 'resolving a hold, recovery', function (): void {
+    it( 'finishes a rejection after a lost void response without voiding twice', function (): void {
+        $order                            = strandedHold( $this, PaymentSession::STATUS_AUTHORIZED );
+        $service                          = app( StrandedPaymentService::class );
+        $this->gateway->voidsLoseResponse = true;
+
+        expect( fn () => $service->rejectHold( $order ) )->toThrow( ArtisanPackUI\Ecommerce\Exceptions\PaymentNotAllowedException::class )
+            ->and( $order->refresh()->system_status )->toBe( 'pending' );
+
+        $rejected = $service->rejectHold( $order );
+
+        expect( $rejected->system_status )->toBe( 'failed' )
+            ->and( $this->gateway->voids )->toHaveCount( 1 );
+    } );
+
+    it( 'sends the same refund request as an automatic stranded refund', function (): void {
+        $order     = strandedHold( $this, PaymentSession::STATUS_SUCCEEDED );
+        $reference = $order->meta['payment_mismatch']['reference'];
+
+        // An automatic refund already went through at the provider.
+        $this->gateway->refundRequests[ 'ap-ec-stranded-' . $reference ] = [ 'reference' => $reference, 'amount' => 2_500, 'order_id' => null ];
+
+        $rejected = app( StrandedPaymentService::class )->rejectHold( $order );
+
+        expect( $rejected->system_status )->toBe( 'failed' )
+            ->and( $this->gateway->refunds )->toBe( [] )
+            ->and( strandedRow( $reference )->resolution_reference )->toBe( 're_ap-ec-stranded-' . $reference );
+    } );
 } );
