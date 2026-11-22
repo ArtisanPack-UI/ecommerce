@@ -18,6 +18,7 @@
  * | `ap.ecommerce.license.activated`                     | `license.activated.customer`           | customer  |
  * | `ap.ecommerce.inventory.lowStock` / `.outOfStock`    | `inventory.low-stock.admin` / `inventory.out-of-stock.admin` | staff |
  * | `ap.ecommerce.review.submitted` (still pending)      | `review.awaiting-moderation.admin`     | staff     |
+ * | `ap.ecommerce.inventory.backInStock`                 | `inventory.back-in-stock.customer` ({@see BackInStockService}) | subscribers |
  *
  * `digital.download-ready.customer` is sent by {@see IssueDigitalDeliverables},
  * which has the freshly issued links. Laravel's `NotificationSending` /
@@ -48,6 +49,7 @@ use ArtisanPackUI\Ecommerce\Notifications\EcommerceNotification;
 use ArtisanPackUI\Ecommerce\Notifications\NotificationCatalog;
 use ArtisanPackUI\Ecommerce\Notifications\NotificationContext;
 use ArtisanPackUI\Ecommerce\Notifications\NotificationDispatcher;
+use ArtisanPackUI\Ecommerce\Services\BackInStockService;
 use DateTimeInterface;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Notifications\Events\NotificationSending;
@@ -94,6 +96,7 @@ class SendCatalogNotifications
         addAction( 'ap.ecommerce.inventory.lowStock', [ $this, 'lowStock' ] );
         addAction( 'ap.ecommerce.inventory.outOfStock', [ $this, 'outOfStock' ] );
         addAction( 'ap.ecommerce.review.submitted', [ $this, 'reviewSubmitted' ] );
+        addAction( 'ap.ecommerce.inventory.backInStock', [ $this, 'backInStock' ] );
 
         $events->listen( DigitalProductUpdated::class, [ $this, 'digitalProductUpdated' ] );
         $events->listen( NotificationSending::class, [ $this, 'sending' ] );
@@ -290,6 +293,20 @@ class SendCatalogNotifications
             'Product' => $this->context->product( $review->product ),
             'Review'  => $this->context->review( $review ),
         ], $review, locale: $this->notifications->adminLocale() );
+    }
+
+    /**
+     * Tells the product's back-in-stock subscribers.
+     *
+     * @since 1.4.0
+     *
+     * @param  InventoryItem  $item  Restocked row.
+     *
+     * @return void
+     */
+    public function backInStock( InventoryItem $item ): void
+    {
+        app( BackInStockService::class )->notifyRestocked( $item );
     }
 
     /**

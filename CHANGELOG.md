@@ -6,6 +6,19 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `Contracts\DescribesLineOptions` (optional, on a `ProductType`) and `Support\LineOptionDescriber` (`describe()`, `forCartItem()`, `forOrderItem()`): human-readable `label` / `value` rows for a line's options, with a default (variant name plus headlined scalar options) for other types. The cart item and order item REST resources and GraphQL types expose `option_lines` (`LineOption`); placement copies the rows into `order_items.product_snapshot.option_lines`, and the order confirmation, admin order-paid, shipped, and refunded templates list them under each line. Filter: `ap.ecommerce.lineOptions.described` (#222).
+- Richer add-to-cart field schema: options may carry `price_delta`, `image`, `swatch`, `hint`, and `disabled`; a `swatch` field type; field-level `visible_when` and `meta.disables`. `Support\StorefrontOptionSchema` (`normalize()`, `isVisible()`, `visibleFields()`, `stripHidden()`, `rules()`, `validate()`) drops malformed fields with a logged warning and lets types skip hidden fields. `purchase-options` serves normalized fields, and the new GraphQL `productPurchaseOptions` query returns the same data (#223).
+- `Services\PriceQuoteService::quote()`, `ValueObjects\PriceQuote`, and the optional `Contracts\QuotesPrice`: list-price quotes for a product and its options with no side effects, over `POST products/{product}/quote` (`catalog.read`, 422 with `options.*` errors) and GraphQL `productQuote` (#224).
+- Back-in-stock subscriptions: `Models\BackInStockSubscription` (`ecommerce_back_in_stock_subscriptions`), `Services\BackInStockService` (`subscribe()`, `unsubscribe()`, `isSubscribed()`, `notifyRestocked()`, `exportFor()`, `eraseFor()`), the `inventory.back-in-stock.customer` notification (category `back-in-stock`), the `ap.ecommerce.inventory.backInStock` hook fired by `InventoryService` when available stock rises from zero, `ap.ecommerce.backInStock.subscribed` / `.unsubscribed` / `.notified` / `.shouldNotify` / `.productUrl` hooks, the `ecommerce.backInStock.subscribe` rate policy, and the `notifications.product_url` config key. Subscriptions are deleted on customer erasure and added to artisanpack-ui/privacy exports.
+
+### Changed
+
+- `StorefrontCartService` refuses options that fail a type's `StorefrontOptionSchema::validate()` (a `ValidationException`) as `options-invalid` with the schema's first message, as it already did for `InvalidArgumentException`.
+- `AddCartItemRequest::optionRules()` exposes the cart's option payload limits, shared by the quote endpoint and GraphQL `productQuote`: at most 20 top-level options, values of up to 255 characters, and now nested values for dot- or bracket-named fields (up to 3 levels deep, 100 values in all) so they reach the type's `StorefrontOptionSchema` instead of being refused.
+- A product type that throws a `TypeError` on an option's shape (a nested value where it reads a scalar) is refused as `options-invalid` by the cart and as an invalid quote, instead of erroring.
+
 ## [1.3.0] - 2026-11-10
 
 Payment gateways that share one provider webhook endpoint can settle their

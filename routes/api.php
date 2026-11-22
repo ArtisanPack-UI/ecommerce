@@ -132,6 +132,13 @@ Route::middleware( [ 'ecommerce.rate-limit:ecommerce.lookup.attempt', 'ecommerce
     Route::get( 'order-views/{token}', [ GuestOrderController::class, 'view' ] )->where( 'token', '[0-9a-f-]+' )->name( 'order-views.show' );
 } );
 
+// Price quotes for a set of options (#224): a read with no side effects,
+// so it shares the catalog policy and needs no Idempotency-Key.
+Route::post( 'products/{product}/quote', [ ProductController::class, 'quote' ] )
+    ->whereNumber( 'product' )
+    ->middleware( [ 'ecommerce.rate-limit:ecommerce.catalog.read' ] )
+    ->name( 'products.quote' );
+
 // Storefronts report product views (#179).
 Route::post( 'products/{product}/views', [ ProductController::class, 'recordView' ] )
     ->whereNumber( 'product' )

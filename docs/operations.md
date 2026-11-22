@@ -165,6 +165,7 @@ default, so a limit can't be switched off this way.
 | `ecommerce.webhook.inbound` | 120/min per IP | Every inbound provider webhook |
 | `ecommerce.webhook.verified` | 1,000/min per provider (`rate_limits.webhook.inbound.per_provider`) | Verified inbound webhooks only |
 | `ecommerce.notifications.unsubscribe` | 30/min per IP | Signed unsubscribe links |
+| `ecommerce.backInStock.subscribe` | 10/hour per IP + 5/hour per email | Registered for storefront back-in-stock sign-up forms; no engine route uses it |
 | `ecommerce.admin.mutate` | 120/min per user | Admin, kanban, and `me/*` routes |
 | `ecommerce.login` | 5/min per IP + 20/hour per email | Registered for storefront and admin login forms; no engine route uses it |
 

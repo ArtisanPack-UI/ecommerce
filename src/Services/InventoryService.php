@@ -78,9 +78,11 @@ class InventoryService
      * listeners can veto or modify the delta, and
      * `ap.ecommerce.inventory.adjusted` (action) after. Low-stock and
      * out-of-stock hooks fire when the resulting on-hand crosses thresholds
-     * downward.
+     * downward; `ap.ecommerce.inventory.backInStock` fires when available
+     * stock rises from zero or less to above zero.
      *
      * @since 1.0.0
+     * @since 1.4.0 Fires `ap.ecommerce.inventory.backInStock`.
      *
      * @param  InventoryItem  $item    Row to adjust.
      * @param  int            $delta   Signed change in `quantity_on_hand`.
@@ -116,6 +118,7 @@ class InventoryService
             doAction( 'ap.ecommerce.inventory.adjusted', $fresh, $delta, $newOnHand );
 
             $this->fireStockThresholdHooks( $fresh, $previousOnHand, $newOnHand );
+            $this->fireBackInStockHook( $fresh, $previousOnHand - (int) $fresh->quantity_reserved );
 
             return $fresh;
         } );
@@ -415,12 +418,18 @@ class InventoryService
                 return false;
             }
 
+            $previousAvailable = null === $item ? null : $item->availableQuantity();
+
             if ( null !== $item ) {
                 $item->quantity_reserved = max( 0, $item->quantity_reserved - $reservation->quantity );
                 $item->save();
             }
 
             doAction( 'ap.ecommerce.inventory.reservationReleased', $reservation );
+
+            if ( null !== $item && null !== $previousAvailable ) {
+                $this->fireBackInStockHook( $item, $previousAvailable );
+            }
 
             return true;
         } );
@@ -441,6 +450,34 @@ class InventoryService
         );
 
         return $ttl > 0 ? $ttl : 15;
+    }
+
+    /**
+     * Fires `ap.ecommerce.inventory.backInStock` `(InventoryItem $item, int
+     * $available)` when a tracked, non-backorderable row's available stock
+     * (on hand less reserved) goes from zero or less to above zero — a
+     * restock, a refund that restocks, or a released reservation. Not on a
+     * rise from 3 to 5. Back-in-stock subscribers are notified from it
+     * ({@see BackInStockService}).
+     *
+     * @since 1.4.0
+     *
+     * @param  InventoryItem  $item               Row after the change.
+     * @param  int            $previousAvailable  Available quantity before the change.
+     *
+     * @return void
+     */
+    protected function fireBackInStockHook( InventoryItem $item, int $previousAvailable ): void
+    {
+        if ( ! $item->track_inventory || $item->allow_backorder ) {
+            return;
+        }
+
+        $available = $item->availableQuantity();
+
+        if ( $previousAvailable <= 0 && $available > 0 ) {
+            doAction( 'ap.ecommerce.inventory.backInStock', $item, $available );
+        }
     }
 
     /**

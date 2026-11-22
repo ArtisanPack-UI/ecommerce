@@ -13,6 +13,8 @@ the matching abstract contract-test suite.
 | [`ProductType`](../src/Contracts/ProductType.php) | `ProductTypeRegistry` | `simple`, `digital`, `variable`, `grouped`, `bundled` (`src/ProductTypes/`); `MissingProductType` placeholder for unknown keys | `ProductTypeContractTest` |
 | [`ExpandsInventory`](../src/Contracts/ExpandsInventory.php) (optional, on a `ProductType`) | The product type itself | `BundledProductType` | none |
 | [`ProvidesStorefrontOptions`](../src/Contracts/ProvidesStorefrontOptions.php) (optional, on a `ProductType`) | The product type itself | `GroupedProductType`, `BundledProductType` | none |
+| [`DescribesLineOptions`](../src/Contracts/DescribesLineOptions.php) (optional, on a `ProductType`, since 1.4.0) | The product type itself | none (the default description lives in `Support\LineOptionDescriber`) | none |
+| [`QuotesPrice`](../src/Contracts/QuotesPrice.php) (optional, on a `ProductType`, since 1.4.0) | The product type itself | none | none |
 | [`PaymentGateway`](../src/Contracts/PaymentGateway.php) | `PaymentGatewayRegistry` | `StripeGateway` (`stripe`, when `gateways.stripe.enabled` and `stripe/stripe-php` is installed) | `PaymentGatewayContractTest` |
 | [`RendersClientPayment`](../src/Contracts/RendersClientPayment.php) (optional, on a `PaymentGateway`) | The gateway itself | `StripeGateway` (`stripe-payment-element`) | none |
 | [`SharesWebhookEndpoint`](../src/Contracts/SharesWebhookEndpoint.php) (optional, on a `PaymentGateway`, since 1.3.0) | The gateway itself | none | Checked inside `PaymentGatewayContractTest` |
@@ -130,6 +132,14 @@ interface ExpandsInventory {
 
 interface ProvidesStorefrontOptions {
     public function storefrontOptions( Product $product ): array;
+}
+
+interface DescribesLineOptions {
+    public function describeLineOptions( Product $product, array $options ): array; // list<array{label: string, value: string}>
+}
+
+interface QuotesPrice {
+    public function quoteBreakdown( Product $product, array $options, int $quantity, string $currency ): array; // list<array{label: string, amount: Money}>
 }
 
 interface PaymentGateway {
@@ -431,10 +441,33 @@ stock checks read them, instead of the product itself.
 **`ProvidesStorefrontOptions`.** Optional on a product type. It describes the
 add-to-cart inputs a storefront renders, returned as `options` from
 `GET products/{product}/purchase-options`. Each field has `type` (`text`,
-`textarea`, `number`, `quantity`, `select`, `radio`, `checkbox`, `info`),
-`name` (the cart option key, dot or bracket notation), and `label`, and may
-have `options` (`[ { value, label } ]`), `rules`, `required`, `default`,
-`help`, and `meta`.
+`textarea`, `number`, `quantity`, `select`, `radio`, `checkbox`, `info`,
+`swatch`), `name` (the cart option key, dot or bracket notation), and `label`,
+and may have `options` (`[ { value, label } ]`, each optionally with
+`price_delta`, `image`, `swatch`, `hint`, and `disabled`), `rules`,
+`required`, `default`, `help`, `visible_when`, and `meta` (including
+`meta.disables`). The engine normalizes the fields through
+`Support\StorefrontOptionSchema` before serving them; types call its
+`validate()` from `validateCartOptions()` so hidden fields are neither
+validated nor stored. Every key is documented with an example in
+[products.md](products.md#add-to-cart-fields).
+
+**`DescribesLineOptions`.** Optional on a product type (since 1.4.0).
+`describeLineOptions( $product, $options )` returns the human-readable rows
+for a line (`[ { label, value } ]`, translated), shown in carts, orders,
+order emails, and the REST and GraphQL `option_lines` field. Types without it
+get the default rows from `Support\LineOptionDescriber`: the variant name
+(empty label), then each scalar option with its key headlined. At placement
+the rows are copied into `order_items.product_snapshot.option_lines`, so a
+placed order keeps its wording when the type's labels change later. See
+[products.md](products.md#line-option-descriptions).
+
+**`QuotesPrice`.** Optional on a product type (since 1.4.0).
+`quoteBreakdown( $product, $options, $quantity, $currency )` returns
+breakdown rows (`[ { label, amount: Money } ]`) that `PriceQuoteService`
+adds to a `PriceQuote`. It is only called after `validateCartOptions()`
+accepted the options. Rows in another currency or of the wrong shape are
+dropped. See [products.md](products.md#price-quotes).
 
 **`CurrencyResolver` and `RefreshableRateProvider`.** `CurrencyResolver`
 picks the shopper's currency. The core `SessionCurrencyResolver` reads the

@@ -404,6 +404,12 @@ return [
             'per_ip' => (int) env( 'ECOMMERCE_RATE_UNSUBSCRIBE_PER_IP', 30 ),
         ],
 
+        // Per hour: back-in-stock sign-ups per IP and per email address.
+        'backInStock.subscribe' => [
+            'per_ip'    => (int) env( 'ECOMMERCE_RATE_BACK_IN_STOCK_SUBSCRIBE_PER_IP', 10 ),
+            'per_email' => (int) env( 'ECOMMERCE_RATE_BACK_IN_STOCK_SUBSCRIBE_PER_EMAIL', 5 ),
+        ],
+
         'admin.mutate' => [
             'per_user' => (int) env( 'ECOMMERCE_RATE_ADMIN_MUTATE_PER_USER', 120 ),
         ],
@@ -900,6 +906,10 @@ return [
     |                               off links to a signed one-click
     |                               unsubscribe instead, and carries
     |                               `List-Unsubscribe` headers.
+    | `product_url`               — Storefront product page, with `{slug}`
+    |                               and `{id}` placeholders, linked from
+    |                               back-in-stock notifications as
+    |                               `Product.url` (none when unset).
     |
     */
 
@@ -912,6 +922,7 @@ return [
         'preference_channels'       => [ 'mail' ],
         'review_request_delay_days' => (int) env( 'ECOMMERCE_REVIEW_REQUEST_DELAY_DAYS', 7 ),
         'preferences_url'           => env( 'ECOMMERCE_NOTIFICATIONS_PREFERENCES_URL' ),
+        'product_url'               => env( 'ECOMMERCE_NOTIFICATIONS_PRODUCT_URL' ),
     ],
 
     /*

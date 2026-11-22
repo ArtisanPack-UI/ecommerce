@@ -144,6 +144,49 @@ describe( 'options', function (): void {
             ->toThrow( fn ( CartOperationException $e ) => expect( $e->errorCode )->toBe( 'options-invalid' ) );
     } );
 
+    it( 'refuses options that fail the storefront schema with the schema\'s message', function (): void {
+        app( ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry::class )->register( 'schema-validated', new class extends ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType {
+            public function key(): string
+            {
+                return 'schema-validated';
+            }
+
+            public function validateCartOptions( Product $product, array $options ): array
+            {
+                return app( ArtisanPackUI\Ecommerce\Support\StorefrontOptionSchema::class )->validate(
+                    [ [ 'type' => 'text', 'name' => 'engraving', 'label' => 'Engraving', 'required' => true ] ],
+                    $options,
+                );
+            }
+        } );
+
+        $product = correctnessProduct( [ 'USD' => 1_000 ], [ 'type' => 'schema-validated' ] );
+
+        expect( fn () => $this->service->addItem( $this->cart, $product->id, null, 1 ) )
+            ->toThrow( fn ( CartOperationException $e ) => expect( $e->errorCode )->toBe( 'options-invalid' )->and( $e->getMessage() )->toContain( 'engraving' ) );
+
+        expect( $this->service->addItem( $this->cart, $product->id, null, 1, [ 'engraving' => 'Sam' ] )->options )->toBe( [ 'engraving' => 'Sam' ] );
+    } );
+
+    it( 'refuses a nested option a product type didn\'t expect instead of erroring', function (): void {
+        app( ArtisanPackUI\Ecommerce\Registries\ProductTypeRegistry::class )->register( 'scalar-only', new class extends ArtisanPackUI\Ecommerce\ProductTypes\SimpleProductType {
+            public function key(): string
+            {
+                return 'scalar-only';
+            }
+
+            public function validateCartOptions( Product $product, array $options ): array
+            {
+                return [ 'size' => strtoupper( $options['size'] ?? '' ) ];
+            }
+        } );
+
+        $product = correctnessProduct( [ 'USD' => 1_000 ], [ 'type' => 'scalar-only' ] );
+
+        expect( fn () => $this->service->addItem( $this->cart, $product->id, null, 1, [ 'size' => [ 'nested' => 'x' ] ] ) )
+            ->toThrow( fn ( CartOperationException $e ) => expect( $e->errorCode )->toBe( 'options-invalid' ) );
+    } );
+
     it( 'rejects oversized option payloads at the API', function (): void {
         $product = correctnessProduct();
         $options = array_fill_keys( array_map( static fn ( int $i ): string => "o{$i}", range( 1, 21 ) ), 'x' );

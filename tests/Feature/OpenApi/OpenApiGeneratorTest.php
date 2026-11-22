@@ -65,8 +65,9 @@ it( 'annotates every endpoint with its rate-limit policy', function (): void {
 
 it( 'documents the Idempotency-Key requirement on every mutating endpoint', function (): void {
     foreach ( documentedOperations( $this->spec ) as [ $route, $method, $operation ] ) {
-        // Template preview is a read-only POST (engine spec §9.11): no Idempotency-Key.
-        $readOnlyPost = 'ecommerce.api.admin.notification-templates.preview' === $route->getName();
+        // Template preview (engine spec §9.11) and price quotes (#224) are
+        // read-only POSTs: no Idempotency-Key.
+        $readOnlyPost = in_array( $route->getName(), [ 'ecommerce.api.admin.notification-templates.preview', 'ecommerce.api.products.quote' ], true );
 
         if ( 'ecommerce.webhooks' === $route->getName() || $readOnlyPost || ! in_array( $method, [ 'POST', 'PUT', 'PATCH', 'DELETE' ], true ) ) {
             continue;

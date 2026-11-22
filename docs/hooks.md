@@ -222,6 +222,12 @@ Event types and payloads are listed in [activity-log.md](activity-log.md#event-t
 | `ap.ecommerce.inventory.outOfStock` | action | `InventoryItem $item`. Fires when on-hand drops from above zero to zero or below. | | `Services/InventoryService` |
 | `ap.ecommerce.inventory.reserved` | action | `InventoryReservation $reservation` | | `Services/InventoryService::reserve()` |
 | `ap.ecommerce.inventory.reservationReleased` | action | `InventoryReservation $snapshot` (a clone; the row is already deleted) | | `Services/InventoryService::releaseExpired()` |
+| `ap.ecommerce.inventory.backInStock` | action | `InventoryItem $item`, `int $available`. Since 1.4.0. Fires when a tracked, non-backorderable row's available stock (on hand less reserved) rises from zero or less to above zero (an adjustment or a released reservation). | | `Services/InventoryService` |
+| `ap.ecommerce.backInStock.subscribed` | action | `BackInStockSubscription $subscription`, `Product $product`, `?ProductVariant $variant`. Since 1.4.0. After commit; not fired when an existing pending subscription is returned. | | `Services/BackInStockService::subscribe()` |
+| `ap.ecommerce.backInStock.unsubscribed` | action | `BackInStockSubscription $subscription`. Since 1.4.0. After commit. | | `Services/BackInStockService::unsubscribe()` |
+| `ap.ecommerce.backInStock.notified` | action | `BackInStockSubscription $subscription`, `Product $product`, `?ProductVariant $variant`. Since 1.4.0. After commit, once per subscription. | | `Services/BackInStockService::notify()` |
+| `ap.ecommerce.backInStock.shouldNotify` | filter | `bool $notify` (true), `BackInStockSubscription $subscription`, `Product $product`. Since 1.4.0. | `bool`. `false` skips the subscription; it stays pending. | `Services/BackInStockService::notify()` |
+| `ap.ecommerce.backInStock.productUrl` | filter | `string\|null $url` (from `notifications.product_url`), `Product $product`, `?ProductVariant $variant`. Since 1.4.0. | `string\|null`: `Product.url` in the back-in-stock notification | `Notifications/NotificationContext::backInStockProduct()` |
 
 ## Products and search
 
@@ -241,6 +247,9 @@ See [products.md](products.md).
 | `ap.ecommerce.product.listQuery` | filter | `Builder $query`, `array $params` (the parsed catalog filters: `category` ids, `tag` id, `currency`, `price` `[min, max]`, `attributes`, `in_stock`, `on_sale`; only those the request set) | `Builder` | `Catalog/CatalogQuery::builder()` (`GET products`, `GET categories/{category}/products`) |
 | `ap.ecommerce.product.viewed` | action | `Product $product`, `?Customer $customer` (the viewer, when signed in) | | `Catalog/ProductViews::record()` (`POST products/{product}/views`) |
 | `ap.ecommerce.product.related` | filter | `Collection<int, Product> $products`, `Product $product`, `string $type` (`related`, `upsell`, or `cross_sell`), `int $limit` | `Collection`. Anything else is ignored. | `Catalog/RelatedProducts` (`GET products/{product}/related`) |
+| `ap.ecommerce.storefrontOptions.fieldTypes` | filter | `array<string> $types` (the documented add-to-cart field types). Since 1.4.0. | `array<string>`: types `StorefrontOptionSchema::normalize()` accepts | `Support/StorefrontOptionSchema` |
+| `ap.ecommerce.lineOptions.described` | filter | `array $rows` (`[ { label, value } ]`), `?Product $product`, `array $options`. Since 1.4.0. Not applied to rows read from an order snapshot. | `array`: rows; malformed ones are dropped | `Support/LineOptionDescriber` |
+| `ap.ecommerce.priceQuote.quoted` | filter | `PriceQuote $quote`, `Product $product`, `array $options` (sanitised). Since 1.4.0. Only for accepted options. | `PriceQuote`. Anything else is ignored. | `Services/PriceQuoteService::quote()` |
 | `ap.ecommerce.product.searchableData` | filter | `array $data` (Scout document: `id`, `name`, `slug`, `sku`, …), `Product $product` | `array` | `Models/Product::toSearchableArray()` |
 
 ## Reviews

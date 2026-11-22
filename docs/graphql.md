@@ -54,7 +54,7 @@ app's GraphQL schemas.
 
 | Field | Access | Rate policy |
 |---|---|---|
-| `product(id)`, `productBySlug(slug)`, `products(filter, sort, first, after)`, `search(query, first, after)` | public (storefront-visible products only) | `ecommerce.catalog.read` |
+| `product(id)`, `productBySlug(slug)`, `products(filter, sort, first, after)`, `search(query, first, after)`, `productPurchaseOptions(product, currency, country_code, region_code, postal_code)`, `productQuote(product, options, quantity, currency)` | public (storefront-visible products only) | `ecommerce.catalog.read` |
 | `cart(token)`, `cartShippingRates(token, country_code, region_code, postal_code)`, `checkout(token)` | anyone holding the token; a cart that belongs to a customer account also needs that account's session or token | `ecommerce.cart.mutate` |
 | `guestOrderLookup(email, order_number)`, `orderByViewToken(token)` | public | `ecommerce.lookup.attempt` |
 | `me`, `myOrders` | signed-in shopper, token with `ecommerce:storefront` (or admin) | `ecommerce.admin.mutate` |
@@ -70,6 +70,21 @@ Notes on the storefront fields:
   The price, popularity, and relevance sorts are REST-only, because they page
   by number rather than by cursor.
 - `search` takes a `query` of 1–200 characters.
+- `productPurchaseOptions` returns the same JSON as REST
+  `purchase-options` (normalized add-to-cart fields included), or `null` for
+  a product that isn't on sale.
+- `productQuote` returns a `PriceQuote` (`currency`, `quantity`,
+  `unit_price`, `line_total`, `breakdown`, `valid`, `errors`), with money as
+  `QuoteMoney` (`amount`, `currency`, `formatted`). Options the product type
+  rejects give `valid: false` and `errors` (`UserError`, `field` `options.*`)
+  instead of a GraphQL error. A malformed payload is a `BAD_USER_INPUT`
+  GraphQL error instead: a quantity out of range, `options` that isn't an
+  object, more than 20 top-level options, nesting deeper than three levels,
+  more than 100 values in all, or a value over 255 characters (the cart's
+  limits). Promotions are not applied. `null` for a product that isn't on
+  sale.
+- `CartItem.option_lines` and `OrderItem.option_lines` are `[LineOption!]!`
+  (`label`, `value`); an order line's rows come from its snapshot.
 - `cart`, `cartShippingRates`, and `checkout` return `null` for an unknown
   token or a cart the caller can't open. `checkout` returns a `CheckoutInfo`:
   `state`, `requires_shipping`, `shipping_rates`, `gateways`,
