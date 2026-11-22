@@ -14,6 +14,13 @@
  * confirmed later, the engine still matches it through the cart's payment
  * session history and applies the `checkout.stranded_payments` policy.
  *
+ * Implement it only when the provider refuses, atomically, to cancel a
+ * session that became confirmed after you checked it. Stripe, for example,
+ * cancels a manual-capture PaymentIntent in `requires_capture` (an
+ * authorization the shopper just made), so the bundled Stripe gateway does
+ * not implement this contract: a check-then-cancel there could release an
+ * authorization instead of applying the stranded-payment policy.
+ *
  * @package    ArtisanPack_UI
  * @subpackage Ecommerce
  *
