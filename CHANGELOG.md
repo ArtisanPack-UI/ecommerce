@@ -6,12 +6,25 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-22
+
+Product types can describe a cart line's options in words, offer a richer
+add-to-cart schema (swatches, option metadata, conditional fields), and quote
+a price for a set of options without side effects. Shoppers can sign up to
+hear when a sold-out product is back in stock. A payment the provider
+confirmed that no order can take is now held for review or refunded instead
+of being left with no order, refund, or record, and staff can accept or
+reject that hold.
+
+This is the engine release `ecommerce-storefront-livewire` 2.0.0 builds on
+for rich options, "Notify me", line summaries, and stranded payments.
+
 ### Added
 
 - `Contracts\DescribesLineOptions` (optional, on a `ProductType`) and `Support\LineOptionDescriber` (`describe()`, `forCartItem()`, `forOrderItem()`): human-readable `label` / `value` rows for a line's options, with a default (variant name plus headlined scalar options) for other types. The cart item and order item REST resources and GraphQL types expose `option_lines` (`LineOption`); placement copies the rows into `order_items.product_snapshot.option_lines`, and the order confirmation, admin order-paid, shipped, and refunded templates list them under each line. Filter: `ap.ecommerce.lineOptions.described` (#222).
 - Richer add-to-cart field schema: options may carry `price_delta`, `image`, `swatch`, `hint`, and `disabled`; a `swatch` field type; field-level `visible_when` and `meta.disables`. `Support\StorefrontOptionSchema` (`normalize()`, `isVisible()`, `visibleFields()`, `stripHidden()`, `rules()`, `validate()`) drops malformed fields with a logged warning and lets types skip hidden fields. `purchase-options` serves normalized fields, and the new GraphQL `productPurchaseOptions` query returns the same data (#223).
 - `Services\PriceQuoteService::quote()`, `ValueObjects\PriceQuote`, and the optional `Contracts\QuotesPrice`: list-price quotes for a product and its options with no side effects, over `POST products/{product}/quote` (`catalog.read`, 422 with `options.*` errors) and GraphQL `productQuote` (#224).
-- Back-in-stock subscriptions: `Models\BackInStockSubscription` (`ecommerce_back_in_stock_subscriptions`), `Services\BackInStockService` (`subscribe()`, `unsubscribe()`, `isSubscribed()`, `notifyRestocked()`, `exportFor()`, `eraseFor()`), the `inventory.back-in-stock.customer` notification (category `back-in-stock`), the `ap.ecommerce.inventory.backInStock` hook fired by `InventoryService` when available stock rises from zero, `ap.ecommerce.backInStock.subscribed` / `.unsubscribed` / `.notified` / `.shouldNotify` / `.productUrl` hooks, the `ecommerce.backInStock.subscribe` rate policy, and the `notifications.product_url` config key. Subscriptions are deleted on customer erasure and added to artisanpack-ui/privacy exports.
+- Back-in-stock subscriptions: `Models\BackInStockSubscription` (`ecommerce_back_in_stock_subscriptions`), `Services\BackInStockService` (`subscribe()`, `unsubscribe()`, `isSubscribed()`, `notifyRestocked()`, `exportFor()`, `eraseFor()`), the `inventory.back-in-stock.customer` notification (category `back-in-stock`), the `ap.ecommerce.inventory.backInStock` hook fired by `InventoryService` when available stock rises from zero, `ap.ecommerce.backInStock.subscribed` / `.unsubscribed` / `.notified` / `.shouldNotify` / `.productUrl` hooks, the `ecommerce.backInStock.subscribe` rate policy, and the `notifications.product_url` config key. Subscriptions are deleted on customer erasure and added to artisanpack-ui/privacy exports (#229).
 - Stranded payments (#231): a payment the provider confirmed that no order can take (the cart's total changed after its session was made, or a newer session replaced it) is no longer left with no order, refund, or record.
   - `Models\CartPaymentSession` (`ecommerce_cart_payment_sessions`, with a factory) keeps every payment session a cart was given, written by `CheckoutService::createPaymentSession()`; `carts.payment_reference` stays the current one. Rows hold only references, amounts and statuses (`active`, `superseded`, `canceled`, `stranded`, `held`, `refunded`, `voided`, `completed`). `Cart::paymentSessions()`.
   - `checkout.stranded_payments` config key and store setting (env `ECOMMERCE_STRANDED_PAYMENTS`): `hold` (default) places the order for staff review (`pending`, `payment_status = paid` when captured, `meta.payment_mismatch` with both amounts and the session, a `payment.stranded` timeline entry); `refund` refunds a captured payment or voids an authorized one through the gateway's `refund()` / `voidPendingPayment()` (always the same request and idempotency key), holds it when nothing can be sent (no gateway or no refund support), and leaves it `stranded` and retried, never held as paid, when a refund or void was sent but not confirmed.
