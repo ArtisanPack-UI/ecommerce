@@ -46,6 +46,7 @@ use ArtisanPackUI\Ecommerce\Exceptions\CartOperationException;
 use ArtisanPackUI\Ecommerce\Inventory\StockLevels;
 use ArtisanPackUI\Ecommerce\Models\Cart;
 use ArtisanPackUI\Ecommerce\Models\CartItem;
+use ArtisanPackUI\Ecommerce\Models\CartPaymentSession;
 use ArtisanPackUI\Ecommerce\Models\Coupon;
 use ArtisanPackUI\Ecommerce\Models\Customer;
 use ArtisanPackUI\Ecommerce\Models\Product;
@@ -618,6 +619,9 @@ class StorefrontCartService
 
             $locked->meta                = $meta;
             $locked->shipping_amount     = 0;
+
+            CartPaymentSession::supersede( (int) $locked->getKey(), $locked->payment_gateway_key, $locked->payment_reference );
+
             $locked->payment_reference   = null;
             $locked->payment_gateway_key = null;
 

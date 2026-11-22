@@ -276,7 +276,6 @@ describe( 'finalize', function (): void {
     it( 'refuses when the total changed after the payment was set up', function (): void {
         $cart    = readyCart( $this->product );
         $session = $this->checkout->createPaymentSession( $cart );
-        $this->gateway->confirm( $session->reference );
 
         ProductPrice::query()->where( 'priceable_id', $this->product->id )->update( [ 'price_amount' => 3_000 ] );
 
